@@ -15,6 +15,7 @@ urlpatterns = [
     path("auth/csrf", common_auth_api_views.csrf_token),
     path("auth/login", common_auth_api_views.api_login),
     path("auth/logout", common_auth_api_views.api_logout),
+    path("auth/forgot-password", common_auth_api_views.api_forgot_password),
     path("auth/me", monitor_auth_views.auth_me),
     path("auth/subscriptions", monitor_auth_views.auth_subscriptions),
     path("dashboard/", include("dashboard.api_urls")),

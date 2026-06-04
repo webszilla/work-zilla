@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "WorkZilla",
+    "slug": "work-zilla-mobile",
+    "scheme": "workzilla",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-asset"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.workzilla.mobile"
+    },
+    "android": {
+      "package": "com.workzilla.mobile"
+    }
+  }
+}

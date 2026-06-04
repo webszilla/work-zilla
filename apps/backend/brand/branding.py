@@ -4,6 +4,8 @@ import json
 from django.db import connection
 from django.db.models import Q
 
+from core.models import ThemeSettings
+
 from .models import Product, ProductAlias, ProductRouteMapping
 
 
@@ -81,6 +83,7 @@ def resolve_product(product_key):
 
 def build_branding_payload(product_key, request=None):
     product, route = resolve_product(product_key)
+    global_theme = ThemeSettings.get_active()
     logo_url = ""
     if product and product.logo:
         logo_url = product.logo.url
@@ -99,6 +102,8 @@ def build_branding_payload(product_key, request=None):
         "description": product.description if product else "",
         "logoUrl": logo_url,
         "primaryColor": product.primary_color if product else "",
+        "themePrimary": (global_theme.primary_color or "").strip() or "#e11d48",
+        "themeSecondary": (global_theme.secondary_color or "").strip() or "#f59e0b",
         "publicSlug": public_slug,
         "legacySlugs": legacy_slugs,
         "aliases": _build_aliases(product),

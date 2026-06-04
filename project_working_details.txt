@@ -56,6 +56,27 @@ B) Single URL (recommended): Django + built React on same URL
 - `python manage.py runserver 127.0.0.1:8000 --noreload`
 - Open: `http://127.0.0.1:8000` (SPA routes under `/app/...`)
 
+C) Mobile app (Expo) browser preview
+- `cd ~/Desktop/webszilla/saas/work-zilla`
+- `./run_mobile_web_preview.sh`
+- Opens Expo web preview for quick mobile UI checks in browser
+- Use this for layout/dev checks; final QA should still be done in real phone / emulator
+
+D) Mobile app (Expo) device/emulator preview
+- `cd ~/Desktop/webszilla/saas/work-zilla/apps/mobile`
+- `npm install` (first time only or after dependency changes)
+- `npm run dev`
+- Then choose:
+  - press `w` for browser preview
+  - press `i` for iOS simulator
+  - press `a` for Android emulator
+  - or scan Expo QR in Expo Go
+
+CODEX RUN NOTE
+- If user says: `run the mobile app in browser preview`
+  - first read this file
+  - then run: `cd ~/Desktop/webszilla/saas/work-zilla && ./run_mobile_web_preview.sh`
+
 LOCAL MIGRATIONS (WHEN SCHEMA CHANGES)
 - `cd apps/backend`
 - `python manage.py makemigrations`

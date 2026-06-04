@@ -1653,6 +1653,73 @@ def checkout_select(request):
     return redirect("/checkout/")
 
 
+@require_http_methods(["POST"])
+def subscription_checkout_select(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"detail": "authentication_required"}, status=401)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+
+    plan_id = payload.get("plan_id")
+    product_slug = _normalize_product_slug(payload.get("product_slug") or payload.get("product"))
+    currency = (payload.get("currency") or "inr").lower()
+    billing = (payload.get("billing") or "monthly").lower()
+    try:
+        addon_count = int(payload.get("addon_count") or 0)
+    except (TypeError, ValueError):
+        addon_count = 0
+    addon_count = max(0, addon_count)
+    plan = Plan.objects.filter(id=plan_id).select_related("product").first() if plan_id else None
+    user_type_counts = {}
+    if plan and _is_business_autopilot_alias(product_slug):
+        for row in _plan_ba_user_types(plan):
+            field_name = f"user_type_count_{row['key']}"
+            try:
+                parsed = int(payload.get(field_name) or 0)
+            except (TypeError, ValueError):
+                parsed = 0
+            user_type_counts[row["key"]] = max(0, parsed)
+        addon_count = _ba_user_type_total_count(user_type_counts)
+
+    request.session["selected_product_slug"] = product_slug
+    request.session["selected_plan_id"] = plan_id
+    request.session["selected_currency"] = currency
+    request.session["selected_billing"] = billing
+    request.session["selected_addon_count"] = addon_count
+    request.session["selected_user_type_counts"] = user_type_counts
+    request.session.modified = True
+
+    org = _resolve_org_for_user(request.user)
+    try:
+        selected_plan_id = int(plan_id or 0)
+    except (TypeError, ValueError):
+        selected_plan_id = 0
+    if org and selected_plan_id > 0 and product_slug:
+        product_filter = Q(plan__product__slug=product_slug)
+        if product_slug == "monitor":
+            product_filter |= Q(plan__product__isnull=True)
+        elif _is_business_autopilot_alias(product_slug):
+            product_filter = Q(plan__product__slug__in=["business-autopilot", "business-autopilot-erp"])
+
+        active_sub = (
+            Subscription.objects
+            .filter(organization=org, status__in=["active", "trialing"])
+            .filter(product_filter)
+            .order_by("-start_date", "-id")
+            .first()
+        )
+        if active_sub and active_sub.plan_id == selected_plan_id:
+            return JsonResponse({
+                "detail": "already_active",
+                "message": "You already have this plan active. Please choose a different plan.",
+                "redirect": f"/pricing/?product={product_slug}",
+            }, status=409)
+    return JsonResponse({"ok": True, "redirect": "/checkout/"})
+
+
 @login_required(login_url="/auth/login/")
 def checkout_view(request):
     if request.user.email and not request.user.email_verified:

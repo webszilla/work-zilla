@@ -73,6 +73,22 @@ CSRF_TRUSTED_ORIGINS = _csv_env("DJANGO_CSRF_TRUSTED_ORIGINS")
 CORS_ALLOW_CREDENTIALS = _bool_env("DJANGO_CORS_ALLOW_CREDENTIALS", "1")
 CORS_ALLOW_ALL_ORIGINS = _bool_env("DJANGO_CORS_ALLOW_ALL_ORIGINS", "0")
 
+if DEBUG:
+    if not CORS_ALLOWED_ORIGINS:
+        CORS_ALLOWED_ORIGINS = [
+            "http://localhost:8081",
+            "http://localhost:8082",
+            "http://127.0.0.1:8081",
+            "http://127.0.0.1:8082",
+        ]
+    if not CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS = [
+            "http://localhost:8081",
+            "http://localhost:8082",
+            "http://127.0.0.1:8081",
+            "http://127.0.0.1:8082",
+        ]
+
 
 INSTALLED_APPS = [
     "django.contrib.admin",
