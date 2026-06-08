@@ -2216,6 +2216,7 @@ def _clear_renew_session(request):
         "renew_currency",
         "renew_billing",
         "renew_addon_count",
+        "renew_user_type_counts",
     ):
         request.session.pop(key, None)
     request.session.modified = True
@@ -2842,6 +2843,15 @@ def billing_renew_view(request):
         _clear_renew_session(request)
         return redirect(f"/pricing/?product={product_slug}")
 
+    if org and (not addon_count and not user_type_counts):
+        latest = _latest_subscription_for_product(org, product_slug)
+        if latest and latest.plan_id == plan.id:
+            addon_count = _subscription_next_cycle_addon_count(latest)
+            user_type_counts = _normalize_ba_user_type_counts(
+                getattr(latest, "user_type_next_cycle_counts", None) or getattr(latest, "user_type_counts", None),
+                plan=plan,
+            )
+
     currency = currency if currency in ("inr", "usd") else "inr"
     billing = billing if billing in ("monthly", "yearly") else "monthly"
     if not plan.allow_addons:
@@ -2872,6 +2882,7 @@ def billing_renew_view(request):
     request.session["renew_currency"] = currency
     request.session["renew_billing"] = billing
     request.session["renew_addon_count"] = int(addon_count)
+    request.session["renew_user_type_counts"] = user_type_counts
 
     base_price_monthly = float(_plan_price(plan, currency, "monthly") or 0)
     base_price_yearly = float(_plan_price(plan, currency, "yearly") or 0)
@@ -2969,9 +2980,10 @@ def billing_renew_confirm(request):
                 parsed = 0
             user_type_counts[row["key"]] = max(0, parsed)
         addon_count = _ba_user_type_total_count(user_type_counts)
-        if addon_count <= 0:
-            messages.error(request, "Select at least one Business Autopilot user seat to renew.")
-            return redirect("/my-account/billing/renew/")
+    request.session["renew_billing"] = billing
+    request.session["renew_addon_count"] = int(addon_count)
+    request.session["renew_user_type_counts"] = user_type_counts
+    request.session.modified = True
 
     utr_number = (request.POST.get("utr_number") or "").strip()
     paid_on = request.POST.get("paid_on") or None
@@ -3022,6 +3034,9 @@ def billing_renew_confirm(request):
 
     if not receipt:
         messages.error(request, "Please upload payment proof.")
+        return redirect("/my-account/billing/renew/")
+    if not paid_on:
+        messages.error(request, "Paid date is required.")
         return redirect("/my-account/billing/renew/")
     if receipt.size and receipt.size > (1 * 1024 * 1024):
         messages.error(request, "Payment proof must be 1MB or smaller.")

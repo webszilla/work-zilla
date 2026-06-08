@@ -1287,6 +1287,13 @@ function normalizeBusinessAutopilotUserType(value) {
   return "full_access_user";
 }
 
+function getBusinessAutopilotUserTypeLabel(user = {}) {
+  if (isOrgAdminAccountUser(user)) {
+    return "ORG Admin";
+  }
+  return BA_USER_TYPE_LABELS[normalizeBusinessAutopilotUserType(user.user_type)] || "Full Access User";
+}
+
 function splitCombinedPhoneValue(value) {
   const raw = String(value || "").trim();
   if (!raw) {
@@ -5328,14 +5335,16 @@ export default function BusinessAutopilotUsersPage() {
                                   ORG Admin
                                 </span>
                               ) : null}
-                              <span className="badge bg-light text-dark border">
-                                {BA_USER_TYPE_LABELS[normalizeBusinessAutopilotUserType(user.user_type)] || "Full Access User"}
-                              </span>
+                              {!isOrgAdminAccountUser(user) ? (
+                                <span className="badge bg-light text-dark border">
+                                  {getBusinessAutopilotUserTypeLabel(user)}
+                                </span>
+                              ) : null}
                             </div>
                           </td>
                           <td>{user.last_name || splitDisplayName(user.name || "").last_name || "-"}</td>
                           <td>{user.email || "-"}</td>
-                          <td>{BA_USER_TYPE_LABELS[normalizeBusinessAutopilotUserType(user.user_type)] || "Full Access User"}</td>
+                          <td>{getBusinessAutopilotUserTypeLabel(user)}</td>
                           <td>
                             <div className="d-flex flex-column lh-sm">
                               <span className="text-secondary small">Department</span>

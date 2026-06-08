@@ -89,6 +89,50 @@ function formatValue(value) {
   return formatDateLikeValue(value, "-");
 }
 
+function SaasTableActionButton({
+  title,
+  icon,
+  variant = "btn-outline-secondary",
+  onClick,
+  href,
+  to,
+  target,
+  rel,
+  disabled = false,
+  children = null,
+  ...props
+}) {
+  const className = `btn btn-sm ${variant} saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center`;
+  const content = children || <i className={`bi ${icon}`} aria-hidden="true" />;
+  const sharedProps = {
+    className,
+    title,
+    "data-wz-tooltip": title,
+    "aria-label": title,
+    ...props,
+  };
+
+  if (to) {
+    return (
+      <Link to={to} {...sharedProps}>
+        {content}
+      </Link>
+    );
+  }
+  if (href) {
+    return (
+      <a href={href} target={target} rel={rel} {...sharedProps}>
+        {content}
+      </a>
+    );
+  }
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} {...sharedProps}>
+      {content}
+    </button>
+  );
+}
+
 function titleCase(value) {
   if (!value) {
     return "-";
@@ -2666,7 +2710,7 @@ export default function SaasAdminProductPage() {
                   <th>Email ID</th>
                   <th>Deleted At</th>
                   <th>Reason</th>
-                  <th>Action</th>
+                  <th className="table-actions">Action</th>
                 </tr>
               ) : (
                 <tr>
@@ -2688,25 +2732,23 @@ export default function SaasAdminProductPage() {
                       <td>{org.owner_email || "-"}</td>
                       <td>{org.deleted_at || "-"}</td>
                       <td>{org.reason || "-"}</td>
-                      <td>
+                      <td className="table-actions">
                         <div className="d-inline-flex align-items-center gap-2 flex-nowrap">
                           {org.can_restore ? (
-                            <button
-                              type="button"
-                              className="btn btn-primary btn-sm"
+                            <SaasTableActionButton
+                              title="Restore Organization"
+                              icon="bi-arrow-counterclockwise"
+                              variant="btn-outline-success"
                               onClick={() => handleDeletedOrgRestore(org)}
-                            >
-                              Restore
-                            </button>
+                            />
                           ) : null}
-                          <button
-                            type="button"
-                            className="btn btn-danger btn-sm"
+                          <SaasTableActionButton
+                            title="Permanent Delete"
+                            icon="bi-trash"
+                            variant="btn-outline-danger"
                             onClick={() => handleDeletedOrgPermanentDelete(org)}
                             disabled={!org.can_permanent_delete}
-                          >
-                            Permanent Delete
-                          </button>
+                          />
                         </div>
                       </td>
                     </tr>
@@ -2716,28 +2758,27 @@ export default function SaasAdminProductPage() {
                       <td>{formatValue(org.owner_email)}</td>
                       <td>{org.subscription?.plan_name || "-"}</td>
                       <td>{org.subscription?.end_date || "-"}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="btn btn-outline-light btn-sm me-2"
-                          onClick={() => openOrgView(org.id)}
-                        >
-                          View
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-sm me-2"
-                          onClick={() => openOrgEdit(org.id)}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-danger btn-sm"
-                          onClick={() => handleOrgDelete(org)}
-                        >
-                          Delete
-                        </button>
+                      <td className="table-actions">
+                        <div className="d-inline-flex align-items-center gap-2 flex-nowrap">
+                          <SaasTableActionButton
+                            title="View Organization"
+                            icon="bi-eye"
+                            variant="btn-outline-secondary"
+                            onClick={() => openOrgView(org.id)}
+                          />
+                          <SaasTableActionButton
+                            title="Edit Organization"
+                            icon="bi-pencil-square"
+                            variant="btn-outline-success"
+                            onClick={() => openOrgEdit(org.id)}
+                          />
+                          <SaasTableActionButton
+                            title="Delete Organization"
+                            icon="bi-trash"
+                            variant="btn-outline-danger"
+                            onClick={() => handleOrgDelete(org)}
+                          />
+                        </div>
                       </td>
                     </tr>
                   )
@@ -3056,32 +3097,31 @@ export default function SaasAdminProductPage() {
                           <td>{isStorageProduct ? formatValue(user.device_count) : formatValue(user.device_id)}</td>
                           <td>{isStorageProduct ? formatValue(user.total_utilized_space) : formatValue(user.pc_name)}</td>
                           {isStorageProduct ? <td>{formatValue(user.monthly_consumed_bandwidth)}</td> : null}
-                          <td>
-                            <button
-                              type="button"
-                              className="btn btn-outline-light btn-sm me-2"
-                              onClick={() => openUserView(user.id)}
-                            >
-                              View
-                            </button>
+                          <td className="table-actions">
+                            <div className="d-inline-flex align-items-center gap-2 flex-nowrap">
+                              <SaasTableActionButton
+                                title="View User"
+                                icon="bi-eye"
+                                variant="btn-outline-secondary"
+                                onClick={() => openUserView(user.id)}
+                              />
                             {isStorageProduct ? null : (
                               <>
-                                <button
-                                  type="button"
-                                  className="btn btn-primary btn-sm me-2"
+                                <SaasTableActionButton
+                                  title="Edit User"
+                                  icon="bi-pencil-square"
+                                  variant="btn-outline-success"
                                   onClick={() => openUserEdit(user.id)}
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  type="button"
-                                  className="btn btn-danger btn-sm"
+                                />
+                                <SaasTableActionButton
+                                  title="Delete User"
+                                  icon="bi-trash"
+                                  variant="btn-outline-danger"
                                   onClick={() => handleUserDelete(user)}
-                                >
-                                  Delete
-                                </button>
+                                />
                               </>
                             )}
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -3126,7 +3166,7 @@ export default function SaasAdminProductPage() {
                       <th>Monthly</th>
                       <th>Yearly</th>
                       <th>Users</th>
-                      <th>Action</th>
+                      <th className="table-actions">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3138,32 +3178,33 @@ export default function SaasAdminProductPage() {
                             {formatValue(plan.monthly_price_inr ?? plan.monthly_price)}
                           </td>
                           <td>{formatValue(plan.yearly_price_inr ?? plan.yearly_price)}</td>
-                          <td>
-                            <button
-                              type="button"
-                              className="btn btn-outline-light btn-sm"
+                          <td className="table-actions">
+                            <SaasTableActionButton
+                              title="View Plan Users"
+                              icon="bi-people"
+                              variant="btn-outline-secondary"
                               onClick={() => openPlanUsersModal(plan)}
                             >
-                              {plan.subscribed_user_count}
-                            </button>
+                              <span className="fw-semibold small">{plan.subscribed_user_count}</span>
+                            </SaasTableActionButton>
                           </td>
-                          <td>
-                            <button
-                              type="button"
-                              className="btn btn-outline-light btn-sm me-2"
-                              onClick={() => openPlanModal("edit", plan)}
-                            >
-                              Edit
-                            </button>
+                          <td className="table-actions">
+                            <div className="d-inline-flex align-items-center gap-2 flex-nowrap">
+                              <SaasTableActionButton
+                                title="Edit Plan"
+                                icon="bi-pencil-square"
+                                variant="btn-outline-success"
+                                onClick={() => openPlanModal("edit", plan)}
+                              />
                             {isStorageProduct ? null : (
-                              <button
-                                type="button"
-                                className="btn btn-danger btn-sm"
+                              <SaasTableActionButton
+                                title="Delete Plan"
+                                icon="bi-trash"
+                                variant="btn-outline-danger"
                                 onClick={() => handlePlanDelete(plan)}
-                              >
-                                Delete
-                              </button>
+                              />
                             )}
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -3330,7 +3371,7 @@ export default function SaasAdminProductPage() {
                       <th>Replies</th>
                       <th>Tokens</th>
                       <th>Estimated INR</th>
-                      <th>Action</th>
+                      <th className="table-actions">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3351,14 +3392,13 @@ export default function SaasAdminProductPage() {
                             <td>{rowReplies.toLocaleString()}</td>
                             <td>{rowTokens.toLocaleString()}</td>
                             <td>INR {Number(rowDisplayInr).toLocaleString()}</td>
-                            <td>
-                              <button
-                                type="button"
-                                className="btn btn-outline-light btn-sm"
+                            <td className="table-actions">
+                              <SaasTableActionButton
+                                title="View Trend"
+                                icon="bi-graph-up-arrow"
+                                variant="btn-outline-info"
                                 onClick={() => openAiUsageTrend(row)}
-                              >
-                                View Trend
-                              </button>
+                              />
                             </td>
                           </tr>
                         );
@@ -3556,7 +3596,7 @@ export default function SaasAdminProductPage() {
                       <th>Billing</th>
                       <th>Created</th>
                       <th>Receipt</th>
-                      <th>Action</th>
+                      <th className="table-actions">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3569,11 +3609,12 @@ export default function SaasAdminProductPage() {
                           <td>{transfer.currency} {transfer.amount}</td>
                           <td>{titleCase(transfer.billing_cycle)}</td>
                           <td>{transfer.created_at || "-"}</td>
-                          <td>
+                          <td className="table-actions">
                             {transfer.receipt_url ? (
-                              <button
-                                type="button"
-                                className="btn btn-outline-light btn-sm"
+                              <SaasTableActionButton
+                                title="View Receipt"
+                                icon="bi-image"
+                                variant="btn-outline-secondary"
                                 onClick={() =>
                                   setReceiptModal({
                                     open: true,
@@ -3582,43 +3623,37 @@ export default function SaasAdminProductPage() {
                                     clearing: false
                                   })
                                 }
-                              >
-                                Image
-                              </button>
+                              />
                             ) : (
                               <span className="text-secondary">Not Available</span>
                             )}
                           </td>
                           <td className="table-actions">
                             <div className="d-flex flex-wrap gap-1 pending-action-group">
-                              <button
-                                type="button"
-                                className="btn btn-outline-info btn-sm"
+                              <SaasTableActionButton
+                                title="View Transfer"
+                                icon="bi-eye"
+                                variant="btn-outline-secondary"
                                 onClick={() => openTransferView(transfer.id)}
-                              >
-                                View
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-success btn-sm"
+                              />
+                              <SaasTableActionButton
+                                title="Approve"
+                                icon="bi-check2-circle"
+                                variant="btn-outline-success"
                                 onClick={() => handleTransferAction(transfer.id, "approve")}
-                              >
-                                Approve
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-danger btn-sm"
+                              />
+                              <SaasTableActionButton
+                                title="Reject"
+                                icon="bi-x-circle"
+                                variant="btn-outline-warning"
                                 onClick={() => handleTransferAction(transfer.id, "reject")}
-                              >
-                                Reject
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-outline-danger btn-sm"
+                              />
+                              <SaasTableActionButton
+                                title="Delete"
+                                icon="bi-trash"
+                                variant="btn-outline-danger"
                                 onClick={() => handleTransferAction(transfer.id, "delete")}
-                              >
-                                Delete
-                              </button>
+                              />
                             </div>
                           </td>
                         </tr>
@@ -3980,8 +4015,8 @@ export default function SaasAdminProductPage() {
                     />
                   </label>
                 </div>
-                <div className="table-responsive mt-2">
-                  <table className="table table-dark table-striped table-hover align-middle">
+                <div className="table-responsive mt-2" data-wz-overflow-x="true">
+                  <table className="table table-dark table-striped table-hover align-middle wz-billing-activity-table">
                     <thead>
                       <tr>
                         <th>Organization</th>
@@ -3993,8 +4028,7 @@ export default function SaasAdminProductPage() {
                         <th>Amount</th>
                         <th>Status</th>
                         <th>Paid On</th>
-                        <th>GST Bill</th>
-                        <th>View</th>
+                        <th className="table-actions">Action</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -4010,34 +4044,31 @@ export default function SaasAdminProductPage() {
                             <td>{row.currency ? `${row.currency} ${formatValue(row.amount)}` : formatValue(row.amount)}</td>
                             <td>{row.status || "-"}</td>
                             <td>{row.paid_on || "-"}</td>
-                            <td>
-                              {row.invoice_available && row.invoice_url ? (
-                                <a
-                                  className="btn btn-outline-light btn-sm"
-                                  href={row.invoice_url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  Download
-                                </a>
-                              ) : (
-                                "-"
-                              )}
-                            </td>
-                            <td>
-                              <button
-                                type="button"
-                                className="btn btn-outline-light btn-sm"
-                                onClick={() => openBillingView(row)}
-                              >
-                                View
-                              </button>
+                            <td className="table-actions">
+                              <div className="d-inline-flex align-items-center gap-2 flex-nowrap">
+                                <SaasTableActionButton
+                                  title="View Billing"
+                                  icon="bi-eye"
+                                  variant="btn-outline-secondary"
+                                  onClick={() => openBillingView(row)}
+                                />
+                                {row.invoice_available && row.invoice_url ? (
+                                  <SaasTableActionButton
+                                    title="Download GST Bill"
+                                    icon="bi-download"
+                                    variant="btn-outline-success"
+                                    href={row.invoice_url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  />
+                                ) : null}
+                              </div>
                             </td>
                           </tr>
                         ))
                       ) : (
                         <tr>
-                          <td colSpan="11">No billing activity found.</td>
+                          <td colSpan="10">No billing activity found.</td>
                         </tr>
                       )}
                     </tbody>
@@ -4074,7 +4105,7 @@ export default function SaasAdminProductPage() {
                     />
                   </label>
                 </div>
-                <div className="table-responsive mt-2">
+                <div className="table-responsive mt-2" data-wz-overflow-x="true">
                   <table className="table table-dark table-striped table-hover align-middle">
                     <thead>
                       <tr>

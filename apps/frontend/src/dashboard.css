@@ -5453,13 +5453,18 @@ html[data-theme="light"] .receipt-modal__close-btn:focus{
 
 .product-admin-layout{
   display:grid;
-  grid-template-columns:220px 1fr;
+  grid-template-columns:220px minmax(0, 1fr);
   gap:16px;
+  min-width:0;
 }
 .product-admin-sidebar{
   position:sticky;
   top:12px;
   align-self:start;
+  min-width:0;
+}
+.product-admin-content{
+  min-width:0;
 }
 .product-admin-nav{
   display:flex;

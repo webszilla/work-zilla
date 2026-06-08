@@ -12,28 +12,38 @@
     {% include "public/partials/account_tabs.html" %}
 
       <div class="account-content card p-4">
+        {% if messages %}
+          <div class="mb-3">
+            {% for message in messages %}
+              <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'warning' %}alert-warning{% elif message.tags == 'success' %}alert-success{% else %}alert-info{% endif %} mb-2" role="alert">
+                {{ message }}
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
         <h2 class="section-title">Selected Plan</h2>
-        <div class="plan-summary mt-3">
-          <div class="plan-summary__row">
-            <span>Product</span>
-            <strong>{% if selected_plan.product and selected_plan.product.slug == "monitor" %}Work Suite{% else %}{{ selected_plan.product.name|default:"Work Suite" }}{% endif %}</strong>
+        <div class="renew-plan-strip mt-3">
+          <div class="renew-plan-chip">
+            <span class="renew-plan-chip__label">Product</span>
+            <strong class="renew-plan-chip__value">{% if selected_plan.product and selected_plan.product.slug == "monitor" %}Work Suite{% else %}{{ selected_plan.product.name|default:"Work Suite" }}{% endif %}</strong>
           </div>
-          <div class="plan-summary__row">
-            <span>Plan</span>
-            <strong>{{ selected_plan_name|default:selected_plan.name }}</strong>
+          <div class="renew-plan-chip">
+            <span class="renew-plan-chip__label">Plan</span>
+            <strong class="renew-plan-chip__value">{{ selected_plan_name|default:selected_plan.name }}</strong>
           </div>
-          <div class="plan-summary__row">
-            <span>Billing Cycle</span>
-            <strong>{{ selected_billing|title }}</strong>
+          <div class="renew-plan-chip">
+            <span class="renew-plan-chip__label">Billing Cycle</span>
+            <strong class="renew-plan-chip__value">{{ selected_billing|title }}</strong>
           </div>
-          <div class="plan-summary__row">
-            <span>Currency</span>
-            <strong>{{ selected_currency|upper }}</strong>
+          <div class="renew-plan-chip">
+            <span class="renew-plan-chip__label">Currency</span>
+            <strong class="renew-plan-chip__value">{{ selected_currency|upper }}</strong>
           </div>
         </div>
+        <div class="renew-plan-ruler" aria-hidden="true"></div>
 
-        <h3 class="section-title mt-4">{% if selected_product_slug == "business-autopilot-erp" or selected_product_slug == "business-autopilot" %}User Type Seats{% else %}Add-on Users{% endif %}</h3>
-        <p class="text-secondary">{% if selected_product_slug == "business-autopilot-erp" or selected_product_slug == "business-autopilot" %}Adjust Business Autopilot user-type seats for renewal. Billing will use the selected counts.{% else %}Adjust add-on seats if needed. Amount recalculates on submission.{% endif %}</p>
+        <h3 class="section-title mt-4">{% if selected_product_slug == "business-autopilot-erp" or selected_product_slug == "business-autopilot" %}Additional ORG Users{% else %}Add-on Users{% endif %}</h3>
+        <p class="text-secondary">{% if selected_product_slug == "business-autopilot-erp" or selected_product_slug == "business-autopilot" %}Base plan already includes one default Org Admin account. Add extra ORG users only if needed for renewal.{% else %}Adjust add-on seats if needed. Amount recalculates on submission.{% endif %}</p>
         <form class="mt-3" method="post" action="/my-account/billing/renew/confirm/" enctype="multipart/form-data">
           {% csrf_token %}
           {% if has_pending_renewal %}
@@ -45,9 +55,26 @@
             <div class="ba-user-type-grid mb-3">
               {% for row in user_type_rows %}
                 <div class="ba-user-type-card">
-                  <div class="ba-user-type-card__title">{{ row.label }}</div>
-                  <div class="ba-user-type-card__desc">{{ row.description }}</div>
-                  <div class="ba-user-type-card__price mt-2">{{ selected_currency|upper }} {% if selected_billing == "yearly" %}{{ row.yearly_price_inr|default:row.yearly_price_usd }}{% else %}{{ row.monthly_price_inr|default:row.monthly_price_usd }}{% endif %}</div>
+                  <div class="ba-user-type-card__top">
+                    <div>
+                      <div class="ba-user-type-card__title">{{ row.label }}</div>
+                      <div class="ba-user-type-card__desc">{{ row.description }}</div>
+                    </div>
+                    <div class="ba-user-type-card__price">
+                      {{ selected_currency|upper }}
+                      <span
+                        class="ba-user-type-unit-price"
+                        data-monthly="{% if selected_currency|lower == 'usd' %}{{ row.monthly_price_usd|default:0 }}{% else %}{{ row.monthly_price_inr|default:0 }}{% endif %}"
+                        data-yearly="{% if selected_currency|lower == 'usd' %}{{ row.yearly_price_usd|default:0 }}{% else %}{{ row.yearly_price_inr|default:0 }}{% endif %}"
+                      >
+                        {% if selected_currency|lower == "usd" %}
+                          {% if selected_billing == "yearly" %}{{ row.yearly_price_usd|default:0 }}{% else %}{{ row.monthly_price_usd|default:0 }}{% endif %}
+                        {% else %}
+                          {% if selected_billing == "yearly" %}{{ row.yearly_price_inr|default:0 }}{% else %}{{ row.monthly_price_inr|default:0 }}{% endif %}
+                        {% endif %}
+                      </span>
+                    </div>
+                  </div>
                   <div class="ba-user-type-card__modules">
                     {% for module_name in row.allowed_modules %}
                       <span>{{ module_name|title }}</span>
@@ -55,77 +82,111 @@
                   </div>
                   <div class="form-field mt-2">
                     <label>Seats</label>
-                    <input type="number" min="0" step="1" name="user_type_count_{{ row.key }}" value="{{ row.quantity|default:0 }}">
+                    <input class="renewUserTypeInput" type="number" min="0" step="1" name="user_type_count_{{ row.key }}" value="{{ row.quantity|default:0 }}">
+                  </div>
+                  <div class="ba-user-type-card__line-total">
+                    <span>Line Total</span>
+                    <strong>{{ selected_currency|upper }} <span class="ba-user-type-line-total">0.00</span></strong>
                   </div>
                 </div>
               {% endfor %}
             </div>
           {% endif %}
-          <div class="form-grid">
-            <div class="form-field">
-              <label>Billing Cycle</label>
-              <select id="renew-billing-cycle" name="billing">
-                <option value="monthly" {% if selected_billing == "monthly" %}selected{% endif %}>Monthly</option>
-                <option value="yearly" {% if selected_billing == "yearly" %}selected{% endif %}>Yearly</option>
-              </select>
+          <div
+            class="renew-calc-shell mt-4"
+            id="renewCalcShell"
+            data-currency="{{ selected_currency|upper }}"
+            data-business-autopilot="{% if selected_product_slug == 'business-autopilot-erp' or selected_product_slug == 'business-autopilot' %}1{% else %}0{% endif %}"
+            data-tax-enabled="{% if tax_breakdown.enabled %}1{% else %}0{% endif %}"
+            data-tax-mode="{{ tax_breakdown.mode|default:'' }}"
+            data-cgst-rate="{{ tax_breakdown.cgst_rate|default:0 }}"
+            data-sgst-rate="{{ tax_breakdown.sgst_rate|default:0 }}"
+            data-igst-rate="{{ tax_breakdown.igst_rate|default:0 }}"
+          >
+            <div class="form-grid renew-form-grid">
+              <div class="form-field">
+                <label>Billing Cycle</label>
+                <select id="renew-billing-cycle" name="billing">
+                  <option value="monthly" {% if selected_billing == "monthly" %}selected{% endif %}>Monthly</option>
+                  <option value="yearly" {% if selected_billing == "yearly" %}selected{% endif %}>Yearly</option>
+                </select>
+              </div>
+              <div class="form-field" {% if selected_product_slug == "business-autopilot-erp" or selected_product_slug == "business-autopilot" %}style="display:none;"{% endif %}>
+                <label>Add-on Users</label>
+                <input
+                  id="renew-addon-count"
+                  type="number"
+                  name="addon_count"
+                  min="0"
+                  step="1"
+                  value="{{ addon_count|default:0 }}"
+                >
+              </div>
+              <div class="form-field">
+                <label>Base Price</label>
+                <input
+                  id="renew-base-price-display"
+                  type="text"
+                  value="{{ selected_currency|upper }} {{ base_price|floatformat:2 }}"
+                  readonly
+                >
+              </div>
+              <div class="form-field">
+                <label>{% if selected_product_slug == "business-autopilot-erp" or selected_product_slug == "business-autopilot" %}Add-on User Amount{% else %}Add-on Price (per user / <span id="renew-addon-suffix">{% if selected_billing == "yearly" %}year{% else %}month{% endif %}</span>){% endif %}</label>
+                <input
+                  id="renew-addon-price-display"
+                  type="text"
+                  value="{{ selected_currency|upper }} {{ addon_price|floatformat:2 }}"
+                  readonly
+                >
+              </div>
+              <div class="form-field">
+                <label>Estimated Total</label>
+                <input
+                  id="renew-total-price-display"
+                  type="text"
+                  value="{{ selected_currency|upper }} {{ total_price|floatformat:2 }}"
+                  readonly
+                >
+              </div>
             </div>
-            <div class="form-field" {% if selected_product_slug == "business-autopilot-erp" or selected_product_slug == "business-autopilot" %}style="display:none;"{% endif %}>
-              <label>Add-on Users</label>
-              <input
-                id="renew-addon-count"
-                type="number"
-                name="addon_count"
-                min="0"
-                step="1"
-                value="{{ addon_count|default:0 }}"
-              >
+            <div class="renew-bill-grid mt-3">
+              <div class="renew-bill-card">
+                <span class="renew-bill-card__label">Subtotal</span>
+                <strong class="renew-bill-card__value" id="renewSubtotalDisplay">{{ selected_currency|upper }} {{ subtotal_price|default:total_price|floatformat:2 }}</strong>
+              </div>
+              <div class="renew-bill-card" id="renewCgstCard" {% if not tax_breakdown.enabled or tax_breakdown.mode != "cgst_sgst" %}style="display:none;"{% endif %}>
+                <span class="renew-bill-card__label">CGST (<span id="renewCgstRateDisplay">{{ tax_breakdown.cgst_rate|default:0 }}</span>%)</span>
+                <strong class="renew-bill-card__value" id="renewCgstAmountDisplay">{{ selected_currency|upper }} {{ tax_breakdown.cgst_amount|default:0|floatformat:2 }}</strong>
+              </div>
+              <div class="renew-bill-card" id="renewSgstCard" {% if not tax_breakdown.enabled or tax_breakdown.mode != "cgst_sgst" %}style="display:none;"{% endif %}>
+                <span class="renew-bill-card__label">SGST (<span id="renewSgstRateDisplay">{{ tax_breakdown.sgst_rate|default:0 }}</span>%)</span>
+                <strong class="renew-bill-card__value" id="renewSgstAmountDisplay">{{ selected_currency|upper }} {{ tax_breakdown.sgst_amount|default:0|floatformat:2 }}</strong>
+              </div>
+              <div class="renew-bill-card" id="renewIgstCard" {% if not tax_breakdown.enabled or tax_breakdown.mode != "igst" %}style="display:none;"{% endif %}>
+                <span class="renew-bill-card__label">IGST (<span id="renewIgstRateDisplay">{{ tax_breakdown.igst_rate|default:0 }}</span>%)</span>
+                <strong class="renew-bill-card__value" id="renewIgstAmountDisplay">{{ selected_currency|upper }} {{ tax_breakdown.igst_amount|default:0|floatformat:2 }}</strong>
+              </div>
+              <div class="renew-bill-card renew-bill-card--total">
+                <span class="renew-bill-card__label">Payable Total</span>
+                <strong class="renew-bill-card__value" id="renewGrandTotalDisplay">{{ selected_currency|upper }} {{ total_price|floatformat:2 }}</strong>
+              </div>
             </div>
-            <div class="form-field">
-              <label>Base Price</label>
-              <input
-                id="renew-base-price-display"
-                type="text"
-                value="{{ selected_currency|upper }} {{ base_price|floatformat:2 }}"
-                readonly
-              >
+            <div class="renew-tax-meta mt-2">
+              <span id="renewTaxMetaText">
+                {% if tax_breakdown.enabled and tax_breakdown.mode == "cgst_sgst" %}
+                  Includes CGST + SGST for this renewal.
+                {% elif tax_breakdown.enabled and tax_breakdown.mode == "igst" %}
+                  Includes IGST for this renewal.
+                {% else %}
+                  Tax will be applied as per billing profile.
+                {% endif %}
+              </span>
+              {% if invoice_sac %}
+                <span class="renew-tax-meta__divider">•</span>
+                <span>SAC/HSN: <strong>{{ invoice_sac }}</strong></span>
+              {% endif %}
             </div>
-            <div class="form-field">
-              <label>Add-on Price (per user / <span id="renew-addon-suffix">{% if selected_billing == "yearly" %}year{% else %}month{% endif %}</span>)</label>
-              <input
-                id="renew-addon-price-display"
-                type="text"
-                value="{{ selected_currency|upper }} {{ addon_price|floatformat:2 }}"
-                readonly
-              >
-            </div>
-            <div class="form-field">
-              <label>Estimated Total</label>
-              <input
-                id="renew-total-price-display"
-                type="text"
-                value="{{ selected_currency|upper }} {{ total_price|floatformat:2 }}"
-                readonly
-              >
-            </div>
-          </div>
-          <div class="small text-secondary mt-2">
-            Subtotal: <strong>{{ selected_currency|upper }} {{ subtotal_price|default:total_price|floatformat:2 }}</strong>
-            {% if tax_breakdown.enabled and tax_breakdown.mode == "cgst_sgst" %}
-              &nbsp;|&nbsp;
-              CGST ({{ tax_breakdown.cgst_rate|default:0 }}%): <strong>{{ selected_currency|upper }} {{ tax_breakdown.cgst_amount|default:0|floatformat:2 }}</strong>
-              &nbsp;|&nbsp;
-              SGST ({{ tax_breakdown.sgst_rate|default:0 }}%): <strong>{{ selected_currency|upper }} {{ tax_breakdown.sgst_amount|default:0|floatformat:2 }}</strong>
-            {% elif tax_breakdown.enabled and tax_breakdown.mode == "igst" %}
-              &nbsp;|&nbsp;
-              IGST ({{ tax_breakdown.igst_rate|default:0 }}%): <strong>{{ selected_currency|upper }} {{ tax_breakdown.igst_amount|default:0|floatformat:2 }}</strong>
-            {% else %}
-              &nbsp;|&nbsp;
-              GST: <strong>{{ selected_currency|upper }} {{ gst_amount|default:0|floatformat:2 }}</strong>
-            {% endif %}
-            {% if invoice_sac %}
-              &nbsp;|&nbsp;
-              SAC/HSN: <strong>{{ invoice_sac }}</strong>
-            {% endif %}
           </div>
 
           <div
@@ -160,18 +221,20 @@
               <input type="text" name="utr_number" placeholder="UTR number">
             </div>
             <div class="form-field">
-              <label>Paid Date (optional)</label>
-              <input type="date" name="paid_on">
+              <label>Paid Date *</label>
+              <input type="date" name="paid_on" required>
             </div>
             <div class="form-field form-field--full">
               <label>Upload Payment Proof *</label>
               <input
+                id="renew-receipt-input"
                 type="file"
                 name="receipt"
                 accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
                 required
               >
               <small class="text-secondary">Allowed: JPG, JPEG, PNG, PDF. Max size: 1MB.</small>
+              <div id="renewReceiptError" class="text-danger small mt-1 d-none"></div>
             </div>
             <div class="form-field form-field--full">
               <label>Notes (optional)</label>
@@ -194,13 +257,91 @@
 </section>
 
 <style>
+  .renew-plan-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    align-items: end;
+  }
+  .renew-plan-chip {
+    padding: 0 0 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-height: auto;
+  }
+  .renew-plan-chip__label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+  }
+  .renew-plan-chip__value {
+    color: #0f172a;
+    font-size: 18px;
+    line-height: 1.25;
+  }
+  .renew-plan-ruler {
+    width: 100%;
+    height: 1px;
+    margin: 14px 0 0;
+    background: linear-gradient(90deg, rgba(34, 197, 94, 0.22), rgba(15, 23, 42, 0.08), rgba(34, 197, 94, 0.22));
+  }
+  .renew-calc-shell {
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 20px;
+    padding: 18px;
+    background: linear-gradient(180deg, rgba(248, 250, 252, 0.85), rgba(255, 255, 255, 1));
+  }
+  .renew-bill-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+  }
+  .renew-bill-card {
+    border-radius: 16px;
+    padding: 14px 16px;
+    border: 1px solid rgba(34, 197, 94, 0.12);
+    background: rgba(240, 253, 244, 0.72);
+  }
+  .renew-bill-card--total {
+    background: linear-gradient(135deg, rgba(22, 163, 74, 0.12), rgba(254, 242, 242, 0.8));
+    border-color: rgba(22, 163, 74, 0.22);
+  }
+  .renew-bill-card__label {
+    display: block;
+    font-size: 12px;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    margin-bottom: 6px;
+  }
+  .renew-bill-card__value {
+    display: block;
+    color: #0f172a;
+    font-size: 22px;
+    line-height: 1.2;
+  }
+  .renew-tax-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    color: #64748b;
+    font-size: 13px;
+  }
+  .renew-tax-meta__divider { opacity: .55; }
   .ba-user-type-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; }
   .ba-user-type-card { border:1px solid rgba(34,197,94,.18); border-radius:16px; padding:16px; background:linear-gradient(180deg, rgba(240,253,244,.9), rgba(255,255,255,1)); }
+  .ba-user-type-card__top { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
   .ba-user-type-card__title { font-weight:700; color:#0f172a; }
   .ba-user-type-card__desc { color:#64748b; font-size:13px; margin-top:3px; }
   .ba-user-type-card__price { color:#16a34a; font-weight:700; }
   .ba-user-type-card__modules { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
   .ba-user-type-card__modules span { padding:4px 8px; border-radius:999px; background:rgba(34,197,94,.10); color:#166534; font-size:12px; }
+  .ba-user-type-card__line-total { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:12px; padding-top:12px; border-top:1px dashed rgba(34,197,94,.24); color:#64748b; font-size:13px; }
+  .ba-user-type-card__line-total strong { color:#0f172a; font-size:15px; }
   .wz-seat-modal-backdrop {
     position: fixed;
     inset: 0;
@@ -267,6 +408,8 @@
   .wz-seat-muted { color: rgba(15, 23, 42, 0.6); }
   .wz-seat-actions { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
   @media (max-width: 720px) {
+    .renew-plan-chip__value { font-size: 18px; }
+    .renew-bill-card__value { font-size: 18px; }
     .wz-seat-hide-sm { display: none; }
     .wz-seat-modal__body { padding-bottom: 120px; }
     .wz-seat-modal__footer { flex-direction: column; align-items: stretch; }
@@ -345,7 +488,21 @@
     const addonDisplay = document.getElementById("renew-addon-price-display");
     const addonSuffix = document.getElementById("renew-addon-suffix");
     const totalDisplay = document.getElementById("renew-total-price-display");
-    if (!addonInput || !billingSelect || !baseDisplay || !addonDisplay || !totalDisplay) {
+    const subtotalDisplay = document.getElementById("renewSubtotalDisplay");
+    const grandTotalDisplay = document.getElementById("renewGrandTotalDisplay");
+    const cgstCard = document.getElementById("renewCgstCard");
+    const sgstCard = document.getElementById("renewSgstCard");
+    const igstCard = document.getElementById("renewIgstCard");
+    const cgstAmountDisplay = document.getElementById("renewCgstAmountDisplay");
+    const sgstAmountDisplay = document.getElementById("renewSgstAmountDisplay");
+    const igstAmountDisplay = document.getElementById("renewIgstAmountDisplay");
+    const calcShell = document.getElementById("renewCalcShell");
+    const userTypeInputs = Array.from(document.querySelectorAll(".renewUserTypeInput"));
+    const userTypeCards = Array.from(document.querySelectorAll(".ba-user-type-card"));
+    const receiptInput = document.getElementById("renew-receipt-input");
+    const receiptError = document.getElementById("renewReceiptError");
+    const form = billingSelect.closest("form");
+    if (!billingSelect || !baseDisplay || !addonDisplay || !totalDisplay || !calcShell) {
       return;
     }
     const seatStateEl = document.getElementById("renewSeatReductionState");
@@ -355,6 +512,11 @@
     const submitBtn = document.getElementById("renewSubmitBtn");
 
     const currency = "{{ selected_currency|upper|escapejs }}";
+    const taxEnabled = String(calcShell.getAttribute("data-tax-enabled") || "0") === "1";
+    const taxMode = String(calcShell.getAttribute("data-tax-mode") || "").trim();
+    const cgstRate = Number(calcShell.getAttribute("data-cgst-rate") || 0) || 0;
+    const sgstRate = Number(calcShell.getAttribute("data-sgst-rate") || 0) || 0;
+    const igstRate = Number(calcShell.getAttribute("data-igst-rate") || 0) || 0;
     const prices = {
       monthly: {
         base: Number("{{ base_price_monthly|default:0 }}") || 0,
@@ -367,8 +529,46 @@
         suffix: "year",
       },
     };
+    const isBusinessAutopilot = String(calcShell.getAttribute("data-business-autopilot") || "0") === "1";
 
     const formatAmount = (amount) => `${currency} ${Number(amount).toFixed(2)}`;
+    const allowedReceiptExtensions = [".jpg", ".jpeg", ".png", ".pdf"];
+    const allowedReceiptMimeTypes = ["image/jpeg", "image/png", "application/pdf"];
+
+    function showReceiptError(message) {
+      if (!receiptError) return;
+      if (message) {
+        receiptError.textContent = message;
+        receiptError.classList.remove("d-none");
+      } else {
+        receiptError.textContent = "";
+        receiptError.classList.add("d-none");
+      }
+    }
+
+    function validateReceiptFile() {
+      if (!receiptInput || !receiptInput.files || !receiptInput.files.length) {
+        showReceiptError("");
+        return true;
+      }
+      const file = receiptInput.files[0];
+      const fileName = String(file.name || "").toLowerCase();
+      const hasAllowedExtension = allowedReceiptExtensions.some((extension) => fileName.endsWith(extension));
+      if (!hasAllowedExtension) {
+        showReceiptError("Allowed file types: JPG, JPEG, PNG, PDF.");
+        return false;
+      }
+      if (file.size && file.size > (1 * 1024 * 1024)) {
+        showReceiptError("Payment proof must be 1MB or smaller.");
+        return false;
+      }
+      if (file.type && !allowedReceiptMimeTypes.includes(String(file.type || "").toLowerCase())) {
+        showReceiptError("Invalid file type. Allowed: JPG, JPEG, PNG, PDF.");
+        return false;
+      }
+      showReceiptError("");
+      return true;
+    }
 
     function clampInt(value) {
       const parsed = parseInt(String(value || "0"), 10);
@@ -446,21 +646,87 @@
       }
     }
 
+    function roundMoney(value) {
+      return Math.round((Number(value) || 0) * 100) / 100;
+    }
+
+    function getUserTypeAddonTotal(billing) {
+      let total = 0;
+      userTypeCards.forEach((card) => {
+        const input = card.querySelector(".renewUserTypeInput");
+        const priceEl = card.querySelector(".ba-user-type-unit-price");
+        const lineTotalEl = card.querySelector(".ba-user-type-line-total");
+        const qty = clampInt(input ? input.value : 0);
+        const unitPrice = Number(priceEl ? priceEl.getAttribute(`data-${billing}`) : 0) || 0;
+        const lineTotal = roundMoney(qty * unitPrice);
+        total += lineTotal;
+        if (priceEl) {
+          priceEl.textContent = unitPrice.toFixed(2);
+        }
+        if (lineTotalEl) {
+          lineTotalEl.textContent = lineTotal.toFixed(2);
+        }
+      });
+      return roundMoney(total);
+    }
+
+    function updateTaxCards(subtotal) {
+      let grandTotal = subtotal;
+      const showCgst = taxEnabled && taxMode === "cgst_sgst";
+      const showIgst = taxEnabled && taxMode === "igst";
+      const cgstAmount = showCgst ? roundMoney(subtotal * (cgstRate / 100)) : 0;
+      const sgstAmount = showCgst ? roundMoney(subtotal * (sgstRate / 100)) : 0;
+      const igstAmount = showIgst ? roundMoney(subtotal * (igstRate / 100)) : 0;
+      grandTotal = roundMoney(subtotal + cgstAmount + sgstAmount + igstAmount);
+      if (cgstCard) cgstCard.style.display = showCgst ? "" : "none";
+      if (sgstCard) sgstCard.style.display = showCgst ? "" : "none";
+      if (igstCard) igstCard.style.display = showIgst ? "" : "none";
+      if (cgstAmountDisplay) cgstAmountDisplay.textContent = formatAmount(cgstAmount);
+      if (sgstAmountDisplay) sgstAmountDisplay.textContent = formatAmount(sgstAmount);
+      if (igstAmountDisplay) igstAmountDisplay.textContent = formatAmount(igstAmount);
+      if (subtotalDisplay) subtotalDisplay.textContent = formatAmount(subtotal);
+      if (grandTotalDisplay) grandTotalDisplay.textContent = formatAmount(grandTotal);
+      totalDisplay.value = formatAmount(grandTotal);
+    }
+
     const recalcTotal = () => {
       const billing = String(billingSelect.value || "monthly");
       const config = prices[billing] || prices.monthly;
-      const addonCount = Math.max(0, parseInt(addonInput.value || "0", 10) || 0);
+      const addonCount = addonInput ? Math.max(0, parseInt(addonInput.value || "0", 10) || 0) : 0;
+      const addonTotal = isBusinessAutopilot
+        ? getUserTypeAddonTotal(billing)
+        : roundMoney(addonCount * config.addon);
       baseDisplay.value = formatAmount(config.base);
-      addonDisplay.value = formatAmount(config.addon);
+      addonDisplay.value = formatAmount(addonTotal);
       if (addonSuffix) addonSuffix.textContent = config.suffix;
-      totalDisplay.value = formatAmount(config.base + addonCount * config.addon);
+      updateTaxCards(roundMoney(config.base + addonTotal));
       updateSeatReductionBanner();
     };
 
-    addonInput.addEventListener("input", recalcTotal);
-    addonInput.addEventListener("change", recalcTotal);
+    if (addonInput) {
+      addonInput.addEventListener("input", recalcTotal);
+      addonInput.addEventListener("change", recalcTotal);
+    }
+    if (receiptInput) {
+      receiptInput.addEventListener("change", validateReceiptFile);
+    }
+    userTypeInputs.forEach((input) => {
+      input.addEventListener("input", recalcTotal);
+      input.addEventListener("change", recalcTotal);
+    });
     billingSelect.addEventListener("change", recalcTotal);
     recalcTotal();
+
+    if (form) {
+      form.addEventListener("submit", (event) => {
+        if (!validateReceiptFile()) {
+          event.preventDefault();
+          if (receiptInput) {
+            receiptInput.focus();
+          }
+        }
+      });
+    }
 
     if (!seatStateEl || !manageBtn) {
       return;

@@ -1156,16 +1156,109 @@ const SUBSCRIPTION_ALERT_OPTIONS = [
   { value: "1", label: "One Day Before" },
   { value: "0", label: "Same day" }
 ];
+const PURCHASE_STATUS_OPTIONS = ["Draft", "Requested", "Approved", "Ordered", "Partially Received", "Received", "Completed", "Cancelled"];
+const PURCHASE_PAYMENT_STATUS_OPTIONS = ["Pending", "Partial", "Paid", "Refunded"];
+const PURCHASE_TYPE_OPTIONS = ["Inventory", "Asset", "Service", "Subscription", "Operations"];
+const PURCHASE_DOCUMENT_TYPE_OPTIONS = ["Vendor Estimate", "Vendor Bill", "Purchase Order", "Delivery Note", "Receipt", "Other"];
+const PURCHASE_LIST_STATUS_TABS = [
+  { key: "all", label: "All" },
+  { key: "draft", label: "Draft" },
+  { key: "ordered", label: "Ordered" },
+  { key: "received", label: "Received" },
+  { key: "completed", label: "Completed" },
+  { key: "cancelled", label: "Cancelled" },
+];
 
 const DEFAULT_ACCOUNTS_DATA = {
   customers: [],
   vendors: [],
+  purchases: [],
   itemMasters: [],
   gstTemplates: createDefaultIndiaGstTemplates(),
   billingTemplates: [],
   estimates: [],
   invoices: []
 };
+
+function createEmptyPurchaseLine() {
+  return {
+    id: `pur_line_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    itemMasterId: "",
+    inventoryItemId: "",
+    description: "",
+    customText: "",
+    itemType: "Inventory",
+    hsnSacType: "HSN",
+    hsnSacCode: "",
+    qty: "1",
+    unit: "",
+    unitCost: "",
+    taxPercent: "",
+    inventorySync: true,
+  };
+}
+
+function createEmptyPurchaseDocument() {
+  return {
+    id: `pur_doc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    type: "Vendor Estimate",
+    name: "",
+    fileType: "",
+    fileSize: 0,
+    fileSizeLabel: "",
+    dataUrl: "",
+    uploadedAt: "",
+  };
+}
+
+function createEmptyPurchaseForm(currency = "INR") {
+  return {
+    id: "",
+    purchaseNo: "",
+    vendorId: "",
+    vendorName: "",
+    gstTemplateId: "",
+    billingTemplateId: "",
+    purchaseType: "Inventory",
+    status: "Draft",
+    paymentStatus: "Pending",
+    currency: String(currency || "INR").trim().toUpperCase() || "INR",
+    purchaseDate: getTodayIsoDate(),
+    dueDate: "",
+    branchId: "",
+    department: "",
+    referenceNo: "",
+    notes: "",
+    termsText: "Payment due within 7 days. Please contact your org admin for support.",
+    paymentStatusNotes: "",
+    paidAmount: "",
+    balanceAmount: "",
+    paymentMode: "",
+    paymentDate: "",
+    transactionId: "",
+    paymentEntries: [],
+    attachments: [],
+    items: [createEmptyPurchaseLine()],
+    inventorySyncedAt: "",
+  };
+}
+
+function createEmptyVendorRecord() {
+  return {
+    id: "",
+    vendorName: "",
+    contactName: "",
+    gstin: "",
+    phoneCountryCode: "+91",
+    phone: "",
+    email: "",
+    billingAddress: "",
+    country: "India",
+    state: "",
+    pincode: "",
+    notes: "",
+  };
+}
 
 function createDefaultIndiaGstTemplates() {
   return [
@@ -1457,6 +1550,7 @@ function getPaymentEntriesTotal(entries = []) {
 function getPaymentStatusBadgeClass(status) {
   if (status === "Paid") return "bg-success-subtle text-success border border-success-subtle";
   if (status === "Partial") return "bg-warning-subtle text-warning border border-warning-subtle";
+  if (status === "Refunded") return "bg-secondary-subtle text-secondary border border-secondary-subtle";
   return "bg-danger-subtle text-danger border border-danger-subtle";
 }
 
@@ -2518,6 +2612,82 @@ function formatFileSizeLabel(bytes) {
     return `${(size / (1024 * 1024)).toFixed(2)} MB`;
   }
   return `${Math.max(1, Math.round(size / 1024))} KB`;
+}
+
+function isPurchaseInventoryCommitted(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  return normalized === "received" || normalized === "completed" || normalized === "partially received";
+}
+
+function getPurchaseInventoryQtyMap(purchase) {
+  const map = new Map();
+  (purchase?.items || []).forEach((line) => {
+    if (!line?.inventorySync) return;
+    const itemId = String(line?.inventoryItemId || "").trim();
+    if (!itemId) return;
+    const qty = parseNumber(line?.qty);
+    if (qty <= 0) return;
+    map.set(itemId, (map.get(itemId) || 0) + qty);
+  });
+  return map;
+}
+
+function computePurchaseLineTotals(line = {}) {
+  const qty = parseNumber(line?.qty);
+  const unitCost = parseNumber(line?.unitCost);
+  const taxPercent = parseNumber(line?.taxPercent);
+  const subtotal = qty * unitCost;
+  const taxAmount = subtotal * (taxPercent / 100);
+  return {
+    qty,
+    unitCost,
+    taxPercent,
+    subtotal,
+    taxAmount,
+    total: subtotal + taxAmount,
+  };
+}
+
+function computePurchaseTotals(purchase = {}) {
+  const gstTemplates = arguments[1] || [];
+  const gstTemplate = (gstTemplates || []).find((row) => row.id === purchase?.gstTemplateId);
+  const { mode: templateTaxMode, components: templateComponents } = getGstTemplateTaxComponents(gstTemplate);
+  const defaultTax = sumTaxComponents(templateComponents);
+  const lines = Array.isArray(purchase?.items) ? purchase.items : [];
+  return lines.reduce((accumulator, line) => {
+    const qty = parseNumber(line?.qty);
+    const unitCost = parseNumber(line?.unitCost);
+    const subtotal = qty * unitCost;
+    const taxPercent = String(line?.taxPercent || "").trim();
+    const effectiveTaxPercent = taxPercent ? parseNumber(taxPercent) : defaultTax;
+    const effectiveComponents = taxPercent
+      ? distributeTaxPercentByComponents(effectiveTaxPercent, templateComponents, templateTaxMode)
+      : templateComponents;
+    const taxAmount = subtotal * (sumTaxComponents(effectiveComponents) / 100);
+    return {
+      subtotal: accumulator.subtotal + subtotal,
+      taxAmount: accumulator.taxAmount + taxAmount,
+      grandTotal: accumulator.grandTotal + subtotal + taxAmount,
+    };
+  }, { subtotal: 0, taxAmount: 0, grandTotal: 0 });
+}
+
+function buildPurchaseInventoryDeltaMap(previousPurchase = null, nextPurchase = null) {
+  const previousMap = previousPurchase && isPurchaseInventoryCommitted(previousPurchase.status)
+    ? getPurchaseInventoryQtyMap(previousPurchase)
+    : new Map();
+  const nextMap = nextPurchase && isPurchaseInventoryCommitted(nextPurchase.status)
+    ? getPurchaseInventoryQtyMap(nextPurchase)
+    : new Map();
+  const deltaMap = new Map();
+  const itemIds = new Set([...previousMap.keys(), ...nextMap.keys()]);
+  itemIds.forEach((itemId) => {
+    const delta = (nextMap.get(itemId) || 0) - (previousMap.get(itemId) || 0);
+    if (delta) {
+      deltaMap.set(itemId, delta);
+    }
+  });
+  return deltaMap;
 }
 
 function formatCrmFollowUpLeadNoteText(followUpRow = {}) {
@@ -4655,11 +4825,130 @@ function isValidAccountsData(value) {
   return value
     && typeof value === "object"
     && Array.isArray(value.customers)
+    && (!Object.prototype.hasOwnProperty.call(value, "vendors") || Array.isArray(value.vendors))
+    && (!Object.prototype.hasOwnProperty.call(value, "purchases") || Array.isArray(value.purchases))
     && Array.isArray(value.itemMasters)
     && Array.isArray(value.gstTemplates)
     && Array.isArray(value.billingTemplates)
     && Array.isArray(value.estimates)
     && Array.isArray(value.invoices);
+}
+
+function normalizeAccountsVendorRecord(row = {}) {
+  const safeRow = row && typeof row === "object" ? row : {};
+  const vendorName = String(
+    safeRow.vendorName
+    || safeRow.companyName
+    || safeRow.name
+    || safeRow.contactName
+    || ""
+  ).trim();
+  return {
+    ...createEmptyVendorRecord(),
+    ...safeRow,
+    id: String(safeRow.id || `vendor_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`).trim(),
+    vendorName,
+    companyName: String(safeRow.companyName || safeRow.name || vendorName).trim(),
+    name: String(safeRow.companyName || safeRow.name || vendorName).trim(),
+    contactName: String(safeRow.contactName || safeRow.clientName || safeRow.vendorName || "").trim(),
+    gstin: String(safeRow.gstin || "").trim(),
+    phoneCountryCode: String(safeRow.phoneCountryCode || "+91").trim() || "+91",
+    phone: String(safeRow.phone || "").trim(),
+    email: String(safeRow.email || "").trim(),
+    billingAddress: String(safeRow.billingAddress || safeRow.address || "").trim(),
+    country: String(safeRow.country || safeRow.billingCountry || "India").trim() || "India",
+    state: String(safeRow.state || safeRow.billingState || "").trim(),
+    pincode: String(safeRow.pincode || safeRow.billingPincode || "").trim(),
+    notes: String(safeRow.notes || "").trim(),
+  };
+}
+
+function normalizePurchaseAttachmentRecord(row = {}) {
+  const safeRow = row && typeof row === "object" ? row : {};
+  return {
+    ...createEmptyPurchaseDocument(),
+    ...safeRow,
+    id: String(safeRow.id || createEmptyPurchaseDocument().id).trim(),
+    type: String(safeRow.type || safeRow.documentType || "Vendor Estimate").trim() || "Vendor Estimate",
+    name: String(safeRow.name || safeRow.fileName || safeRow.attachmentName || "").trim(),
+    fileType: String(safeRow.fileType || safeRow.attachmentType || "").trim(),
+    fileSize: Number(safeRow.fileSize || safeRow.attachmentSize || 0),
+    fileSizeLabel: String(safeRow.fileSizeLabel || safeRow.attachmentSizeLabel || formatFileSizeLabel(safeRow.fileSize || safeRow.attachmentSize || 0)).trim(),
+    dataUrl: String(safeRow.dataUrl || safeRow.fileDataUrl || safeRow.attachmentDataUrl || "").trim(),
+    uploadedAt: String(safeRow.uploadedAt || safeRow.createdAt || "").trim(),
+  };
+}
+
+function normalizePurchaseLineRecord(row = {}) {
+  const safeRow = row && typeof row === "object" ? row : {};
+  const itemType = String(safeRow.itemType || "Inventory").trim() || "Inventory";
+  return {
+    ...createEmptyPurchaseLine(),
+    ...safeRow,
+    ...splitDocumentLineDescription(safeRow.description, safeRow.customText),
+    id: String(safeRow.id || createEmptyPurchaseLine().id).trim(),
+    itemMasterId: String(safeRow.itemMasterId || safeRow.item_master_id || "").trim(),
+    inventoryItemId: String(safeRow.inventoryItemId || safeRow.inventory_item_id || "").trim(),
+    description: String(splitDocumentLineDescription(safeRow.description, safeRow.customText).description || safeRow.itemName || safeRow.name || "").trim(),
+    customText: String(splitDocumentLineDescription(safeRow.description, safeRow.customText).customText || "").trim(),
+    itemType,
+    hsnSacType: normalizeHsnSacType(safeRow.hsnSacType || safeRow.hsn_sac_type || inferHsnSacTypeFromItem(safeRow, "HSN"), "HSN"),
+    hsnSacCode: String(safeRow.hsnSacCode || safeRow.hsn_sac_code || safeRow.hsnCode || safeRow.sacCode || "").trim(),
+    qty: sanitizeDigitsOnlyInput(String(safeRow.qty ?? safeRow.quantity ?? "1"), 8) || "1",
+    unit: String(safeRow.unit || "").trim(),
+    unitCost: String(safeRow.unitCost ?? safeRow.rate ?? safeRow.cost ?? "").trim(),
+    taxPercent: String(safeRow.taxPercent ?? safeRow.tax ?? "").trim(),
+    inventorySync: Boolean(
+      typeof safeRow.inventorySync === "boolean"
+        ? safeRow.inventorySync
+        : (String(safeRow.inventoryItemId || safeRow.inventory_item_id || "").trim() || itemType === "Inventory" || itemType === "Asset")
+    ),
+  };
+}
+
+function normalizePurchaseRecord(row = {}, currency = "INR") {
+  const safeRow = row && typeof row === "object" ? row : {};
+  const normalizedItems = (Array.isArray(safeRow.items) ? safeRow.items : []).map((item) => normalizePurchaseLineRecord(item)).filter(Boolean);
+  const normalizedAttachments = (Array.isArray(safeRow.attachments) ? safeRow.attachments : []).map((item) => normalizePurchaseAttachmentRecord(item)).filter(Boolean);
+  const paymentEntries = normalizePaymentEntries(safeRow.paymentEntries || safeRow.payment_entries);
+  const paymentDetails = normalizePaymentDetails({
+    paymentStatus: safeRow.paymentStatus || safeRow.payment_status,
+    paidAmount: safeRow.paidAmount || safeRow.paid_amount,
+    paymentMode: safeRow.paymentMode || safeRow.payment_mode,
+    paymentDate: safeRow.paymentDate || safeRow.payment_date,
+    transactionId: safeRow.transactionId || safeRow.transaction_id,
+  }, computePurchaseTotals({ items: normalizedItems }).grandTotal);
+  return {
+    ...createEmptyPurchaseForm(currency),
+    ...safeRow,
+    id: String(safeRow.id || `purchase_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`).trim(),
+    purchaseNo: String(safeRow.purchaseNo || safeRow.docNo || safeRow.purchase_no || "").trim(),
+    vendorId: String(safeRow.vendorId || safeRow.vendor_id || "").trim(),
+    vendorName: String(safeRow.vendorName || safeRow.vendor_name || safeRow.companyName || "").trim(),
+    gstTemplateId: String(safeRow.gstTemplateId || safeRow.gst_template_id || "").trim(),
+    billingTemplateId: String(safeRow.billingTemplateId || safeRow.billing_template_id || "").trim(),
+    purchaseType: String(safeRow.purchaseType || "Inventory").trim() || "Inventory",
+    status: String(safeRow.status || "Draft").trim() || "Draft",
+    paymentStatus: String(safeRow.paymentStatus || safeRow.payment_status || "Pending").trim() || "Pending",
+    currency: String(safeRow.currency || currency || "INR").trim().toUpperCase() || "INR",
+    purchaseDate: String(safeRow.purchaseDate || safeRow.issueDate || safeRow.purchase_date || getTodayIsoDate()).trim() || getTodayIsoDate(),
+    dueDate: String(safeRow.dueDate || safeRow.due_date || "").trim(),
+    branchId: String(safeRow.branchId || safeRow.branch_id || "").trim(),
+    department: String(safeRow.department || "").trim(),
+    referenceNo: String(safeRow.referenceNo || safeRow.reference_no || "").trim(),
+    notes: String(safeRow.notes || "").trim(),
+    termsText: String(safeRow.termsText || safeRow.terms_text || "Payment due within 7 days. Please contact your org admin for support.").trim(),
+    paymentStatusNotes: String(safeRow.paymentStatusNotes || safeRow.payment_status_notes || "").trim(),
+    paidAmount: paymentDetails.paidAmount,
+    balanceAmount: String(paymentDetails.balanceAmount || "").trim(),
+    paymentMode: String(safeRow.paymentMode || safeRow.payment_mode || "").trim(),
+    paymentDate: String(safeRow.paymentDate || safeRow.payment_date || "").trim(),
+    transactionId: String(safeRow.transactionId || safeRow.transaction_id || "").trim(),
+    paymentEntries,
+    attachments: normalizedAttachments,
+    items: normalizedItems.length ? normalizedItems : [createEmptyPurchaseLine()],
+    inventorySyncedAt: String(safeRow.inventorySyncedAt || safeRow.inventory_synced_at || "").trim(),
+  };
 }
 
 function normalizeSharedCustomerRecord(row = {}) {
@@ -5147,7 +5436,8 @@ function _normalizeAccountsWorkspacePayload(data = DEFAULT_ACCOUNTS_DATA) {
     ...DEFAULT_ACCOUNTS_DATA,
     ...source,
     customers: Array.isArray(source.customers) ? source.customers : [],
-    vendors: Array.isArray(source.vendors) ? source.vendors : [],
+    vendors: Array.isArray(source.vendors) ? source.vendors.map((row) => normalizeAccountsVendorRecord(row)) : [],
+    purchases: Array.isArray(source.purchases) ? source.purchases.map((row) => normalizePurchaseRecord(row)) : [],
     itemMasters: Array.isArray(source.itemMasters) ? source.itemMasters : [],
     gstTemplates: Array.isArray(source.gstTemplates) ? source.gstTemplates : [],
     billingTemplates: Array.isArray(source.billingTemplates) ? source.billingTemplates : [],
@@ -5206,14 +5496,11 @@ function readSharedAccountsCustomers(storageKey = "") {
 }
 
 function normalizeSharedVendorDisplayName(row = {}) {
-  const vendorName = String(
-    row.vendorName
-      || row.companyName
-      || row.name
-      || row.contactName
-      || row.clientName
-      || ""
-  ).trim();
+  const companyName = String(row.companyName || row.name || row.vendorName || "").trim();
+  const contactName = String(row.contactName || row.clientName || "").trim();
+  const vendorName = companyName && contactName
+    ? `${companyName} / ${contactName}`
+    : (companyName || contactName);
   if (!vendorName) {
     return "";
   }
@@ -33032,7 +33319,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     if (subscriptionsOnly) {
       return "subscriptions";
     }
-    if (accountsQueryTab && new Set(["overview", "invoices", "estimates", "gst", "templates", "items", "customers", "subscriptions"]).has(accountsQueryTab)) {
+    if (accountsQueryTab && new Set(["overview", "invoices", "estimates", "gst", "templates", "items", "customers", "purchases", "subscriptions"]).has(accountsQueryTab)) {
       return accountsQueryTab;
     }
     return String(initialTab || "overview").trim().toLowerCase() || "overview";
@@ -33040,6 +33327,9 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   const [overviewDocTab, setOverviewDocTab] = useState(() => {
     if (accountsQueryTab === "estimates") {
       return "estimate";
+    }
+    if (accountsQueryTab === "purchases") {
+      return "purchase";
     }
     return "invoice";
   });
@@ -33105,6 +33395,16 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     billingShippingSame: false
   });
   const [editingCustomerId, setEditingCustomerId] = useState("");
+  const [purchaseForm, setPurchaseForm] = useState(() => createEmptyPurchaseForm(getOrgCurrency()));
+  const [editingPurchaseId, setEditingPurchaseId] = useState("");
+  const [purchaseStatusTab, setPurchaseStatusTab] = useState("all");
+  const [purchaseViewTab, setPurchaseViewTab] = useState("order");
+  const [purchaseVendorSearch, setPurchaseVendorSearch] = useState("");
+  const [purchaseVendorSearchOpen, setPurchaseVendorSearchOpen] = useState(false);
+  const [purchaseDepartmentSearchOpen, setPurchaseDepartmentSearchOpen] = useState(false);
+  const [vendorForm, setVendorForm] = useState(createEmptyVendorRecord());
+  const [editingVendorId, setEditingVendorId] = useState("");
+  const [purchaseDocumentType, setPurchaseDocumentType] = useState("Vendor Estimate");
   const [itemMasterForm, setItemMasterForm] = useState({
     id: "",
     name: "",
@@ -33187,6 +33487,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     "templates",
     "items",
     "customers",
+    "purchases",
     "subscriptions"
   ]);
 
@@ -33200,6 +33501,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         { key: "templates", label: "Billing Templates" },
         { key: "items", label: "Items" },
         { key: "customers", label: "Clients" },
+        { key: "purchases", label: "Purchases" },
       ];
 
   const openAccountsDocumentViewPopup = useCallback((kind, row) => {
@@ -34371,6 +34673,22 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
   }, []);
 
   useEffect(() => {
+    if (editingPurchaseId) {
+      return;
+    }
+    setPurchaseForm((prev) => {
+      if (String(prev.purchaseNo || "").trim() || String(prev.vendorName || "").trim() || (prev.attachments || []).length > 0) {
+        return prev;
+      }
+      return {
+        ...prev,
+        currency: orgBillingCurrency,
+        purchaseNo: getNextPurchaseNo(moduleData.purchases || []),
+      };
+    });
+  }, [editingPurchaseId, orgBillingCurrency, moduleData.purchases]);
+
+  useEffect(() => {
     if (isAccountsLoading) {
       return;
     }
@@ -34428,6 +34746,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     const invoices = moduleData.invoices || [];
     const estimates = moduleData.estimates || [];
     const gstTemplates = moduleData.gstTemplates || [];
+    const purchases = moduleData.purchases || [];
     const receivables = invoices
       .filter((row) => !["paid", "cancelled"].includes(String(row.status || "").toLowerCase()))
       .reduce((sum, row) => sum + computeDocumentTotals(row, gstTemplates).grandTotal, 0);
@@ -34435,6 +34754,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
       { label: "Invoices", value: String(invoices.length), icon: "bi-receipt-cutoff" },
       { label: "Estimates", value: String(estimates.length), icon: "bi-file-earmark-text" },
       { label: "Receivables", value: formatInr(receivables), icon: "bi-cash-coin" },
+      { label: "Purchases", value: String(purchases.length), icon: "bi-bag-check" },
       { label: taxUi.templatesLabel, value: String(gstTemplates.length), icon: "bi-file-earmark-ruled" }
     ];
   }, [moduleData, taxUi.templatesLabel]);
@@ -34463,6 +34783,82 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     () => new Map(inventoryItems.map((row) => [String(row.id || ""), row])),
     [inventoryItems]
   );
+  const vendorRows = useMemo(
+    () => (Array.isArray(moduleData.vendors) ? moduleData.vendors : []).map((row) => normalizeAccountsVendorRecord(row)),
+    [moduleData.vendors]
+  );
+  const filteredVendorRows = useMemo(() => {
+    const query = String(purchaseVendorSearch || "").trim().toLowerCase();
+    if (!query) {
+      return vendorRows.slice(0, 8);
+    }
+    return vendorRows.filter((row) => {
+      const searchText = [
+        row.companyName,
+        row.vendorName,
+        row.contactName,
+        row.gstin,
+        row.phone,
+        row.email,
+      ].join(" ").toLowerCase();
+      return searchText.includes(query);
+    }).slice(0, 8);
+  }, [purchaseVendorSearch, vendorRows]);
+  const purchaseDepartmentOptions = useMemo(
+    () => Array.from(new Set(
+      (Array.isArray(erpUsersForSales) ? erpUsersForSales : [])
+        .map((row) => String(row?.department || "").trim())
+        .filter(Boolean)
+    )).sort((a, b) => a.localeCompare(b)),
+    [erpUsersForSales]
+  );
+  const filteredPurchaseDepartmentOptions = useMemo(() => {
+    const query = String(purchaseForm.department || "").trim().toLowerCase();
+    if (!query) {
+      return purchaseDepartmentOptions.slice(0, 8);
+    }
+    return purchaseDepartmentOptions.filter((option) => option.toLowerCase().includes(query)).slice(0, 8);
+  }, [purchaseDepartmentOptions, purchaseForm.department]);
+  const purchaseItemOptions = useMemo(() => {
+    const seen = new Set();
+    return [
+      ...inventoryItems.map((row) => ({
+        key: `inventory-${row.id}`,
+        label: String(row.itemName || row.name || "").trim(),
+        source: "inventory",
+        value: String(row.id || "").trim(),
+      })),
+      ...itemMasterOptions.map((row) => ({
+        key: `master-${row.id}`,
+        label: String(row.name || "").trim(),
+        source: "itemMaster",
+        value: String(row.id || "").trim(),
+      })),
+    ].filter((row) => {
+      const label = String(row.label || "").trim();
+      const dedupeKey = `${row.source}:${label.toLowerCase()}`;
+      if (!label || seen.has(dedupeKey)) {
+        return false;
+      }
+      seen.add(dedupeKey);
+      return true;
+    });
+  }, [inventoryItems, itemMasterOptions]);
+  const purchaseBillingTemplates = useMemo(
+    () => (moduleData.billingTemplates || []).filter((row) => {
+      const docType = String(row.docType || "").trim().toLowerCase();
+      if (!docType) return true;
+      return docType === "purchase"
+        || docType === "purchase order"
+        || docType === "invoice"
+        || docType === "estimate";
+    }),
+    [moduleData.billingTemplates]
+  );
+  const purchaseRows = useMemo(
+    () => (Array.isArray(moduleData.purchases) ? moduleData.purchases : []).map((row) => normalizePurchaseRecord(row, orgBillingCurrency)),
+    [moduleData.purchases, orgBillingCurrency]
+  );
   const billingStateOptions = getStateOptionsForCountry(String(customerForm.billingCountry || "India"));
   const shippingStateOptions = getStateOptionsForCountry(String(customerForm.shippingCountry || "India"));
   const subscriptionCustomerOptions = useMemo(
@@ -34474,6 +34870,57 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     },
     [moduleData.customers, subscriptionCustomers]
   );
+  const purchaseSummary = useMemo(() => {
+    const activeRows = purchaseRows.filter((row) => String(row.status || "").trim().toLowerCase() !== "cancelled");
+    const payables = activeRows
+      .filter((row) => !["paid", "refunded"].includes(String(row.paymentStatus || "").trim().toLowerCase()))
+      .reduce((sum, row) => sum + computePurchaseTotals(row, moduleData.gstTemplates || []).grandTotal, 0);
+    const inventoryLinked = activeRows.filter((row) => (row.items || []).some((item) => item.inventorySync && String(item.inventoryItemId || "").trim())).length;
+    const pendingDocs = activeRows.filter((row) => !(row.attachments || []).length).length;
+    return {
+      total: activeRows.length,
+      payables,
+      inventoryLinked,
+      pendingDocs,
+    };
+  }, [purchaseRows, moduleData.gstTemplates]);
+  const filteredPurchaseRows = useMemo(
+    () => purchaseRows.filter((row) => {
+      if (purchaseStatusTab === "all") {
+        return true;
+      }
+      const normalizedStatus = String(row.status || "").trim().toLowerCase();
+      if (purchaseStatusTab === "received") {
+        return normalizedStatus === "received" || normalizedStatus === "partially received";
+      }
+      return normalizedStatus === purchaseStatusTab;
+    }),
+    [purchaseRows, purchaseStatusTab]
+  );
+  const purchaseStatusCounts = useMemo(() => {
+    const counts = { all: purchaseRows.length, draft: 0, ordered: 0, received: 0, completed: 0, cancelled: 0 };
+    purchaseRows.forEach((row) => {
+      const normalizedStatus = String(row.status || "").trim().toLowerCase();
+      if (normalizedStatus === "draft") counts.draft += 1;
+      if (normalizedStatus === "ordered") counts.ordered += 1;
+      if (normalizedStatus === "completed") counts.completed += 1;
+      if (normalizedStatus === "cancelled") counts.cancelled += 1;
+      if (normalizedStatus === "received" || normalizedStatus === "partially received") counts.received += 1;
+    });
+    return counts;
+  }, [purchaseRows]);
+  const purchaseTotals = useMemo(() => computePurchaseTotals(purchaseForm, moduleData.gstTemplates || []), [purchaseForm, moduleData.gstTemplates]);
+  const purchasePaidAmountValue = useMemo(() => {
+    const explicitPaid = Math.max(0, parseNumber(purchaseForm.paidAmount));
+    if (explicitPaid > 0) {
+      return Math.min(explicitPaid, purchaseTotals.grandTotal);
+    }
+    if (String(purchaseForm.paymentStatus || "").trim() === "Paid") {
+      return purchaseTotals.grandTotal;
+    }
+    return 0;
+  }, [purchaseForm.paidAmount, purchaseForm.paymentStatus, purchaseTotals.grandTotal]);
+  const purchaseBalanceAmount = Math.max(0, purchaseTotals.grandTotal - purchasePaidAmountValue);
   const getCategoryName = (categoryId) => {
     const normalizedCategoryId = String(categoryId || "").trim();
     if (!normalizedCategoryId) {
@@ -35918,6 +36365,405 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     }
   }
 
+  function resetVendorForm() {
+    setEditingVendorId("");
+    setVendorForm(createEmptyVendorRecord());
+    setAccountsFormNotice("");
+  }
+
+  function saveVendor(event) {
+    event.preventDefault();
+    const vendorName = String(vendorForm.vendorName || "").trim();
+    if (!vendorName) {
+      setAccountsFormNotice("Vendor name is required.");
+      return;
+    }
+    const payload = normalizeAccountsVendorRecord({
+      ...vendorForm,
+      vendorName,
+    });
+    setModuleData((prev) => {
+      const rows = Array.isArray(prev.vendors) ? prev.vendors : [];
+      if (editingVendorId) {
+        return {
+          ...prev,
+          vendors: rows.map((row) => (String(row?.id || "").trim() === editingVendorId ? { ...row, ...payload, id: editingVendorId } : row)),
+          purchases: (prev.purchases || []).map((row) => (
+            String(row?.vendorId || "").trim() === editingVendorId
+              ? { ...row, vendorName: payload.vendorName, vendorId: editingVendorId }
+              : row
+          )),
+        };
+      }
+      return {
+        ...prev,
+        vendors: [{ ...payload, id: payload.id || `vendor_${Date.now()}` }, ...rows],
+      };
+    });
+    setAccountsFormNotice("");
+    resetVendorForm();
+  }
+
+  function editVendor(row) {
+    const normalized = normalizeAccountsVendorRecord(row);
+    setEditingVendorId(String(normalized.id || "").trim());
+    setVendorForm(normalized);
+    setActiveTab("purchases");
+  }
+
+  function deleteVendor(id) {
+    const targetId = String(id || "").trim();
+    setModuleData((prev) => ({
+      ...prev,
+      vendors: (prev.vendors || []).filter((row) => String(row?.id || "").trim() !== targetId),
+      purchases: (prev.purchases || []).map((row) => (
+        String(row?.vendorId || "").trim() === targetId
+          ? { ...row, vendorId: "", vendorName: row.vendorName || "" }
+          : row
+      )),
+    }));
+    if (editingVendorId === targetId) {
+      resetVendorForm();
+    }
+  }
+
+  function getNextPurchaseNo(rows = []) {
+    const nextNumber = (Array.isArray(rows) ? rows : []).length + 1;
+    return `PUR-${getTodayIsoDate().replace(/-/g, "")}-${String(nextNumber).padStart(3, "0")}`;
+  }
+
+  function resetPurchaseForm() {
+    setEditingPurchaseId("");
+    setPurchaseDocumentType("Vendor Estimate");
+    setPurchaseVendorSearch("");
+    setPurchaseVendorSearchOpen(false);
+    setPurchaseDepartmentSearchOpen(false);
+    setAccountsFormNotice("");
+    setPurchaseForm({
+      ...createEmptyPurchaseForm(orgBillingCurrency),
+      purchaseNo: getNextPurchaseNo(moduleData.purchases || []),
+    });
+  }
+
+  function updatePurchaseFormField(field, value) {
+    setPurchaseForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  function updatePurchaseLine(lineId, patch) {
+    setPurchaseForm((prev) => ({
+      ...prev,
+      items: (prev.items || []).map((row) => (row.id === lineId ? { ...row, ...patch } : row)),
+    }));
+  }
+
+  function addPurchaseLine() {
+    setPurchaseForm((prev) => ({
+      ...prev,
+      items: [...(prev.items || []), createEmptyPurchaseLine()],
+    }));
+  }
+
+  function removePurchaseLine(lineId) {
+    setPurchaseForm((prev) => {
+      const nextItems = (prev.items || []).filter((row) => row.id !== lineId);
+      return {
+        ...prev,
+        items: nextItems.length ? nextItems : [createEmptyPurchaseLine()],
+      };
+    });
+  }
+
+  function applyVendorToPurchase(vendorId) {
+    const selected = vendorRows.find((row) => String(row?.id || "").trim() === String(vendorId || "").trim());
+    if (!selected) {
+      return;
+    }
+    const displayName = normalizeSharedVendorDisplayName(selected);
+    setPurchaseForm((prev) => ({
+      ...prev,
+      vendorId: String(selected.id || "").trim(),
+      vendorName: selected.companyName || selected.name || selected.vendorName || "",
+    }));
+    setPurchaseVendorSearch(displayName);
+    setPurchaseVendorSearchOpen(false);
+  }
+
+  function applyItemMasterToPurchaseLine(lineId, itemId) {
+    const selected = (moduleData.itemMasters || []).find((row) => String(row?.id || "").trim() === String(itemId || "").trim());
+    if (!selected) {
+      return;
+    }
+    updatePurchaseLine(lineId, {
+      itemMasterId: selected.id,
+      inventoryItemId: "",
+      description: selected.name || "",
+      customText: "",
+      itemType: selected.itemType === "Service" ? "Service" : "Inventory",
+      hsnSacType: inferHsnSacTypeFromItem(selected, "HSN"),
+      hsnSacCode: String(selected.hsnSacCode || ""),
+      unit: selected.unit || "",
+      unitCost: formatCurrencyNumberInput(sanitizeCurrencyInput(String(selected.defaultRate || "")), orgBillingCurrency),
+      taxPercent: String(selected.taxPercent || ""),
+      inventorySync: String(selected.itemType || "Product") !== "Service",
+    });
+  }
+
+  function applyInventoryItemToPurchaseLine(lineId, inventoryItemId) {
+    const selected = inventoryItemLookup.get(String(inventoryItemId || "").trim());
+    if (!selected) {
+      return;
+    }
+    const linkedItemMaster = (moduleData.itemMasters || []).find((itemMaster) =>
+      String(itemMaster?.name || "").trim().toLowerCase() === String(selected?.itemName || selected?.name || "").trim().toLowerCase()
+    );
+    updatePurchaseLine(lineId, {
+      inventoryItemId: String(selected.id || "").trim(),
+      itemMasterId: "",
+      description: String(selected.itemName || selected.name || "").trim(),
+      customText: "",
+      itemType: "Inventory",
+      hsnSacType: inferHsnSacTypeFromItem(selected, inferHsnSacTypeFromItem(linkedItemMaster, "HSN")),
+      hsnSacCode: String(
+        selected.hsnSacCode
+        || selected.hsnCode
+        || selected.sacCode
+        || linkedItemMaster?.hsnSacCode
+        || ""
+      ).trim(),
+      unit: selected.unit || linkedItemMaster?.unit || "Nos",
+      inventorySync: true,
+    });
+    setPurchaseForm((prev) => ({
+      ...prev,
+      purchaseType: prev.purchaseType === "Service" ? "Inventory" : prev.purchaseType,
+    }));
+  }
+
+  function setPurchasePrimaryItemText(lineId, rawValue) {
+    const nextValue = String(rawValue || "").trim();
+    if (!nextValue) {
+      updatePurchaseLine(lineId, {
+        description: "",
+        itemMasterId: "",
+        inventoryItemId: "",
+        inventorySync: false,
+      });
+      return;
+    }
+    const matchedInventory = inventoryItems.find((row) => (
+      String(row?.itemName || row?.name || "").trim().toLowerCase() === nextValue.toLowerCase()
+    ));
+    if (matchedInventory) {
+      applyInventoryItemToPurchaseLine(lineId, matchedInventory.id);
+      return;
+    }
+    const matchedItemMaster = itemMasterOptions.find((row) => (
+      String(row?.name || "").trim().toLowerCase() === nextValue.toLowerCase()
+    ));
+    if (matchedItemMaster) {
+      applyItemMasterToPurchaseLine(lineId, matchedItemMaster.id);
+      return;
+    }
+    updatePurchaseLine(lineId, {
+      description: nextValue,
+      itemMasterId: "",
+      inventoryItemId: "",
+      inventorySync: false,
+    });
+  }
+
+  function applyBillingTemplateToPurchase(templateId) {
+    const selectedTemplate = (moduleData.billingTemplates || []).find((row) => String(row.id || "") === String(templateId || ""));
+    setPurchaseForm((prev) => ({
+      ...prev,
+      billingTemplateId: String(templateId || "").trim(),
+      notes: String(selectedTemplate?.footerNote || prev.notes || "").trim(),
+      termsText: String(selectedTemplate?.termsText || prev.termsText || "").trim(),
+    }));
+  }
+
+  function removePurchaseAttachment(attachmentId) {
+    setPurchaseForm((prev) => ({
+      ...prev,
+      attachments: (prev.attachments || []).filter((row) => String(row?.id || "").trim() !== String(attachmentId || "").trim()),
+    }));
+  }
+
+  function openPurchaseAttachment(attachment = {}) {
+    const dataUrl = String(attachment?.dataUrl || "").trim();
+    if (!dataUrl) {
+      return;
+    }
+    window.open(dataUrl, "_blank", "noopener,noreferrer");
+  }
+
+  function handlePurchaseAttachmentUpload(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+    const validation = validateBusinessAutopilotImageOrPdf(file, { label: purchaseDocumentType || "Purchase document" });
+    if (!validation.ok) {
+      showUploadAlert(validation.message);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === "string" ? reader.result : "";
+      setPurchaseForm((prev) => ({
+        ...prev,
+        attachments: [
+          normalizePurchaseAttachmentRecord({
+            id: `pur_doc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            type: purchaseDocumentType,
+            name: file.name || "purchase-document",
+            fileType: file.type || "",
+            fileSize: file.size,
+            fileSizeLabel: formatFileSizeLabel(file.size),
+            dataUrl,
+            uploadedAt: new Date().toISOString(),
+          }),
+          ...(prev.attachments || []),
+        ],
+      }));
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function syncInventoryForPurchaseChange(previousRow = null, nextRow = null) {
+    const deltaMap = buildPurchaseInventoryDeltaMap(previousRow, nextRow);
+    if (!deltaMap.size || !inventoryWorkspace || !Array.isArray(inventoryWorkspace.items)) {
+      return;
+    }
+    saveInventoryWorkspace({
+      ...inventoryWorkspace,
+      items: (inventoryWorkspace.items || []).map((row) => {
+        const delta = deltaMap.get(String(row?.id || "").trim());
+        if (!delta) {
+          return row;
+        }
+        const currentQty = parseNumber(row?.qty);
+        return {
+          ...row,
+          qty: String(Math.max(0, currentQty + delta)),
+        };
+      }),
+    });
+  }
+
+  function savePurchase(event) {
+    event.preventDefault();
+    const vendorName = String(purchaseForm.vendorName || "").trim();
+    const normalizedItems = (purchaseForm.items || []).map((row) => normalizePurchaseLineRecord(row));
+    const normalizedPaymentStatus = String(purchaseForm.paymentStatus || "Pending").trim() || "Pending";
+    const normalizedPaidAmount = formatCurrencyNumberInput(String(Math.max(0, parseNumber(purchaseForm.paidAmount))), orgBillingCurrency);
+    const fallbackGstTemplateId = resolveDefaultGstTemplateId(moduleData.gstTemplates || []);
+    const fallbackBillingTemplateId = resolveDefaultBillingTemplateId(purchaseBillingTemplates || []);
+    const resolvedGstTemplateId = String(purchaseForm.gstTemplateId || fallbackGstTemplateId || "").trim();
+    const resolvedBillingTemplateId = String(purchaseForm.billingTemplateId || fallbackBillingTemplateId || "").trim();
+    if (!vendorName) {
+      setAccountsFormNotice("Vendor name is required.");
+      return;
+    }
+    if (!resolvedGstTemplateId) {
+      setAccountsFormNotice("GST Template is required.");
+      return;
+    }
+    if (!normalizedItems.some((row) => String(row.description || "").trim())) {
+      setAccountsFormNotice("Add at least one purchase item.");
+      return;
+    }
+    if (normalizedItems.some((row) => !String(row.description || "").trim() || parseNumber(row.qty) <= 0 || parseNumber(row.unitCost) < 0)) {
+      setAccountsFormNotice("Each purchase line needs item description, quantity, and unit cost.");
+      return;
+    }
+    const payload = normalizePurchaseRecord({
+      ...purchaseForm,
+      purchaseNo: String(purchaseForm.purchaseNo || "").trim(),
+      vendorName,
+      gstTemplateId: resolvedGstTemplateId,
+      billingTemplateId: resolvedBillingTemplateId,
+      termsText: String(purchaseForm.termsText || "").trim(),
+      paymentStatusNotes: String(purchaseForm.paymentStatusNotes || "").trim(),
+      paymentStatus: normalizedPaymentStatus,
+      paidAmount: normalizedPaidAmount,
+      balanceAmount: String(Math.max(0, computePurchaseTotals({ items: normalizedItems, gstTemplateId: resolvedGstTemplateId }, moduleData.gstTemplates || []).grandTotal - parseNumber(normalizedPaidAmount))).trim(),
+      paymentMode: String(purchaseForm.paymentMode || "").trim(),
+      paymentDate: String(purchaseForm.paymentDate || "").trim(),
+      transactionId: String(purchaseForm.transactionId || "").trim(),
+      paymentEntries: normalizePaymentEntries(purchaseForm.paymentEntries),
+      items: normalizedItems.map((row) => ({
+        ...row,
+        description: composeDocumentLineDescription(row.description, row.customText),
+        customText: String(row.customText || "").trim(),
+        hsnSacType: normalizeHsnSacType(row.hsnSacType || "HSN"),
+        hsnSacCode: String(row.hsnSacCode || "").trim(),
+      })),
+      attachments: (purchaseForm.attachments || []).map((row) => normalizePurchaseAttachmentRecord(row)),
+    }, orgBillingCurrency);
+    setModuleData((prev) => {
+      const rows = Array.isArray(prev.purchases) ? prev.purchases : [];
+      if (editingPurchaseId) {
+        const previousRow = rows.find((row) => String(row?.id || "").trim() === editingPurchaseId) || null;
+        const nextRow = {
+          ...payload,
+          id: editingPurchaseId,
+          purchaseNo: payload.purchaseNo || previousRow?.purchaseNo || getNextPurchaseNo(rows),
+        };
+        syncInventoryForPurchaseChange(previousRow, nextRow);
+        return {
+          ...prev,
+          purchases: rows.map((row) => (String(row?.id || "").trim() === editingPurchaseId ? nextRow : row)),
+        };
+      }
+      const nextRow = {
+        ...payload,
+        id: payload.id || `purchase_${Date.now()}`,
+        purchaseNo: payload.purchaseNo || getNextPurchaseNo(rows),
+      };
+      syncInventoryForPurchaseChange(null, nextRow);
+      return {
+        ...prev,
+        purchases: [nextRow, ...rows],
+      };
+    });
+    setAccountsFormNotice("");
+    resetPurchaseForm();
+  }
+
+  function editPurchase(row) {
+    const normalized = normalizePurchaseRecord(row, orgBillingCurrency);
+    setEditingPurchaseId(String(normalized.id || "").trim());
+    setPurchaseForm(normalized);
+    setPurchaseViewTab("order");
+    if (normalized.vendorId) {
+      const selectedVendor = vendorRows.find((item) => String(item?.id || "").trim() === String(normalized.vendorId || "").trim());
+      setPurchaseVendorSearch(selectedVendor ? normalizeSharedVendorDisplayName(selectedVendor) : String(normalized.vendorName || "").trim());
+    } else {
+      setPurchaseVendorSearch(String(normalized.vendorName || "").trim());
+    }
+    setActiveTab("purchases");
+  }
+
+  function deletePurchase(id) {
+    const targetId = String(id || "").trim();
+    setModuleData((prev) => {
+      const rows = Array.isArray(prev.purchases) ? prev.purchases : [];
+      const previousRow = rows.find((row) => String(row?.id || "").trim() === targetId) || null;
+      if (previousRow) {
+        syncInventoryForPurchaseChange(previousRow, null);
+      }
+      return {
+        ...prev,
+        purchases: rows.filter((row) => String(row?.id || "").trim() !== targetId),
+      };
+    });
+    if (editingPurchaseId === targetId) {
+      resetPurchaseForm();
+    }
+  }
+
   function applyCustomerToDocument(kind, customerId) {
     const selected = (moduleData.customers || []).find((row) => row.id === customerId);
     if (!selected) {
@@ -36779,6 +37625,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
 
   const accountsInvoiceSearchTerm = activeTab === "invoices" ? accountsQuerySearch : "";
   const accountsEstimateSearchTerm = activeTab === "estimates" ? accountsQuerySearch : "";
+  const accountsPurchaseSearchTerm = activeTab === "purchases" ? accountsQuerySearch : "";
 
 	  function deleteDocument(kind, id, options = {}) {
 	    const listKey = kind === "estimate" ? "estimates" : "invoices";
@@ -37929,7 +38776,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
     );
   }
 
-	  function DocumentTable({ kind, rows, statusOptions, initialSearchTerm = "" }) {
+  function DocumentTable({ kind, rows, statusOptions, initialSearchTerm = "" }) {
 	    const gstRows = moduleData.gstTemplates || [];
 	    const isInvoice = kind === "invoice";
 	    const [invoiceStatusTab, setInvoiceStatusTab] = useState("all");
@@ -38304,7 +39151,129 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
 		            );
 		          })()
 		        )}
-	      />
+      />
+    );
+  }
+
+  function PurchaseOrderTable({ initialSearchTerm = "", withoutOuterCard = false, title = "Purchase Order List" }) {
+    return (
+      <SearchablePaginatedTableCard
+        title={title}
+        badgeLabel={`${filteredPurchaseRows.length}/${purchaseRows.length} purchases`}
+        rows={filteredPurchaseRows}
+        columns={[
+          { key: "purchaseNo", label: "PO No" },
+          { key: "vendorName", label: "Vendor" },
+          { key: "purchaseDate", label: "Date" },
+          { key: "purchaseType", label: "Type" },
+          { key: "department", label: "Department" },
+          { key: "grandTotal", label: "Total", sortValue: (row) => computePurchaseTotals(row, moduleData.gstTemplates || []).grandTotal },
+          { key: "paymentStatus", label: "Payment" },
+          { key: "status", label: "Status" },
+        ]}
+        searchPlaceholder="Search purchase orders"
+        noRowsText="No purchase orders yet."
+        initialSearchTerm={initialSearchTerm}
+        withoutOuterCard={withoutOuterCard}
+        enableExport
+        exportFileName="accounts-purchase-orders"
+        headerBottomTop={(
+          <div className="d-flex flex-wrap gap-2">
+            {PURCHASE_LIST_STATUS_TABS.map((tab) => (
+              <button
+                key={`purchase-status-tab-${tab.key}`}
+                type="button"
+                className={`btn btn-sm ${purchaseStatusTab === tab.key ? "btn-success" : "btn-outline-light"}`}
+                onClick={() => setPurchaseStatusTab(tab.key)}
+              >
+                {tab.label} ({purchaseStatusCounts[tab.key] || 0})
+              </button>
+            ))}
+          </div>
+        )}
+        exportCellValue={(row, column) => {
+          if (column.key === "grandTotal") {
+            return computePurchaseTotals(row, moduleData.gstTemplates || []).grandTotal;
+          }
+          return row?.[column.key] ?? "";
+        }}
+        searchBy={(row) => [
+          row.purchaseNo,
+          row.vendorName,
+          row.referenceNo,
+          row.purchaseType,
+          row.status,
+          row.paymentStatus,
+          row.department,
+          row.notes,
+          ...(row.items || []).map((item) => `${item.description} ${item.itemType} ${item.inventoryItemId}`),
+        ].join(" ")}
+        renderCells={(row) => {
+          const totals = computePurchaseTotals(row, moduleData.gstTemplates || []);
+          return [
+            <div>
+              <div className="fw-semibold">{row.purchaseNo || "-"}</div>
+              <div className="small text-secondary">{row.referenceNo || "No vendor ref"}</div>
+            </div>,
+            <div>
+              <div className="fw-semibold">{row.vendorName || "-"}</div>
+              <div className="small text-secondary">{(row.attachments || []).length ? `${row.attachments.length} doc(s)` : "No docs"}</div>
+            </div>,
+            formatDateLikeCellValue("purchaseDate", row.purchaseDate, "-"),
+            row.purchaseType || "-",
+            row.department || "-",
+            <div>
+              <div className="fw-semibold">{formatInr(totals.grandTotal)}</div>
+              <div className="small text-secondary">{(row.items || []).length} line(s)</div>
+            </div>,
+            <span className={`badge ${getPaymentStatusBadgeClass(String(row.paymentStatus || "Pending").trim() || "Pending")}`}>{row.paymentStatus || "Pending"}</span>,
+            <span className={`badge ${String(row.status || "").toLowerCase() === "cancelled" ? "text-bg-danger" : "text-bg-success"}`}>{row.status || "Draft"}</span>,
+          ];
+        }}
+        renderActions={(row) => (
+          <div className="d-inline-flex gap-2">
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-light"
+              data-wz-tooltip="View Purchase Order"
+              aria-label="View Purchase Order"
+              onClick={() => editPurchase(row)}
+            >
+              <i className="bi bi-eye" aria-hidden="true" />
+            </button>
+            {(row.attachments || []).length ? (
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-light"
+                data-wz-tooltip="Download Bill"
+                aria-label="Download Bill"
+                onClick={() => openPurchaseAttachment(row.attachments[0])}
+              >
+                <i className="bi bi-file-earmark-arrow-down" aria-hidden="true" />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-light"
+              data-wz-tooltip="Edit Purchase Order"
+              aria-label="Edit Purchase Order"
+              onClick={() => editPurchase(row)}
+            >
+              <i className="bi bi-pencil-square" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-danger"
+              data-wz-tooltip="Delete Purchase Order"
+              aria-label="Delete Purchase Order"
+              disabled={!canDeleteAccountsRows}
+              onClick={() => deletePurchase(row.id)}
+            >
+              <i className="bi bi-trash" aria-hidden="true" />
+            </button>
+          </div>
+        )}
+      />
     );
   }
 
@@ -38318,7 +39287,7 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         <p className="text-secondary mb-3">
           {subscriptionsOnly
             ? "Manage subscription categories, sub categories, and customer subscriptions in one place."
-            : "Complete billing workflow with GST templates, billing templates, estimates, invoices, and status updates."}
+            : "Complete billing and purchase workflow with GST templates, billing templates, estimates, invoices, vendor bills, and status updates."}
         </p>
         {accountsSyncError ? (
           <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
@@ -38497,6 +39466,13 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
             >
               Estimate List
             </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${overviewDocTab === "purchase" ? "btn-success" : "btn-outline-light"}`}
+              onClick={() => setOverviewDocTab("purchase")}
+            >
+              Purchase Order List
+            </button>
           </div>
           <div>
             {overviewDocTab === "invoice" ? (
@@ -38506,13 +39482,15 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
                 statusOptions={INVOICE_STATUS_OPTIONS}
                 initialSearchTerm={accountsInvoiceSearchTerm}
               />
-            ) : (
+            ) : overviewDocTab === "estimate" ? (
               <DocumentTable
                 kind="estimate"
                 rows={moduleData.estimates || []}
                 statusOptions={ESTIMATE_STATUS_OPTIONS}
                 initialSearchTerm={accountsEstimateSearchTerm}
               />
+            ) : (
+              <PurchaseOrderTable withoutOuterCard />
             )}
           </div>
         </>
@@ -38944,6 +39922,368 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
               </div>
             )}
           />
+        </>
+      ) : null}
+
+      {activeTab === "purchases" ? (
+        <>
+          <div className="row g-3">
+            {[
+              { label: "Purchase Orders", value: String(purchaseSummary.total), icon: "bi-bag-check" },
+              { label: "Open Payables", value: formatInr(purchaseSummary.payables), icon: "bi-cash-stack" },
+              { label: "Inventory Linked", value: String(purchaseSummary.inventoryLinked), icon: "bi-box-seam" },
+              { label: "Docs Pending", value: String(purchaseSummary.pendingDocs), icon: "bi-file-earmark-arrow-up" },
+            ].map((item) => (
+              <div className="col-12 col-md-6 col-xl-3" key={`purchase-stat-${item.label}`}>
+                <div className="card p-3 h-100 d-flex flex-column align-items-center justify-content-center text-center">
+                  <div className="stat-icon stat-icon-primary mb-2">
+                    <i className={`bi ${item.icon}`} aria-hidden="true" />
+                  </div>
+                  <div className="text-secondary small">{item.label}</div>
+                  <h5 className="mb-0 mt-1">{item.value}</h5>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="d-flex flex-wrap gap-2">
+            {[
+              { key: "order", label: "Purchase Order" },
+              { key: "list", label: "Purchase Order List" },
+            ].map((tab) => (
+              <button
+                key={`purchase-view-tab-${tab.key}`}
+                type="button"
+                className={`btn btn-sm ${purchaseViewTab === tab.key ? "btn-success" : "btn-outline-light"}`}
+                onClick={() => {
+                  setPurchaseViewTab(tab.key);
+                  setAccountsFormNotice("");
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {purchaseViewTab === "list" ? (
+            <>
+              <div className="d-flex flex-wrap justify-content-between gap-2">
+                <div className="small text-secondary align-self-center">
+                  Track vendor quotations, negotiation changes, finalized purchase orders, stock intake, and non-inventory spend in one list.
+                </div>
+                <button type="button" className="btn btn-sm btn-success" onClick={() => { resetPurchaseForm(); setPurchaseViewTab("order"); }}>
+                  Create Purchase Order
+                </button>
+              </div>
+              <PurchaseOrderTable initialSearchTerm={accountsPurchaseSearchTerm} withoutOuterCard />
+            </>
+          ) : (
+            <>
+              <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                <div>
+                  <h6 className="mb-1">{editingPurchaseId ? "Edit Purchase Order" : "Create Purchase Order"}</h6>
+                </div>
+                <span className="badge bg-dark border">{purchaseForm.purchaseNo || "Auto purchase number on save"}</span>
+              </div>
+              <form className="d-flex flex-column gap-3" data-skip-ba-character-limit-scope="true" onSubmit={savePurchase}>
+                <div className="row g-3">
+                  <div className="col-12 col-xl-2">
+                    <label className="form-label small text-secondary mb-1">Vendor / Company Name *</label>
+                    <div className="crm-inline-suggestions-wrap">
+                      <input
+                        className="form-control"
+                        value={purchaseVendorSearch}
+                        onFocus={() => setPurchaseVendorSearchOpen(true)}
+                        onClick={() => setPurchaseVendorSearchOpen(true)}
+                        onBlur={() => window.setTimeout(() => setPurchaseVendorSearchOpen(false), 120)}
+                        onChange={(event) => {
+                          const nextValue = event.target.value;
+                          setPurchaseVendorSearch(nextValue);
+                          setPurchaseVendorSearchOpen(true);
+                          updatePurchaseFormField("vendorId", "");
+                          updatePurchaseFormField("vendorName", nextValue);
+                        }}
+                        placeholder="Search Vendor / Company"
+                      />
+                      {purchaseVendorSearchOpen ? (
+                        filteredVendorRows.length ? (
+                          <div className="crm-inline-suggestions">
+                            <div className="crm-inline-suggestions__group">
+                              <div className="crm-inline-suggestions__title">Vendor Registration</div>
+                              {filteredVendorRows.map((row) => (
+                                <button
+                                  key={`purchase-vendor-option-${row.id}`}
+                                  type="button"
+                                  className="crm-inline-suggestions__item"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => applyVendorToPurchase(row.id)}
+                                >
+                                  <span className="crm-inline-suggestions__item-main">{normalizeSharedVendorDisplayName(row)}</span>
+                                  <span className="crm-inline-suggestions__item-meta">{[row.gstin, row.phone].filter(Boolean).join(" • ") || row.email || "Registered vendor"}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="crm-inline-suggestions">
+                            <div className="crm-inline-suggestions__item">
+                              <span className="crm-inline-suggestions__item-main">No registered vendor found</span>
+                            </div>
+                          </div>
+                        )
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="col-12 col-xl-2">
+                    <label className="form-label small text-secondary mb-1">Purchase No</label>
+                    <input
+                      className="form-control"
+                      value={purchaseForm.purchaseNo || ""}
+                      onChange={(event) => updatePurchaseFormField("purchaseNo", event.target.value)}
+                      placeholder="PUR-DDMMYYYY-001"
+                    />
+                  </div>
+                  <div className="col-12 col-md-6 col-xl-2">
+                    <label className="form-label small text-secondary mb-1">Purchase Date</label>
+                    <input className="form-control" type="date" value={purchaseForm.purchaseDate || ""} onChange={(event) => updatePurchaseFormField("purchaseDate", event.target.value)} />
+                  </div>
+                  <div className="col-12 col-md-6 col-xl-2">
+                    <label className="form-label small text-secondary mb-1">Due Date</label>
+                    <input className="form-control" type="date" value={purchaseForm.dueDate || ""} onChange={(event) => updatePurchaseFormField("dueDate", event.target.value)} />
+                  </div>
+                  <div className="col-12 col-md-6 col-xl-2">
+                    <label className="form-label small text-secondary mb-1">GST Template *</label>
+                    <select
+                      className="form-select"
+                      required
+                      value={purchaseForm.gstTemplateId || String((moduleData.gstTemplates || []).find((row) => String(row.status || "").toLowerCase() === "active")?.id || "").trim()}
+                      onChange={(event) => updatePurchaseFormField("gstTemplateId", event.target.value)}
+                    >
+                      <option value="">Select GST Template</option>
+                      {(moduleData.gstTemplates || []).map((row) => (
+                        <option key={`purchase-gst-${row.id}`} value={row.id}>
+                          {row.name} ({gstTemplateTotalPercent(row)}%)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="col-12 col-md-6 col-xl-2">
+                    <label className="form-label small text-secondary mb-1">Billing Template *</label>
+                    <select
+                      className="form-select"
+                      required
+                      value={purchaseForm.billingTemplateId || resolveDefaultBillingTemplateId(purchaseBillingTemplates || [])}
+                      onChange={(event) => applyBillingTemplateToPurchase(event.target.value)}
+                    >
+                      <option value="">Select Billing Template</option>
+                      {purchaseBillingTemplates.map((row) => (
+                        <option key={`purchase-billing-template-${row.id}`} value={row.id}>{row.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="pt-0">
+                  <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                    <h6 className="mb-0">Item Table</h6>
+                    <button type="button" className="btn btn-outline-light btn-sm" onClick={addPurchaseLine}>Add Row</button>
+                  </div>
+                  <div className="table-responsive wz-accounts-item-table">
+                    <table className="table table-dark table-borderless align-middle mb-0">
+                      <thead>
+                        <tr>
+                          <th className="wz-item-details-col" style={{ minWidth: 220 }}>Item Details</th>
+                          <th style={{ width: 110 }}>Qty</th>
+                          <th style={{ width: 140 }}>Rate</th>
+                          <th style={{ width: 130 }}>Tax %</th>
+                          <th style={{ width: 160 }}>Amount</th>
+                          <th className="text-end" style={{ width: 100 }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(purchaseForm.items || []).map((line, index) => {
+                          const totals = computePurchaseLineTotals(line);
+                          return (
+                            <tr key={line.id || `purchase-line-${index}`}>
+                              <td className="wz-item-details-cell" style={{ backgroundColor: index % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>
+                                <div className="d-flex flex-column gap-2">
+                                  <input
+                                    className="form-control mb-2 wz-item-custom-input"
+                                    value={line.customText || ""}
+                                    onChange={(event) => updatePurchaseLine(line.id, { customText: event.target.value })}
+                                    placeholder="Custom Text (Bill Line 1)"
+                                  />
+                                  <div className="row g-2">
+                                    <div className="col-7">
+                                      <input
+                                        className="form-control wz-item-primary-input"
+                                        list={`purchase-item-options-${line.id}`}
+                                        value={line.description || ""}
+                                        onChange={(event) => updatePurchaseLine(line.id, { description: event.target.value })}
+                                        onBlur={(event) => setPurchasePrimaryItemText(line.id, event.target.value)}
+                                        placeholder="Click to search item"
+                                      />
+                                      <datalist id={`purchase-item-options-${line.id}`}>
+                                        {purchaseItemOptions.map((row) => (
+                                          <option key={`${line.id}-${row.key}`} value={row.label} />
+                                        ))}
+                                      </datalist>
+                                    </div>
+                                    <div className="col-5">
+                                      <div className="d-flex gap-2">
+                                        <select
+                                          className="form-select wz-item-hsn-type-select"
+                                          value={normalizeHsnSacType(line.hsnSacType || "HSN")}
+                                          onChange={(event) => updatePurchaseLine(line.id, { hsnSacType: normalizeHsnSacType(event.target.value, "HSN") })}
+                                        >
+                                          <option value="HSN">HSN</option>
+                                          <option value="SAC">SAC</option>
+                                        </select>
+                                        <input
+                                          className="form-control"
+                                          value={line.hsnSacCode || ""}
+                                          onChange={(event) => updatePurchaseLine(line.id, { hsnSacCode: event.target.value })}
+                                          placeholder={normalizeHsnSacType(line.hsnSacType || "HSN") === "SAC" ? "SAC Code" : "HSN Code"}
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="small text-secondary mt-2">
+                                    Inventory adds only when this purchase moves to Received or Completed.
+                                  </div>
+                                </div>
+                              </td>
+                              <td style={{ backgroundColor: index % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}><input className="form-control" value={line.qty || ""} onChange={(event) => updatePurchaseLine(line.id, { qty: sanitizeDigitsOnlyInput(event.target.value, 8) })} placeholder="1" /></td>
+                              <td style={{ backgroundColor: index % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}><input className="form-control" value={line.unitCost || ""} onChange={(event) => updatePurchaseLine(line.id, { unitCost: event.target.value })} placeholder="0.00" /></td>
+                              <td style={{ backgroundColor: index % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}><input className="form-control" value={line.taxPercent || ""} onChange={(event) => updatePurchaseLine(line.id, { taxPercent: event.target.value })} placeholder="Auto" /></td>
+                              <td className="fw-semibold" style={{ backgroundColor: index % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}>{formatInr(totals.total)}</td>
+                              <td className="text-end" style={{ backgroundColor: index % 2 === 0 ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)" }}><button type="button" className="btn btn-outline-danger btn-sm" onClick={() => removePurchaseLine(line.id)}>Delete</button></td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="row g-3">
+                  <div className="col-12 col-xl-7">
+                    <label className="form-label small text-secondary mb-1">Vendor Notes</label>
+                    <textarea className="form-control mb-3" rows="2" value={purchaseForm.notes || ""} onChange={(event) => updatePurchaseFormField("notes", event.target.value)} placeholder="Notes visible on purchase order" />
+                    <label className="form-label small text-secondary mb-1">Terms & Conditions</label>
+                    <textarea className="form-control mb-3" rows="2" value={purchaseForm.termsText || ""} onChange={(event) => updatePurchaseFormField("termsText", event.target.value)} placeholder="Terms and conditions" />
+                    <label className="form-label small text-secondary mb-1">Payment Status / Custom Notes</label>
+                    <textarea className="form-control" rows="2" value={purchaseForm.paymentStatusNotes || ""} onChange={(event) => updatePurchaseFormField("paymentStatusNotes", event.target.value)} placeholder="Internal payment or negotiation follow-up notes" />
+                  </div>
+                  <div className="col-12 col-xl-5">
+                    <div className="card p-3 border">
+                      <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+                        <h6 className="mb-0">Summary</h6>
+                        <span className={`badge ${getPaymentStatusBadgeClass(String(purchaseForm.paymentStatus || "Pending").trim() || "Pending")}`}>{purchaseForm.paymentStatus || "Pending"}</span>
+                      </div>
+                      <div className="d-flex justify-content-between mb-2"><span className="text-secondary">Sub Total</span><strong>{formatInr(purchaseTotals.subtotal)}</strong></div>
+                      <div className="d-flex justify-content-between mb-2"><span className="text-secondary">GST / Tax</span><strong>{formatInr(purchaseTotals.taxAmount)}</strong></div>
+                      <div className="d-flex justify-content-between mb-2"><span className="text-secondary">Paid</span><strong>{formatInr(purchasePaidAmountValue)}</strong></div>
+                      <div className="d-flex justify-content-between mb-2"><span className="text-secondary">Balance</span><strong>{formatInr(purchaseBalanceAmount)}</strong></div>
+                      <div className="d-flex justify-content-between pt-2 border-top">
+                        <span className="fw-semibold">Total</span>
+                        <strong>{formatInr(purchaseTotals.grandTotal)}</strong>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border rounded p-3">
+                  <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
+                    <div className="fw-semibold">Payment Details</div>
+                    <span className={`badge ${getPaymentStatusBadgeClass(String(purchaseForm.paymentStatus || "Pending").trim() || "Pending")}`}>{purchaseForm.paymentStatus || "Pending"}</span>
+                  </div>
+                  <div className="row g-3">
+                    <div className="col-12 col-md-6 col-xl-2">
+                      <label className="form-label small text-secondary mb-1">Payment Status</label>
+                      <select className="form-select" value={purchaseForm.paymentStatus || "Pending"} onChange={(event) => updatePurchaseFormField("paymentStatus", event.target.value)}>
+                        {PURCHASE_PAYMENT_STATUS_OPTIONS.map((option) => (
+                          <option key={`purchase-payment-detail-${option}`} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="col-12 col-md-6 col-xl-2">
+                      <label className="form-label small text-secondary mb-1">Paid Amount</label>
+                      <input className="form-control" inputMode="decimal" value={purchaseForm.paidAmount || ""} onChange={(event) => updatePurchaseFormField("paidAmount", event.target.value)} placeholder="0.00" />
+                    </div>
+                    <div className="col-12 col-md-6 col-xl-2">
+                      <label className="form-label small text-secondary mb-1">Payment Mode</label>
+                      <select className="form-select" value={purchaseForm.paymentMode || ""} onChange={(event) => updatePurchaseFormField("paymentMode", event.target.value)}>
+                        <option value="">Select Payment Mode</option>
+                        {PAYMENT_MODE_OPTIONS.map((mode) => (
+                          <option key={`purchase-pay-mode-${mode}`} value={mode}>{mode}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="col-12 col-md-6 col-xl-2">
+                      <label className="form-label small text-secondary mb-1">Payment Date</label>
+                      <input type="date" className="form-control" value={purchaseForm.paymentDate || ""} onChange={(event) => updatePurchaseFormField("paymentDate", event.target.value)} />
+                    </div>
+                    <div className="col-12 col-md-6 col-xl-2">
+                      <label className="form-label small text-secondary mb-1">Transaction ID</label>
+                      <input className="form-control" value={purchaseForm.transactionId || ""} onChange={(event) => updatePurchaseFormField("transactionId", event.target.value)} placeholder="Transaction ID" />
+                    </div>
+                    <div className="col-12 col-md-6 col-xl-2">
+                      <label className="form-label small text-secondary mb-1">Balance</label>
+                      <input className="form-control" value={formatInr(purchaseBalanceAmount)} readOnly />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="card p-3 wz-card-borderless">
+                  <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                    <div>
+                      <h6 className="mb-1">Vendor Estimate / Bill Uploads</h6>
+                      <div className="small text-secondary">Upload quotation, purchase order copy, vendor bill, delivery note, or receipt for audit trail.</div>
+                    </div>
+                    <div className="d-flex gap-2">
+                      <select className="form-select form-select-sm" value={purchaseDocumentType} onChange={(event) => setPurchaseDocumentType(event.target.value)}>
+                        {PURCHASE_DOCUMENT_TYPE_OPTIONS.map((option) => (
+                          <option key={`purchase-doc-type-${option}`} value={option}>{option}</option>
+                        ))}
+                      </select>
+                      <label className="btn btn-sm btn-outline-success mb-0">
+                        Upload
+                        <input type="file" className="d-none" accept=".pdf,image/*" onChange={handlePurchaseAttachmentUpload} />
+                      </label>
+                    </div>
+                  </div>
+                  {(purchaseForm.attachments || []).length ? (
+                    <div className="d-flex flex-column gap-2">
+                      {(purchaseForm.attachments || []).map((attachment) => (
+                        <div key={attachment.id} className="d-flex flex-wrap align-items-center justify-content-between gap-2 border rounded-3 px-3 py-2">
+                          <div>
+                            <div className="fw-semibold">{attachment.type || "Document"}: {attachment.name || "-"}</div>
+                            <div className="small text-secondary">
+                              {[formatDocumentFileTypeLabel(attachment.fileType || attachment.name || ""), attachment.fileSizeLabel].filter(Boolean).join(" • ") || "Uploaded file"}
+                            </div>
+                          </div>
+                          <div className="d-flex gap-2">
+                            <button type="button" className="btn btn-sm btn-outline-light" onClick={() => openPurchaseAttachment(attachment)}>Open</button>
+                            <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => removePurchaseAttachment(attachment.id)}>Remove</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="small text-secondary">No vendor documents uploaded yet.</div>
+                  )}
+                </div>
+
+                <div className="d-flex flex-wrap gap-2">
+                  <button type="submit" className="btn btn-success btn-sm">{editingPurchaseId ? "Update Purchase Order" : "Create Purchase Order"}</button>
+                  {(editingPurchaseId || purchaseForm.vendorName || (purchaseForm.attachments || []).length > 0) ? (
+                    <button type="button" className="btn btn-outline-light btn-sm" onClick={resetPurchaseForm}>Cancel</button>
+                  ) : null}
+                </div>
+              </form>
+            </>
+          )}
+
         </>
       ) : null}
 
