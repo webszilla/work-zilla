@@ -109,6 +109,7 @@ urlpatterns = [
     path("api/employees/search", business_autopilot_api_views.employees_search),
     path("api/hr/employee/<int:employee_id>/salary-history/", business_autopilot_api_views.employee_salary_history),
     path("api/hr/attendance/geo-settings", business_autopilot_api_views.attendance_geo_settings),
+    path("api/hr/attendance/my-records", business_autopilot_api_views.attendance_my_records),
     path("api/hr/attendance/geo-checkin", business_autopilot_api_views.attendance_geo_checkin),
     path("api/hr/attendance/geo-checkout", business_autopilot_api_views.attendance_geo_checkout),
     path("api/imposition/", include("apps.backend.imposition.api_urls")),

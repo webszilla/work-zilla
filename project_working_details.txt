@@ -154,3 +154,16 @@ ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
   - `/downloads/bootstrap-products.json` -> `200`
   - `/downloads/windows-agent/` -> `404`
   - `/downloads/mac-agent/` -> `404`
+
+LATEST WORK LOG (2026-06-08)
+- Mobile login copy cleaned:
+  - removed text: `After login the org admin theme applies automatically.`
+- Mobile Business Autopilot dashboard attendance:
+  - `My Attendance` title opens attendance records page
+  - `In` and `Out` buttons now call geo attendance APIs
+  - added mobile attendance records screen
+- Backend:
+  - added `GET /api/hr/attendance/my-records`
+- Deploy scope:
+  - code files only
+  - do not move DB files

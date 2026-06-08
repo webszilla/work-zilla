@@ -1270,6 +1270,31 @@ def _attendance_geo_response(entry, *, action, message):
     }
 
 
+def _serialize_attendance_entry(entry):
+    return {
+        "id": entry.id,
+        "employee_name": entry.employee_name,
+        "attendance_date": entry.attendance_date.isoformat() if entry.attendance_date else "",
+        "checkin_time": entry.checkin_time.isoformat() if entry.checkin_time else None,
+        "checkout_time": entry.checkout_time.isoformat() if entry.checkout_time else None,
+        "checkin_latitude": float(entry.checkin_latitude) if entry.checkin_latitude is not None else None,
+        "checkin_longitude": float(entry.checkin_longitude) if entry.checkin_longitude is not None else None,
+        "checkin_accuracy": float(entry.checkin_accuracy) if entry.checkin_accuracy is not None else None,
+        "checkout_latitude": float(entry.checkout_latitude) if entry.checkout_latitude is not None else None,
+        "checkout_longitude": float(entry.checkout_longitude) if entry.checkout_longitude is not None else None,
+        "checkout_accuracy": float(entry.checkout_accuracy) if entry.checkout_accuracy is not None else None,
+        "checkin_distance_meters": float(entry.checkin_distance_meters) if entry.checkin_distance_meters is not None else None,
+        "checkout_distance_meters": float(entry.checkout_distance_meters) if entry.checkout_distance_meters is not None else None,
+        "checkin_inside_geofence": entry.checkin_inside_geofence,
+        "checkout_inside_geofence": entry.checkout_inside_geofence,
+        "geo_status": entry.geo_status,
+        "outside_reason": entry.outside_reason,
+        "device_info": entry.device_info,
+        "created_at": entry.created_at.isoformat() if entry.created_at else None,
+        "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
+    }
+
+
 def _ensure_default_module_catalog():
     # Keeps local/stale DBs usable even if seed migrations were not applied yet.
     # Avoid frequent write-lock contention on sqlite by doing minimal writes.
@@ -4723,6 +4748,30 @@ def attendance_geo_settings(request):
     setting.require_gps = require_gps
     setting.save()
     return JsonResponse({"setting": _serialize_attendance_geo_setting(setting)})
+
+
+@require_http_methods(["GET"])
+def attendance_my_records(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    membership = _get_org_membership(request.user, org)
+    if not membership:
+        return JsonResponse({"detail": "employee_not_found"}, status=403)
+
+    rows = list(
+        AttendanceEntry.objects.filter(organization=org, employee_membership=membership)
+        .select_related("employee_membership")
+        .order_by("-attendance_date", "-updated_at", "-id")[:31]
+    )
+    return JsonResponse(
+        {
+            "records": [_serialize_attendance_entry(row) for row in rows],
+            "employee_name": _get_org_user_display_name(request.user),
+        }
+    )
 
 
 def _attendance_geo_punch(request, *, action):

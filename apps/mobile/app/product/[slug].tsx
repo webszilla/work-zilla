@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
+import { performAttendancePunch } from "@/modules/businessAutopilot/utils/attendance";
 import { useThemeTokens } from "@/core/theme/useThemeTokens";
 import { BusinessAutopilotAccountsPanel } from "@/modules/businessAutopilot/components/BusinessAutopilotAccountsPanel";
 import { BusinessAutopilotCrmPanel } from "@/modules/businessAutopilot/components/BusinessAutopilotCrmPanel";
@@ -48,6 +49,9 @@ export default function ProductWorkspaceScreen() {
   const productSlug = String(slug || "monitor");
   const [activeTab, setActiveTab] = useState("dashboard");
   const [activeModule, setActiveModule] = useState<string | null>(null);
+  const [attendanceNotice, setAttendanceNotice] = useState("");
+  const [attendanceError, setAttendanceError] = useState("");
+  const [attendanceSubmitting, setAttendanceSubmitting] = useState<"in" | "out" | "">("");
   const isWorksuite = productSlug === "monitor" || productSlug === "worksuite" || productSlug === "work-suite";
   const isBusinessAutopilot = productSlug === "business-autopilot-erp" || productSlug === "business-autopilot";
 
@@ -96,6 +100,20 @@ export default function ProductWorkspaceScreen() {
     }
   };
 
+  const handleAttendancePunch = async (action: "in" | "out") => {
+    setAttendanceSubmitting(action);
+    setAttendanceNotice("");
+    setAttendanceError("");
+    try {
+      const response = await performAttendancePunch(action);
+      setAttendanceNotice(response.message || (action === "in" ? "Check-in saved successfully." : "Check-out saved successfully."));
+    } catch (error) {
+      setAttendanceError(error instanceof Error ? error.message : "Unable to save attendance.");
+    } finally {
+      setAttendanceSubmitting("");
+    }
+  };
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <AppTopHeader />
@@ -110,17 +128,29 @@ export default function ProductWorkspaceScreen() {
             />
           </View>
           <View style={styles.attendanceCard}>
-            <Text style={styles.attendanceTitle}>My Attendance</Text>
+            <Pressable onPress={() => router.push("/attendance")}>
+              <Text style={styles.attendanceTitle}>My Attendance</Text>
+            </Pressable>
             <View style={styles.attendanceButtons}>
-              <Pressable style={styles.attendanceButtonPrimary}>
+              <Pressable
+                style={[styles.attendanceButtonPrimary, attendanceSubmitting ? styles.attendanceButtonDisabled : null]}
+                disabled={Boolean(attendanceSubmitting)}
+                onPress={() => handleAttendancePunch("in")}
+              >
                 <Ionicons name="log-in-outline" size={16} color="#ffffff" />
-                <Text style={styles.attendanceButtonPrimaryText}>In</Text>
+                <Text style={styles.attendanceButtonPrimaryText}>{attendanceSubmitting === "in" ? "Saving..." : "In"}</Text>
               </Pressable>
-              <Pressable style={styles.attendanceButtonSecondary}>
+              <Pressable
+                style={[styles.attendanceButtonSecondary, attendanceSubmitting ? styles.attendanceButtonDisabled : null]}
+                disabled={Boolean(attendanceSubmitting)}
+                onPress={() => handleAttendancePunch("out")}
+              >
                 <Ionicons name="log-out-outline" size={16} color={theme.colors.primary} />
-                <Text style={styles.attendanceButtonSecondaryText}>Out</Text>
+                <Text style={styles.attendanceButtonSecondaryText}>{attendanceSubmitting === "out" ? "Saving..." : "Out"}</Text>
               </Pressable>
             </View>
+            {attendanceNotice ? <Text style={styles.attendanceNotice}>{attendanceNotice}</Text> : null}
+            {attendanceError ? <Text style={styles.attendanceError}>{attendanceError}</Text> : null}
           </View>
         </View>
       ) : null}
@@ -233,6 +263,9 @@ const createStyles = (theme: ReturnType<typeof useThemeTokens>) =>
     attendanceButtons: {
       gap: 10
     },
+    attendanceButtonDisabled: {
+      opacity: 0.6
+    },
     attendanceButtonPrimary: {
       alignItems: "center",
       backgroundColor: theme.colors.primary,
@@ -266,6 +299,18 @@ const createStyles = (theme: ReturnType<typeof useThemeTokens>) =>
       color: theme.colors.primary,
       fontSize: 13,
       fontWeight: "700",
+      textAlign: "center"
+    },
+    attendanceNotice: {
+      color: theme.colors.primary,
+      fontSize: 12,
+      fontWeight: "600",
+      textAlign: "center"
+    },
+    attendanceError: {
+      color: "#dc2626",
+      fontSize: 12,
+      fontWeight: "600",
       textAlign: "center"
     },
     tabBar: {

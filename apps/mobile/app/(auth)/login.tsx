@@ -33,7 +33,7 @@ export default function LoginScreen() {
   return (
     <View style={styles.screen}>
       <View style={styles.card}>
-        <BrandedHeader title="Login" subtitle="Use your existing WorkZilla account. After login the org admin theme applies automatically." alignCenter />
+        <BrandedHeader title="Login" subtitle="Use your existing WorkZilla account." alignCenter />
         <TextInput
           autoCapitalize="none"
           placeholder="Email or username"
