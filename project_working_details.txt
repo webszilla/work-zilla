@@ -143,10 +143,10 @@ VERIFY (AFTER DEPLOY)
 - `pgrep -af "core_platform.wsgi:application"`
 
 ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
-- Published at (UTC): `2026-06-04T14:40:18Z`
-- Local SHA: `7be50780ee3392d2d94031ee00d648ef07835565`
-- GitHub main SHA: `7be50780ee3392d2d94031ee00d648ef07835565`
-- Server SHA: `7be50780ee3392d2d94031ee00d648ef07835565`
+- Published at (UTC): `2026-06-12T02:45:32Z`
+- Local SHA: `0460ea96552a35b0cf17caf88efc941fc83c7912`
+- GitHub main SHA: `0460ea96552a35b0cf17caf88efc941fc83c7912`
+- Server SHA: `0460ea96552a35b0cf17caf88efc941fc83c7912`
 - Deploy method: `git-pull`
 - Gunicorn: listening on `:8000` (`yes`)
 - Verified URLs:
@@ -155,7 +155,44 @@ ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
   - `/downloads/windows-agent/` -> `404`
   - `/downloads/mac-agent/` -> `404`
 
-LATEST WORK LOG (2026-06-08)
+LATEST WORK LOG (2026-06-12)
+- Business Autopilot AI assistant upgraded as reusable module:
+  - shared assistant registry / prompt context
+  - org-aware assistant profile and lightweight training context
+  - reusable full-page assistant route for future products
+- Admin profile AI Office Assistant settings added:
+  - chatbot name
+  - male / female voice preference
+  - wake word configuration support
+- Voice / chat improvements:
+  - push-to-talk helpers
+  - wake-word detector hooks
+  - browser speech input
+  - speech playback helpers
+  - shared chat history model and sync support
+- Business data answer coverage expanded:
+  - invoice counts
+  - invoice total amount
+  - paid / pending / this-month invoice summaries
+  - richer org capability / plan / module context for answers
+- Full-page assistant UI refined:
+  - close returns to dashboard
+  - fullscreen route cleanup
+  - left sidebar hidden on assistant page
+  - extra wrapper box removed
+  - full-width layout enabled
+- Production deploy completed:
+  - GitHub push
+  - server git pull
+  - DB auth check passed
+  - migrations `core.0154`, `core.0155`, `core.0156` applied
+  - collectstatic completed
+  - gunicorn restarted
+- Notes:
+  - collectstatic reported duplicate static destination warnings for `public/js/site.js`, `public/css/site.css`, and `js/ai_chatbot_widget.js`
+  - warnings did not block deploy; live app verified with `200`
+
+PREVIOUS WORK LOG (2026-06-08)
 - Mobile login copy cleaned:
   - removed text: `After login the org admin theme applies automatically.`
 - Mobile Business Autopilot dashboard attendance:
