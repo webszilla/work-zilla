@@ -1563,11 +1563,35 @@ class OrganizationSettings(models.Model):
     business_autopilot_openai_model = models.CharField(max_length=120, blank=True, default="gpt-4o-mini")
     business_autopilot_ai_agent_name = models.CharField(max_length=120, blank=True, default="Work Zilla AI Assistant")
     business_autopilot_openai_enabled = models.BooleanField(default=False)
+    business_autopilot_ai_voice_gender = models.CharField(max_length=20, blank=True, default="female")
+    business_autopilot_ai_wake_word_enabled = models.BooleanField(default=False)
+    business_autopilot_ai_wake_phrase = models.CharField(max_length=120, blank=True, default="")
     business_autopilot_role_access_map = models.JSONField(default=dict, blank=True)
     business_autopilot_user_type_access_map = models.JSONField(default=dict, blank=True)
 
     def __str__(self):
         return f"{self.organization.name} settings"
+
+
+class BusinessAutopilotChatHistory(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="business_autopilot_chat_histories")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="business_autopilot_chat_histories")
+    chat_date = models.DateField()
+    messages = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "user", "chat_date"], name="uniq_ba_chat_history_org_user_date"),
+        ]
+        indexes = [
+            models.Index(fields=["organization", "user", "chat_date"]),
+            models.Index(fields=["organization", "updated_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.organization_id}:{self.user_id}:{self.chat_date}"
 
 
 class UserLoginActivity(models.Model):

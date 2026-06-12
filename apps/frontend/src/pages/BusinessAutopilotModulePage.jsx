@@ -596,13 +596,9 @@ const HR_TAB_CONFIG = {
       { key: "outTime", label: "Out Time" },
       { key: "workedHours", label: "Worked" },
       { key: "overtimeHours", label: "OT" },
-      { key: "locationStatus", label: "Location Status" },
-      { key: "distanceMeters", label: "Distance" },
-      { key: "gpsAccuracy", label: "GPS Accuracy" },
-      { key: "viewMap", label: "View Map" },
       {
         key: "attendanceDebit",
-        label: "Attendance Debit",
+        label: "Debit",
         thStyle: { width: 150, minWidth: 150 },
         tdStyle: { width: 150, minWidth: 150, whiteSpace: "normal" }
       },
@@ -5092,6 +5088,27 @@ function findBestCustomerMatch(customers = [], {
 function normalizePlaceholderText(value = "") {
   const normalizedValue = String(value || "").trim();
   return normalizedValue === "-" ? "" : normalizedValue;
+}
+
+function openHtmlDocumentInBlankPage(html = "", onBlocked) {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const blob = new Blob([String(html || "")], { type: "text/html" });
+  const blobUrl = URL.createObjectURL(blob);
+  const popup = window.open("about:blank", "_blank");
+  if (!popup) {
+    URL.revokeObjectURL(blobUrl);
+    if (typeof onBlocked === "function") {
+      onBlocked();
+    }
+    return false;
+  }
+  popup.location.replace(blobUrl);
+  window.setTimeout(() => {
+    URL.revokeObjectURL(blobUrl);
+  }, 60000);
+  return true;
 }
 
 function toPopupTitleCase(value = "") {
@@ -25655,7 +25672,9 @@ export function HrManagementModule({
     if (activeTab !== "attendance") {
       return config.columns;
     }
-    return (config.columns || []).map((column) => {
+    return (config.columns || [])
+      .filter((column) => !(attendanceScope === "my" && column.key === "employee"))
+      .map((column) => {
       if (column.key === "date") {
         return {
           ...column,
@@ -25666,13 +25685,41 @@ export function HrManagementModule({
       if (column.key === "inTime" || column.key === "outTime") {
         return {
           ...column,
-          thStyle: { width: "120px", minWidth: "120px", whiteSpace: "nowrap" },
-          tdStyle: { width: "120px", minWidth: "120px", whiteSpace: "nowrap" },
+          thStyle: { width: "100px", minWidth: "100px", whiteSpace: "nowrap" },
+          tdStyle: { width: "100px", minWidth: "100px", whiteSpace: "nowrap" },
+        };
+      }
+      if (column.key === "workedHours") {
+        return {
+          ...column,
+          thStyle: { width: "80px", minWidth: "80px", whiteSpace: "nowrap" },
+          tdStyle: { width: "80px", minWidth: "80px", whiteSpace: "nowrap" },
+        };
+      }
+      if (column.key === "overtimeHours") {
+        return {
+          ...column,
+          thStyle: { width: "48px", minWidth: "48px", whiteSpace: "nowrap" },
+          tdStyle: { width: "48px", minWidth: "48px", whiteSpace: "nowrap" },
+        };
+      }
+      if (column.key === "attendanceDebit") {
+        return {
+          ...column,
+          thStyle: { width: "110px", minWidth: "110px", whiteSpace: "normal" },
+          tdStyle: { width: "110px", minWidth: "110px", whiteSpace: "normal", lineHeight: 1.2 },
+        };
+      }
+      if (column.key === "status") {
+        return {
+          ...column,
+          thStyle: { width: "105px", minWidth: "105px", whiteSpace: "normal" },
+          tdStyle: { width: "105px", minWidth: "105px", whiteSpace: "normal", lineHeight: 1.15, wordBreak: "break-word" },
         };
       }
       return column;
     });
-  }, [activeTab, config.columns]);
+  }, [activeTab, attendanceScope, config.columns]);
   const currentRows = useMemo(() => {
     if (activeTab === "attendance") {
       return Array.isArray(moduleData.attendance) ? moduleData.attendance : [];
@@ -27313,6 +27360,925 @@ export function HrManagementModule({
     setAttendanceTaskModal((prev) => ({ ...prev, open: false }));
   }
 
+  function openAttendanceDetailsPage(row) {
+    const detailRow = row && typeof row === "object" ? row : {};
+    const defaultIso = normalizeIsoDateValue(detailRow?.date) || todayIso;
+    const payload = {
+      employee: String(detailRow?.employee || myAttendanceEmployee || currentHrEmployeeName || "").trim(),
+      year: defaultIso.slice(0, 4),
+      month: defaultIso.slice(5, 7),
+      storageKey: HR_STORAGE_KEY,
+    };
+    const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>View Details</title>
+    <style>
+      :root {
+        --line: rgba(34, 197, 94, 0.22);
+        --line-strong: rgba(34, 197, 94, 0.42);
+        --line-soft: rgba(34, 197, 94, 0.14);
+        --bg: #f7fcf7;
+        --card: #ffffff;
+        --text: #1f2937;
+        --muted: #607089;
+        --field-bg: #ffffff;
+        --field-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.04);
+        --focus-ring: 0 0 0 4px rgba(34, 197, 94, 0.12);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(34, 197, 94, 0.14), transparent 30%),
+          linear-gradient(180deg, #fbfefb 0%, var(--bg) 100%);
+      }
+      .page {
+        width: 100%;
+        max-width: none;
+        margin: 0;
+        padding: 18px 20px 24px;
+      }
+      .card {
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        overflow: visible;
+      }
+      .header {
+        padding: 8px 0 14px;
+        border-bottom: 1px solid var(--line-soft);
+        display: grid;
+        grid-template-columns: minmax(220px, 3fr) minmax(560px, 8fr) minmax(90px, 1fr);
+        align-items: end;
+        gap: 16px;
+      }
+      .header-copy {
+        min-width: 0;
+      }
+      .header-toolbar {
+        min-width: 0;
+      }
+      .header-status {
+        min-width: 0;
+        display: flex;
+        justify-content: flex-end;
+      }
+      .title {
+        margin: 0;
+        font-size: 30px;
+        line-height: 1.1;
+      }
+      .subtitle {
+        margin: 8px 0 0;
+        color: var(--muted);
+        font-size: 16px;
+      }
+      .status {
+        display: inline-flex;
+        align-items: center;
+        min-height: 38px;
+        padding: 0 12px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--muted);
+        font-size: 14px;
+        white-space: nowrap;
+      }
+      .content {
+        padding: 14px 0 0;
+      }
+      .toolbar {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 14px;
+        align-items: end;
+      }
+      .toolbar-group {
+        min-width: 180px;
+      }
+      .toolbar-group.is-employee {
+        min-width: 340px;
+      }
+      .toolbar-label {
+        display: block;
+        margin-bottom: 6px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .toolbar-control {
+        width: 100%;
+        min-height: 42px;
+        border-radius: 12px;
+        border: 1px solid var(--line-strong);
+        background: var(--field-bg);
+        color: var(--text);
+        padding: 0 12px;
+        font: inherit;
+        box-shadow: var(--field-shadow);
+        outline: none;
+        appearance: none;
+        -webkit-appearance: none;
+        background-image: linear-gradient(45deg, transparent 50%, #607089 50%), linear-gradient(135deg, #607089 50%, transparent 50%);
+        background-position: calc(100% - 20px) calc(50% - 3px), calc(100% - 14px) calc(50% - 3px);
+        background-size: 6px 6px, 6px 6px;
+        background-repeat: no-repeat;
+      }
+      .toolbar-control:focus {
+        border-color: rgba(34, 197, 94, 0.7);
+        box-shadow: var(--focus-ring);
+      }
+      .employee-picker {
+        position: relative;
+      }
+      .employee-input {
+        width: 100%;
+        min-height: 42px;
+        border-radius: 12px;
+        border: 1px solid var(--line-strong);
+        background: var(--field-bg);
+        color: var(--text);
+        padding: 0 40px 0 14px;
+        font: inherit;
+        box-shadow: var(--field-shadow);
+      }
+      .employee-input:focus {
+        outline: none;
+        border-color: rgba(34, 197, 94, 0.7);
+        box-shadow: var(--focus-ring);
+      }
+      .employee-toggle {
+        position: absolute;
+        top: 50%;
+        right: 14px;
+        transform: translateY(-50%);
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font-size: 16px;
+        cursor: pointer;
+      }
+      .employee-menu {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        right: 0;
+        z-index: 10;
+        background: #fff;
+        border: 1px solid var(--line-strong);
+        border-radius: 14px;
+        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.10);
+        max-height: 360px;
+        overflow: hidden;
+        padding: 0;
+      }
+      .employee-menu-title {
+        padding: 14px 18px 10px;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--text);
+        border-bottom: 1px solid rgba(34, 197, 94, 0.14);
+        background: rgba(34, 197, 94, 0.04);
+      }
+      .employee-menu-body {
+        max-height: 292px;
+        overflow: auto;
+        padding: 10px;
+      }
+      .employee-option {
+        width: 100%;
+        border: 0;
+        background: transparent;
+        text-align: left;
+        color: var(--text);
+        padding: 12px 14px;
+        border-radius: 12px;
+        font: inherit;
+        cursor: pointer;
+        line-height: 1.25;
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+      }
+      .employee-option:hover,
+      .employee-option.active {
+        background: rgba(34, 197, 94, 0.10);
+      }
+      .employee-option-indicator {
+        width: 18px;
+        height: 18px;
+        border-radius: 6px;
+        border: 1px solid rgba(34, 197, 94, 0.28);
+        background: #fff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 18px;
+        margin-top: 2px;
+      }
+      .employee-option.active .employee-option-indicator {
+        background: rgba(34, 197, 94, 0.16);
+        border-color: rgba(34, 197, 94, 0.6);
+      }
+      .employee-option-indicator::after {
+        content: "";
+        width: 10px;
+        height: 10px;
+        border-radius: 4px;
+        background: transparent;
+      }
+      .employee-option.active .employee-option-indicator::after {
+        background: #22c55e;
+      }
+      .employee-option-copy {
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+      .employee-option-title {
+        display: block;
+        font-weight: 600;
+      }
+      .employee-option-sub {
+        display: block;
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .employee-empty {
+        padding: 12px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .table-shell {
+        overflow-x: auto;
+        overflow-y: hidden;
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+      }
+      table {
+        width: 100%;
+        min-width: 2350px;
+        border-collapse: collapse;
+        background: #fff;
+      }
+      th, td {
+        border: 1px solid var(--line);
+        vertical-align: top;
+        padding: 8px 10px;
+        text-align: left;
+        font-size: 14px;
+      }
+      th {
+        background: rgba(34, 197, 94, 0.07);
+        font-size: 13px;
+        white-space: nowrap;
+      }
+      td {
+        background: #fff;
+      }
+      .text-cell {
+        white-space: normal;
+        word-break: break-word;
+        line-height: 1.35;
+      }
+      .text-cell.compact {
+        max-width: 220px;
+      }
+      .status-present {
+        font-weight: 700;
+      }
+      .status-holiday {
+        color: #16a34a;
+        font-weight: 700;
+      }
+      .status-muted {
+        color: #94a3b8;
+      }
+      .actions {
+        display: inline-flex;
+        gap: 6px;
+        flex-wrap: nowrap;
+      }
+      .action-btn {
+        min-width: 30px;
+        height: 30px;
+        border-radius: 9px;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: #1f2937;
+        font-size: 13px;
+        line-height: 1;
+        cursor: pointer;
+      }
+      .action-btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      .footnote {
+        padding: 12px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.48);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        z-index: 50;
+      }
+      .modal.is-open {
+        display: flex;
+      }
+      .modal-card {
+        width: min(720px, 100%);
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        box-shadow: 0 24px 60px rgba(15, 23, 42, 0.15);
+        overflow: hidden;
+      }
+      .modal-header {
+        padding: 18px 20px;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .modal-title {
+        margin: 0;
+        font-size: 22px;
+      }
+      .modal-subtitle {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .modal-close {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        min-width: 36px;
+        height: 36px;
+        background: #fff;
+        cursor: pointer;
+      }
+      .modal-body {
+        padding: 20px;
+      }
+      .detail-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .detail-item {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px 14px;
+        background: rgba(34, 197, 94, 0.03);
+      }
+      .detail-label {
+        color: var(--muted);
+        font-size: 13px;
+        margin-bottom: 6px;
+      }
+      .detail-value {
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .map-link {
+        color: #16a34a;
+        text-decoration: none;
+        font-weight: 600;
+      }
+      @media (max-width: 720px) {
+        .page { padding: 12px; }
+        .header, .content { padding-left: 0; padding-right: 0; }
+        .footnote { padding: 12px 0 0; }
+        .header {
+          grid-template-columns: 1fr;
+          align-items: stretch;
+        }
+        .header-status {
+          justify-content: flex-start;
+        }
+        .toolbar {
+          flex-wrap: wrap;
+        }
+        .toolbar-group, .toolbar-group.is-employee { min-width: 100%; }
+        .detail-grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="card">
+        <div class="header">
+          <div class="header-copy">
+            <h1 class="title">View Details</h1>
+            <p class="subtitle" id="subtitle">Loading...</p>
+          </div>
+          <div class="header-toolbar">
+            <div class="toolbar">
+              <div class="toolbar-group is-employee">
+                <label class="toolbar-label" for="employeeInput">Employee</label>
+                <div class="employee-picker">
+                  <input id="employeeInput" class="employee-input" type="text" autocomplete="off" placeholder="Search employee" />
+                  <button id="employeeToggle" class="employee-toggle" type="button" aria-label="Toggle employee list">⌄</button>
+                  <div id="employeeMenu" class="employee-menu" hidden></div>
+                </div>
+              </div>
+              <div class="toolbar-group">
+                <label class="toolbar-label" for="yearSelect">Year</label>
+                <select id="yearSelect" class="toolbar-control"></select>
+              </div>
+              <div class="toolbar-group">
+                <label class="toolbar-label" for="monthSelect">Month</label>
+                <select id="monthSelect" class="toolbar-control"></select>
+              </div>
+            </div>
+          </div>
+          <div class="header-status">
+            <div class="status" id="pageStatus">View only</div>
+          </div>
+        </div>
+        <div class="content">
+          <div class="table-shell">
+            <table id="detailsTable">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>In Time</th>
+                  <th>Out Time</th>
+                  <th>Worked</th>
+                  <th>OT</th>
+                  <th>Debit</th>
+                  <th>Status</th>
+                  <th>Location Status</th>
+                  <th>Distance</th>
+                  <th>GPS Accuracy</th>
+                  <th>Map</th>
+                  <th>Entry Mode</th>
+                  <th>Completed Tasks</th>
+                  <th>Task Notes</th>
+                  <th>Admin Notes</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="footnote">Full month attendance details with quick action previews.</div>
+      </div>
+    </div>
+    <div id="detailsModal" class="modal">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="modalTitle">Details</h2>
+            <div class="modal-subtitle" id="modalSubtitle"></div>
+          </div>
+          <button type="button" class="modal-close" id="modalClose">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="detail-grid" id="modalGrid"></div>
+        </div>
+      </div>
+    </div>
+    <script>
+      const config = ${JSON.stringify(payload)};
+      const subtitleEl = document.getElementById("subtitle");
+      const employeeInput = document.getElementById("employeeInput");
+      const employeeToggle = document.getElementById("employeeToggle");
+      const employeeMenu = document.getElementById("employeeMenu");
+      const yearSelect = document.getElementById("yearSelect");
+      const monthSelect = document.getElementById("monthSelect");
+      const detailsTableBody = document.querySelector("#detailsTable tbody");
+      const detailsModal = document.getElementById("detailsModal");
+      const modalTitle = document.getElementById("modalTitle");
+      const modalSubtitle = document.getElementById("modalSubtitle");
+      const modalGrid = document.getElementById("modalGrid");
+      const modalClose = document.getElementById("modalClose");
+      const MONTH_LABELS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+      let renderedRows = [];
+      let employeeOptions = [];
+      let selectedEmployee = String(config.employee || "").trim();
+      let isEmployeeMenuOpen = false;
+
+      function readWorkspace() {
+        try {
+          const raw = window.localStorage.getItem(config.storageKey);
+          return raw ? JSON.parse(raw) : {};
+        } catch {
+          return {};
+        }
+      }
+
+      function normalizeIso(value) {
+        const text = String(value || "").trim();
+        return /^\\d{4}-\\d{2}-\\d{2}$/.test(text) ? text : "";
+      }
+
+      function escapeHtml(value) {
+        return String(value || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }
+
+      function toText(value, fallback = "-") {
+        const text = String(value || "").trim();
+        return text || fallback;
+      }
+
+      function toHtmlText(value, fallback = "-") {
+        const text = String(value || "").trim();
+        if (!text) {
+          return fallback;
+        }
+        return escapeHtml(text).replace(/\\n/g, "<br />");
+      }
+
+      function formatDateDisplay(value) {
+        const iso = normalizeIso(value);
+        if (!iso) return "-";
+        const [year, month, day] = iso.split("-");
+        return [day, month, year].join("-");
+      }
+
+      function formatTime(value) {
+        const raw = String(value || "").trim();
+        if (!raw) return "-";
+        const match = raw.match(/^(\\d{1,2}):(\\d{2})$/);
+        if (!match) return raw;
+        let hours = Number(match[1]);
+        const minutes = match[2];
+        const suffix = hours >= 12 ? "PM" : "AM";
+        hours = hours % 12 || 12;
+        return hours + ":" + minutes + " " + suffix;
+      }
+
+      function computeWorked(inTime, outTime) {
+        const inMatch = String(inTime || "").trim().match(/^(\\d{1,2}):(\\d{2})$/);
+        const outMatch = String(outTime || "").trim().match(/^(\\d{1,2}):(\\d{2})$/);
+        if (!inMatch || !outMatch) return "-";
+        const inMinutes = Number(inMatch[1]) * 60 + Number(inMatch[2]);
+        const outMinutes = Number(outMatch[1]) * 60 + Number(outMatch[2]);
+        if (!Number.isFinite(inMinutes) || !Number.isFinite(outMinutes) || outMinutes <= inMinutes) return "-";
+        const total = outMinutes - inMinutes;
+        const hours = Math.floor(total / 60);
+        const minutes = total % 60;
+        return minutes ? hours + "h " + minutes + "m" : hours + "h";
+      }
+
+      function formatDistance(value) {
+        const numberValue = Number(value);
+        return Number.isFinite(numberValue) ? Math.round(numberValue) + " m" : "-";
+      }
+
+      function formatAccuracy(value) {
+        const numberValue = Number(value);
+        return Number.isFinite(numberValue) ? Math.round(numberValue) + " m" : "-";
+      }
+
+      function getEntryModeLabel(value) {
+        const raw = String(value || "").trim();
+        const lower = raw.toLowerCase();
+        if (lower.includes("hr self") || lower === "self") return "Self";
+        if (lower.includes("admin") || lower.includes("hr side")) return "Admin";
+        if (lower.includes("user")) return "User";
+        return raw;
+      }
+
+      function getStatusText(row) {
+        const base = String(row && row.status || "").trim() || "-";
+        const modeLabel = getEntryModeLabel(row && row.entryMode);
+        if (!modeLabel || base === "-" || /^holiday$/i.test(base) || /^absent$/i.test(base)) return base;
+        return base + " (" + modeLabel + ")";
+      }
+
+      function getSelectableData(workspace) {
+        const rows = Array.isArray(workspace && workspace.attendance) ? workspace.attendance : [];
+        const employees = Array.from(new Set(rows.map((row) => String(row && row.employee || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+        const years = Array.from(new Set(rows.map((row) => normalizeIso(row && row.date).slice(0, 4)).filter((value) => /^\\d{4}$/.test(value)))).sort((a, b) => b.localeCompare(a));
+        return { employees, years };
+      }
+
+      function getFilteredEmployeeOptions() {
+        const query = String(employeeInput.value || "").trim().toLowerCase();
+        if (!query) {
+          return employeeOptions;
+        }
+        return employeeOptions.filter((option) => option.toLowerCase().includes(query));
+      }
+
+      function closeEmployeeMenu() {
+        isEmployeeMenuOpen = false;
+        employeeMenu.hidden = true;
+      }
+
+      function openEmployeeMenu() {
+        isEmployeeMenuOpen = true;
+        renderEmployeeMenu();
+        employeeMenu.hidden = false;
+      }
+
+      function renderEmployeeMenu() {
+        const options = getFilteredEmployeeOptions();
+        if (!options.length) {
+          employeeMenu.innerHTML = '<div class="employee-menu-title">Employees</div><div class="employee-menu-body"><div class="employee-empty">No employee found.</div></div>';
+          return;
+        }
+        employeeMenu.innerHTML = '<div class="employee-menu-title">Employees</div><div class="employee-menu-body">' + options.map((option) => {
+          const isActive = option === selectedEmployee;
+          return '<button type="button" class="employee-option' + (isActive ? ' active' : '') + '" data-employee="' + escapeHtml(option) + '">' +
+            '<span class="employee-option-indicator"></span>' +
+            '<span class="employee-option-copy"><span class="employee-option-title">' + escapeHtml(option) + '</span><span class="employee-option-sub">' + escapeHtml(option) + '</span></span>' +
+          '</button>';
+        }).join("") + '</div>';
+      }
+
+      function setSelectedEmployee(value) {
+        selectedEmployee = String(value || "").trim();
+        employeeInput.value = selectedEmployee;
+      }
+
+      function fillSelect(select, values, currentValue, labelForValue) {
+        select.innerHTML = values.map((value) => {
+          const selected = String(value) === String(currentValue) ? " selected" : "";
+          const label = labelForValue ? labelForValue(value) : value;
+          return '<option value="' + value + '"' + selected + '>' + escapeHtml(label) + '</option>';
+        }).join("");
+      }
+
+      function buildMonthRows(workspace, employee, year, month) {
+        const attendanceRows = Array.isArray(workspace && workspace.attendance) ? workspace.attendance : [];
+        const holidayRows = Array.isArray(workspace && workspace.holidays) ? workspace.holidays : [];
+        const rowMap = new Map();
+        attendanceRows.forEach((row) => {
+          const iso = normalizeIso(row && row.date);
+          if (!iso) return;
+          if (String(row && row.employee || "").trim() !== employee) return;
+          if (iso.slice(0, 4) !== year || iso.slice(5, 7) !== month) return;
+          if (row && (row.deleted || row.isDeleted)) return;
+          rowMap.set(iso, row);
+        });
+        const holidayMap = new Map();
+        holidayRows.forEach((row) => {
+          const iso = normalizeIso(row && row.date);
+          if (!iso) return;
+          if (iso.slice(0, 4) !== year || iso.slice(5, 7) !== month) return;
+          holidayMap.set(iso, row);
+        });
+        const monthIndex = Number(month) - 1;
+        const lastDay = new Date(Number(year), monthIndex + 1, 0).getDate();
+        const result = [];
+        for (let day = 1; day <= lastDay; day += 1) {
+          const iso = year + "-" + month + "-" + String(day).padStart(2, "0");
+          const existing = rowMap.get(iso);
+          if (existing) {
+            result.push(existing);
+            continue;
+          }
+          const holiday = holidayMap.get(iso);
+          result.push({
+            id: "placeholder-" + employee + "-" + iso,
+            employee,
+            date: iso,
+            inTime: "",
+            outTime: "",
+            workedHours: "",
+            overtimeHours: "",
+            attendanceDebit: "",
+            status: holiday ? "Holiday" : "Absent",
+            holidayOccasion: String(holiday && holiday.occasion || "").trim(),
+            holidayType: String(holiday && holiday.type || "").trim(),
+            completedTasks: "",
+            taskNotes: "",
+            notes: "",
+          });
+        }
+        return result;
+      }
+
+      function openModal(title, subtitle, items) {
+        modalTitle.textContent = title;
+        modalSubtitle.textContent = subtitle;
+        modalGrid.innerHTML = items.map((item) => (
+          '<div class="detail-item"><div class="detail-label">' + escapeHtml(item.label) + '</div><div class="detail-value">' + item.value + '</div></div>'
+        )).join("");
+        detailsModal.classList.add("is-open");
+      }
+
+      function closeModal() {
+        detailsModal.classList.remove("is-open");
+      }
+
+      function renderRows(rows) {
+        renderedRows = rows.slice();
+        if (!rows.length) {
+          detailsTableBody.innerHTML = '<tr><td colspan="16" style="text-align:center;color:#607089;">No entries found for this month.</td></tr>';
+          return;
+        }
+        detailsTableBody.innerHTML = rows.map((row, index) => {
+          const statusText = getStatusText(row);
+          const statusClass = /^present/i.test(statusText)
+            ? "status-present"
+            : /^holiday/i.test(statusText)
+              ? "status-holiday"
+              : statusText === "-" || /^absent/i.test(statusText)
+                ? ""
+                : "status-muted";
+          const hasTasks = Boolean(String(row && row.completedTasks || "").trim() || String(row && row.taskNotes || "").trim());
+          const hasGeo = Boolean(String(row && row.locationStatus || row && row.geoStatus || "").trim() || Number.isFinite(Number(row && row.distanceMeters)) || Number.isFinite(Number(row && row.gpsAccuracy)) || String(row && row.mapUrl || "").trim());
+          const hasNotes = Boolean(String(row && row.notes || "").trim());
+          const hasHistory = Boolean(String(row && row.entryMode || "").trim() || String(row && row.sourceUserId || "").trim() || String(row && row.sourceUserEmail || "").trim());
+          const mapUrl = String(row && row.mapUrl || "").trim();
+          return '<tr>' +
+            '<td>' + escapeHtml(formatDateDisplay(row && row.date)) + '</td>' +
+            '<td>' + escapeHtml(formatTime(row && row.inTime)) + '</td>' +
+            '<td>' + escapeHtml(formatTime(row && row.outTime)) + '</td>' +
+            '<td>' + escapeHtml(toText(row && row.workedHours, computeWorked(row && row.inTime, row && row.outTime))) + '</td>' +
+            '<td>' + escapeHtml(toText(row && row.overtimeHours || row && row.overtime || "")) + '</td>' +
+            '<td>' + escapeHtml(toText(row && (row.attendanceDebit || row.debit || ""))) + '</td>' +
+            '<td class="' + statusClass + '">' + escapeHtml(statusText) + '</td>' +
+            '<td>' + escapeHtml(toText(row && (row.locationStatus || row.geoStatus || ""))) + '</td>' +
+            '<td>' + escapeHtml(formatDistance(row && row.distanceMeters)) + '</td>' +
+            '<td>' + escapeHtml(formatAccuracy(row && row.gpsAccuracy)) + '</td>' +
+            '<td>' + (mapUrl ? '<a class="map-link" href="' + escapeHtml(mapUrl) + '" target="_blank" rel="noreferrer">View Map</a>' : '-') + '</td>' +
+            '<td>' + escapeHtml(toText(getEntryModeLabel(row && row.entryMode))) + '</td>' +
+            '<td class="text-cell compact">' + toHtmlText(row && row.completedTasks, "-") + '</td>' +
+            '<td class="text-cell compact">' + toHtmlText(row && row.taskNotes, "-") + '</td>' +
+            '<td class="text-cell compact">' + toHtmlText(row && row.notes, "-") + '</td>' +
+            '<td><div class="actions">' +
+              '<button type="button" class="action-btn" data-action="view" data-index="' + index + '" title="View Details">👁</button>' +
+              '<button type="button" class="action-btn" data-action="tasks" data-index="' + index + '" title="Tasks"' + (hasTasks ? '' : ' disabled') + '>≣</button>' +
+              '<button type="button" class="action-btn" data-action="notes" data-index="' + index + '" title="Notes"' + (hasNotes ? '' : ' disabled') + '>💬</button>' +
+              '<button type="button" class="action-btn" data-action="history" data-index="' + index + '" title="History"' + (hasHistory ? '' : ' disabled') + '>🕘</button>' +
+              '<button type="button" class="action-btn" data-action="geo" data-index="' + index + '" title="Geo Details"' + (hasGeo ? '' : ' disabled') + '>◎</button>' +
+              '<button type="button" class="action-btn" data-action="edit" data-index="' + index + '" title="Edit Preview">✎</button>' +
+              '<button type="button" class="action-btn" data-action="delete" data-index="' + index + '" title="Delete Preview">🗑</button>' +
+            '</div></td>' +
+          '</tr>';
+        }).join("");
+      }
+
+      function renderPage() {
+        const workspace = readWorkspace();
+        const selection = {
+          employee: String(selectedEmployee || config.employee || "").trim(),
+          year: String(yearSelect.value || config.year || "").trim(),
+          month: String(monthSelect.value || config.month || "").trim(),
+        };
+        const rows = buildMonthRows(workspace, selection.employee, selection.year, selection.month);
+        subtitleEl.textContent = selection.employee + " • " + selection.year + "-" + selection.month;
+        renderRows(rows);
+      }
+
+      function handleActionClick(event) {
+        const button = event.target.closest("[data-action]");
+        if (!button) return;
+        const index = Number(button.getAttribute("data-index"));
+        const action = String(button.getAttribute("data-action") || "");
+        const row = renderedRows[index];
+        if (!row) return;
+        const subtitle = formatDateDisplay(row.date) + " • " + toText(row.employee);
+        if (action === "view") {
+          openModal("Attendance Details", subtitle, [
+            { label: "Date", value: escapeHtml(formatDateDisplay(row.date)) },
+            { label: "Employee", value: escapeHtml(toText(row.employee)) },
+            { label: "In Time", value: escapeHtml(formatTime(row.inTime)) },
+            { label: "Out Time", value: escapeHtml(formatTime(row.outTime)) },
+            { label: "Worked", value: escapeHtml(toText(row.workedHours, computeWorked(row.inTime, row.outTime))) },
+            { label: "OT", value: escapeHtml(toText(row.overtimeHours || row.overtime || "")) },
+            { label: "Debit", value: escapeHtml(toText(row.attendanceDebit || row.debit || "")) },
+            { label: "Status", value: escapeHtml(getStatusText(row)) },
+          ]);
+          return;
+        }
+        if (action === "tasks") {
+          openModal("Task Details", subtitle, [
+            { label: "Completed Tasks", value: escapeHtml(String(row.completedTasks || "").trim() || "-").replace(/\\n/g, "<br />") },
+            { label: "Task Notes", value: escapeHtml(String(row.taskNotes || "").trim() || "-").replace(/\\n/g, "<br />") },
+          ]);
+          return;
+        }
+        if (action === "notes") {
+          openModal("Admin Notes", subtitle, [
+            { label: "Admin Notes", value: escapeHtml(String(row.notes || "").trim() || "-").replace(/\\n/g, "<br />") },
+          ]);
+          return;
+        }
+        if (action === "geo") {
+          const mapUrl = String(row.mapUrl || "").trim();
+          openModal("Geo Details", subtitle, [
+            { label: "Location Status", value: escapeHtml(String(row.locationStatus || row.geoStatus || "").trim() || "-") },
+            { label: "Distance", value: escapeHtml(formatDistance(row.distanceMeters)) },
+            { label: "GPS Accuracy", value: escapeHtml(Number.isFinite(Number(row.gpsAccuracy)) ? Math.round(Number(row.gpsAccuracy)) + " m" : "-") },
+            { label: "Map", value: mapUrl ? '<a class="map-link" href="' + escapeHtml(mapUrl) + '" target="_blank" rel="noreferrer">Open Map</a>' : "-" },
+          ]);
+          return;
+        }
+        if (action === "history") {
+          openModal("Attendance History", subtitle, [
+            { label: "Entry Mode", value: escapeHtml(toText(getEntryModeLabel(row.entryMode))) },
+            { label: "Source User ID", value: escapeHtml(toText(row.sourceUserId || row.userId || "")) },
+            { label: "Source User Email", value: escapeHtml(toText(row.sourceUserEmail || row.userEmail || "")) },
+            { label: "Last Updated", value: escapeHtml(toText(row.updatedAt || row.updated_at || "")) },
+          ]);
+          return;
+        }
+        if (action === "edit") {
+          openModal("Edit Preview", subtitle, [
+            { label: "Employee", value: escapeHtml(toText(row.employee)) },
+            { label: "Date", value: escapeHtml(formatDateDisplay(row.date)) },
+            { label: "Entry Mode", value: escapeHtml(toText(getEntryModeLabel(row.entryMode))) },
+            { label: "Notes", value: toHtmlText(row.notes, "-") },
+          ]);
+          return;
+        }
+        if (action === "delete") {
+          openModal("Delete Preview", subtitle, [
+            { label: "Row ID", value: escapeHtml(toText(row.id || "")) },
+            { label: "Status", value: escapeHtml("Delete action is available in the main attendance page.") },
+          ]);
+        }
+      }
+
+      const workspace = readWorkspace();
+      const selectable = getSelectableData(workspace);
+      employeeOptions = selectable.employees.slice();
+      if (!selectedEmployee || !employeeOptions.includes(selectedEmployee)) {
+        selectedEmployee = employeeOptions[0] || selectedEmployee || "";
+      }
+      setSelectedEmployee(selectedEmployee);
+      fillSelect(yearSelect, selectable.years, config.year);
+      fillSelect(monthSelect, Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0")), config.month, (value) => MONTH_LABELS[Number(value) - 1] || value);
+      employeeToggle.addEventListener("click", () => {
+        if (isEmployeeMenuOpen) {
+          closeEmployeeMenu();
+        } else {
+          openEmployeeMenu();
+        }
+      });
+      employeeInput.addEventListener("focus", () => {
+        openEmployeeMenu();
+      });
+      employeeInput.addEventListener("input", () => {
+        if (!isEmployeeMenuOpen) {
+          openEmployeeMenu();
+          return;
+        }
+        renderEmployeeMenu();
+      });
+      employeeMenu.addEventListener("click", (event) => {
+        const option = event.target.closest("[data-employee]");
+        if (!option) return;
+        setSelectedEmployee(option.getAttribute("data-employee") || "");
+        closeEmployeeMenu();
+        renderPage();
+      });
+      document.addEventListener("click", (event) => {
+        if (!employeeMenu.contains(event.target) && !employeeInput.contains(event.target) && !employeeToggle.contains(event.target)) {
+          closeEmployeeMenu();
+        }
+      });
+      employeeInput.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          closeEmployeeMenu();
+        }
+      });
+      yearSelect.addEventListener("change", renderPage);
+      monthSelect.addEventListener("change", renderPage);
+      detailsTableBody.addEventListener("click", handleActionClick);
+      modalClose.addEventListener("click", closeModal);
+      detailsModal.addEventListener("click", (event) => {
+        if (event.target === detailsModal) {
+          closeModal();
+        }
+      });
+      renderPage();
+    <\/script>
+  </body>
+</html>`;
+    openHtmlDocumentInBlankPage(html, () => {
+      setHrFormNotice("Popup blocked. Please allow popups for this site.");
+    });
+  }
+
   function openAttendanceTaskBlankPage() {
     const rowId = String(attendanceTaskModal.rowId || "").trim();
     const employee = String(attendanceTaskModal.employee || "").trim();
@@ -27354,20 +28320,21 @@ export function HrManagementModule({
           linear-gradient(180deg, #fbfefb 0%, var(--bg) 100%);
       }
       .page {
-        max-width: 1280px;
-        margin: 0 auto;
-        padding: 24px;
+        width: 100%;
+        max-width: none;
+        margin: 0;
+        padding: 18px 20px 24px;
       }
       .card {
-        background: var(--card);
-        border: 1px solid var(--line);
-        border-radius: 18px;
-        box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08);
-        overflow: hidden;
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        overflow: visible;
       }
       .header {
-        padding: 24px;
-        border-bottom: 1px solid var(--line);
+        padding: 8px 0 14px;
+        border-bottom: 1px solid var(--line-soft);
         display: flex;
         align-items: flex-start;
         justify-content: space-between;
@@ -27396,7 +28363,7 @@ export function HrManagementModule({
         white-space: nowrap;
       }
       .content {
-        padding: 24px;
+        padding: 14px 0 0;
       }
       .toolbar {
         display: flex;
@@ -27565,29 +28532,32 @@ export function HrManagementModule({
         font-size: 14px;
       }
       .table-shell {
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        overflow: hidden;
-        background: #fff;
+        overflow-x: auto;
+        overflow-y: hidden;
+        background: transparent;
+        border: 0;
+        border-radius: 0;
       }
       table {
         width: 100%;
+        min-width: 1200px;
         border-collapse: collapse;
+        background: #fff;
       }
       th, td {
         border: 1px solid var(--line);
         vertical-align: top;
-        padding: 12px 14px;
+        padding: 8px 10px;
       }
       th {
         background: rgba(34, 197, 94, 0.07);
         text-align: left;
-        font-size: 14px;
+        font-size: 13px;
         white-space: nowrap;
       }
       td {
         background: #fff;
-        font-size: 15px;
+        font-size: 14px;
       }
       .editable {
         min-height: 44px;
@@ -27615,14 +28585,14 @@ export function HrManagementModule({
         color: #94a3b8;
       }
       .footnote {
-        padding: 0 24px 24px;
+        padding: 12px 0 0;
         color: var(--muted);
         font-size: 13px;
       }
       @media (max-width: 720px) {
         .page { padding: 12px; }
-        .header, .content { padding: 16px; }
-        .footnote { padding: 0 16px 16px; }
+        .header, .content { padding-left: 0; padding-right: 0; }
+        .footnote { padding: 12px 0 0; }
         .header { flex-direction: column; }
         .toolbar-group,
         .toolbar-group.is-employee { min-width: 100%; }
@@ -27663,7 +28633,6 @@ export function HrManagementModule({
               <thead>
                 <tr>
                   <th style="width: 150px;">Date</th>
-                  <th style="width: 220px;">Employee Name</th>
                   <th>Completed Task Data</th>
                   <th>Notes Data</th>
                 </tr>
@@ -27797,14 +28766,13 @@ export function HrManagementModule({
 
       function renderTableRows(rows) {
         if (!rows.length) {
-          detailsTableBody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#607089;">No entries found for this month.</td></tr>';
+          detailsTableBody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#607089;">No entries found for this month.</td></tr>';
           return;
         }
         detailsTableBody.innerHTML = rows.map((row) => {
           const notesValue = String(row && (row.taskNotes || row.notes) || "").trim();
           return '<tr data-row-id="' + String(row && row.id || "") + '">' +
             '<td>' + toText(row && row.date) + '</td>' +
-            '<td>' + toText(row && row.employee) + '</td>' +
             '<td>' + renderEditableCell("completedTasks", row && row.completedTasks) + '</td>' +
             '<td>' + renderEditableCell("taskNotes", notesValue) + '</td>' +
           '</tr>';
@@ -27873,7 +28841,7 @@ export function HrManagementModule({
         const selectedRow = findRow(workspace);
         if (!selectedRow) {
           subtitleEl.textContent = "Attendance row not found";
-          detailsTableBody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#607089;">Attendance row not found.</td></tr>';
+          detailsTableBody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#607089;">Attendance row not found.</td></tr>';
           footnoteEl.textContent = "";
           setStatus("Record not found");
           return;
@@ -29988,8 +30956,8 @@ export function HrManagementModule({
               </div>
             </div>
           ) : null}
-          actionHeaderStyle={activeTab === "attendance" && hasHrFullAccess ? { minWidth: "260px", whiteSpace: "nowrap" } : null}
-          actionCellStyle={activeTab === "attendance" && hasHrFullAccess ? { minWidth: "260px", whiteSpace: "nowrap" } : null}
+          actionHeaderStyle={activeTab === "attendance" && hasHrFullAccess ? { minWidth: "150px", width: "150px", whiteSpace: "nowrap" } : null}
+          actionCellStyle={activeTab === "attendance" && hasHrFullAccess ? { minWidth: "150px", width: "150px", whiteSpace: "normal" } : null}
           searchPlaceholder={`Search ${config.label.toLowerCase()}`}
           noRowsText={
             activeTab === "attendance" && !hasHrFullAccess
@@ -29999,7 +30967,7 @@ export function HrManagementModule({
                 : `No ${config.label.toLowerCase()} yet.`
           }
           searchBy={(row) => config.columns.map((column) => row[column.key] || "").join(" ")}
-          renderCells={(row) => config.columns.map((column) => {
+          renderCells={(row) => hrTableColumns.map((column) => {
             if (activeTab === "attendance" && column.key === "employee") {
               const employeeName = String(row[column.key] || "").trim();
               if (!employeeName) {
@@ -30168,13 +31136,16 @@ export function HrManagementModule({
                     return null;
                   }
 	                  return (
-	                    <div className="d-inline-flex gap-2 flex-nowrap justify-content-end">
+	                    <div
+                        className="d-inline-grid gap-2 justify-content-end"
+                        style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}
+                      >
 	                      <button
 	                        type="button"
 	                        className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
-	                        data-wz-tooltip="Open task details"
-	                        onClick={() => openAttendanceTaskModal(row)}
-	                        aria-label="Open task details"
+	                        data-wz-tooltip="View Details"
+	                        onClick={() => openAttendanceDetailsPage(row)}
+	                        aria-label="View Details"
 	                      >
 	                        <i className="bi bi-eye" aria-hidden="true" />
 	                      </button>
@@ -30202,15 +31173,18 @@ export function HrManagementModule({
 	                }
 
                 return (
-                  <div className="d-inline-flex gap-2 flex-nowrap">
+                  <div
+                    className="d-inline-grid gap-2"
+                    style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}
+                  >
                     {!isDeletedRow ? (
                       <>
 	                        <button
 	                          type="button"
 	                          className="btn btn-sm btn-outline-light saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
-	                          data-wz-tooltip="Open task details"
-	                          aria-label="Open task details"
-	                          onClick={() => openAttendanceTaskModal(row)}
+	                          data-wz-tooltip="View Details"
+	                          aria-label="View Details"
+	                          onClick={() => openAttendanceDetailsPage(row)}
 	                        >
 	                          <i className="bi bi-eye" aria-hidden="true" />
 	                        </button>

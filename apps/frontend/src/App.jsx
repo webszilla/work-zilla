@@ -73,6 +73,7 @@ import AiChatbotAgentsPage from "./pages/AiChatbotAgentsPage.jsx";
 import AiChatbotDashboardPage from "./pages/AiChatbotDashboardPage.jsx";
 import AiChatbotHistoryPage from "./pages/AiChatbotHistoryPage.jsx";
 import AiChatbotChatSettingsPage from "./pages/AiChatbotChatSettingsPage.jsx";
+import BusinessAutopilotAssistantPage from "./pages/BusinessAutopilotAssistantPage.jsx";
 import WhatsappAutomationCompanyProfilePage from "./pages/WhatsappAutomationCompanyProfilePage.jsx";
 import WhatsappAutomationDashboardPage from "./pages/WhatsappAutomationDashboardPage.jsx";
 import WhatsappAutomationOverviewPage from "./pages/WhatsappAutomationOverviewPage.jsx";
@@ -672,6 +673,7 @@ function AppShell({ state, productPrefix, productSlug }) {
       }
     : location;
   const normalizedPathname = normalizedLocation.pathname || "/";
+  const isBusinessAutopilotAssistantRoute = normalizedPathname === "/assistant" || normalizedPathname.startsWith("/assistant/");
   const [autopilotAccessRecord, setAutopilotAccessRecord] = useState(null);
   const [autopilotAccessResolved, setAutopilotAccessResolved] = useState(false);
 
@@ -1236,8 +1238,9 @@ function AppShell({ state, productPrefix, productSlug }) {
           : effectiveSidebarMenuStyle === "icons"
             ? "sidebar-style-icons"
             : "sidebar-style-default"
-      }`}
+      } ${isBusinessAutopilotAssistantRoute ? "wz-admin-shell--assistant-fullscreen" : ""}`}
     >
+      {!isBusinessAutopilotAssistantRoute ? (
       <aside className="sidebar wz-sidebar">
         <div className="wz-sidebar__inner">
           <div className="wz-brand-card">
@@ -1446,6 +1449,7 @@ function AppShell({ state, productPrefix, productSlug }) {
           </div>
         </div>
       </aside>
+      ) : null}
 
       <div className="wz-workspace">
         {showTopbarProductSection ? (
@@ -1585,6 +1589,25 @@ function AppShell({ state, productPrefix, productSlug }) {
                 ? <DigitalAutomationOverviewPage subscriptions={state.subscriptions} />
                 : <DashboardPage productSlug={productSlug} subscriptions={state.subscriptions} />
             }
+          />
+          <Route
+            path="/assistant"
+            element={renderRouteElement(
+              <BusinessAutopilotAssistantPage />,
+              {
+                pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
+                allowed:
+                  isBusinessAutopilot &&
+                  businessAutopilotHasActiveSubscription &&
+                  (
+                    hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "dashboard", businessAutopilotIsAdmin)
+                    || hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "crm", businessAutopilotIsAdmin)
+                    || hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "hr", businessAutopilotIsAdmin)
+                    || hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "accounts", businessAutopilotIsAdmin)
+                    || hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "billing", businessAutopilotIsAdmin)
+                  ),
+              }
+            )}
           />
           <Route
             path="/crm"
@@ -2127,11 +2150,10 @@ function AppShell({ state, productPrefix, productSlug }) {
               <Route path="*" element={<Navigate to={withBase("/")} replace />} />
             </Routes>
           </div>
-          {isBusinessAutopilot && !isDealer && !isSaasAdminRoute && autopilotAccessResolved ? (
+          {isBusinessAutopilot && !isDealer && !isSaasAdminRoute && autopilotAccessResolved && !isBusinessAutopilotAssistantRoute ? (
             <BusinessAutopilotAssistantWidget
               enabled={hasBusinessAutopilotSectionAccess(autopilotAccessRecord, autopilotCurrentSectionKey || "dashboard", businessAutopilotIsAdmin)}
-              isAdmin={isAdmin}
-              subscriptions={state.subscriptions}
+              currentSectionKey={autopilotCurrentSectionKey || "dashboard"}
             />
           ) : null}
           {isSaasAdminRoute && isSaasAdmin ? <SaasAdminAIChatWidget /> : null}

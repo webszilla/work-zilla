@@ -23,6 +23,9 @@ const PROFILE_OPENAI_DEFAULT_FORM = {
   model: "gpt-4o-mini",
   agent_name: "Work Zilla AI Assistant",
   enabled: false,
+  voice_gender: "female",
+  wake_word_enabled: false,
+  wake_phrase: "",
 };
 const WHATSAPP_DEPARTMENTS = ["HR", "Sales", "Accounts", "Support", "Projects", "Operations", "Client"];
 const WHATSAPP_COMPANY_EVENT_OPTIONS = [
@@ -304,7 +307,7 @@ export default function ProfilePage() {
     }
     const params = new URLSearchParams(window.location.search);
     const requestedTab = String(params.get("tab") || "").trim();
-    const allowedTabs = new Set(["profile", "companyProfile", "uiTheme", "backup", "referral", "whatsappApi", "openAiApi", "security", "tickets"]);
+    const allowedTabs = new Set(["profile", "companyProfile", "uiTheme", "backup", "referral", "whatsappApi", "openAiApi", "aiOfficeAssistant", "security", "tickets"]);
     return allowedTabs.has(requestedTab) ? requestedTab : "profile";
   })();
   const [state, setState] = useState(emptyState);
@@ -967,7 +970,11 @@ export default function ProfilePage() {
           api_key: openAiState.form.api_key,
           account_email: openAiState.form.account_email,
           model: openAiState.form.model,
+          agent_name: openAiState.form.agent_name,
           enabled: Boolean(openAiState.form.enabled),
+          voice_gender: openAiState.form.voice_gender,
+          wake_word_enabled: Boolean(openAiState.form.wake_word_enabled),
+          wake_phrase: openAiState.form.wake_phrase,
         }),
       });
       setOpenAiState((prev) => ({
@@ -983,6 +990,9 @@ export default function ProfilePage() {
           model: response?.model || prev.form.model,
           agent_name: response?.agent_name || prev.form.agent_name,
           enabled: Boolean(response?.enabled),
+          voice_gender: response?.voice_gender || prev.form.voice_gender,
+          wake_word_enabled: Boolean(response?.wake_word_enabled),
+          wake_phrase: response?.wake_phrase || prev.form.wake_phrase,
         },
       }));
     } catch (error) {
@@ -1378,6 +1388,9 @@ export default function ProfilePage() {
             model: response?.model || "gpt-4o-mini",
             agent_name: response?.agent_name || "Work Zilla AI Assistant",
             enabled: Boolean(response?.enabled),
+            voice_gender: response?.voice_gender || "female",
+            wake_word_enabled: Boolean(response?.wake_word_enabled),
+            wake_phrase: response?.wake_phrase || "",
           },
         });
       } catch (error) {
@@ -1566,6 +1579,15 @@ export default function ProfilePage() {
               onClick={() => setProfileTopTab("openAiApi")}
             >
               Open AI API
+            </button>
+          ) : null}
+          {isBusinessAutopilotOrgAdmin ? (
+            <button
+              type="button"
+              className={`btn btn-sm ${profileTopTab === "aiOfficeAssistant" ? "btn-primary" : "btn-outline-light"}`}
+              onClick={() => setProfileTopTab("aiOfficeAssistant")}
+            >
+              AI Office Assistant
             </button>
           ) : null}
           {isOrgAdminProfile && data.org?.id ? (
@@ -2307,10 +2329,13 @@ export default function ProfilePage() {
                 <input
                   className="form-control"
                   value={openAiState.form.agent_name}
-                  readOnly
-                  disabled
+                  onChange={(event) => setOpenAiState((prev) => ({
+                    ...prev,
+                    form: { ...prev.form, agent_name: event.target.value },
+                  }))}
+                  placeholder="Enter assistant name"
                 />
-                <div className="form-text">This assistant name is fixed for all organizations.</div>
+                <div className="form-text">This name appears in the Business Autopilot chat widget and voice assistant.</div>
               </div>
               <div className="col-12 col-md-6">
                 <label className="form-label">Model</label>
@@ -2381,6 +2406,124 @@ export default function ProfilePage() {
                 disabled={openAiState.loading || openAiTestState.loading}
               >
                 {openAiTestState.loading ? "Testing..." : "Test Connection"}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+      ) : null}
+
+      {profileTopTab === "aiOfficeAssistant" && isBusinessAutopilotOrgAdmin ? (
+      <div className="mt-3">
+        <div className="card p-3">
+          <div className="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
+            <div>
+              <h5 className="mb-1">AI Office Assistant</h5>
+              <p className="text-secondary mb-0">
+                Set the chatbot name, choose male or female reply voice, and turn on wake-word listening when the chat box is open.
+              </p>
+            </div>
+            <span className={`badge ${openAiState.form.wake_word_enabled ? "bg-success" : "bg-secondary"}`}>
+              {openAiState.form.wake_word_enabled ? "Wake Word On" : "Wake Word Off"}
+            </span>
+          </div>
+          {openAiState.error ? <div className="alert alert-danger py-2">{openAiState.error}</div> : null}
+          {openAiState.success ? <div className="alert alert-success py-2">{openAiState.success}</div> : null}
+          <form className="d-flex flex-column gap-3" onSubmit={handleSaveOpenAiSettings}>
+            <div className="row g-3">
+              <div className="col-12 col-md-6">
+                <label className="form-label">Chat Bot Name</label>
+                <input
+                  className="form-control"
+                  value={openAiState.form.agent_name}
+                  onChange={(event) => setOpenAiState((prev) => ({
+                    ...prev,
+                    form: { ...prev.form, agent_name: event.target.value },
+                  }))}
+                  placeholder="Enter assistant name"
+                  maxLength={120}
+                />
+                <div className="form-text">Example: if the name is `Maya`, the wake phrase can be `Hey Maya`.</div>
+              </div>
+              <div className="col-12 col-md-6">
+                <label className="form-label">Reply Voice</label>
+                <div className="d-flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${openAiState.form.voice_gender === "female" ? "btn-primary" : "btn-outline-light"}`}
+                    onClick={() => setOpenAiState((prev) => ({
+                      ...prev,
+                      form: { ...prev.form, voice_gender: "female" },
+                    }))}
+                  >
+                    Female Voice
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${openAiState.form.voice_gender === "male" ? "btn-primary" : "btn-outline-light"}`}
+                    onClick={() => setOpenAiState((prev) => ({
+                      ...prev,
+                      form: { ...prev.form, voice_gender: "male" },
+                    }))}
+                  >
+                    Male Voice
+                  </button>
+                </div>
+                <div className="form-text">This controls AI voice reply tone for chat playback.</div>
+              </div>
+              <div className="col-12">
+                <div className="form-check">
+                  <input
+                    id="ba-openai-wake-word-enabled"
+                    className="form-check-input"
+                    type="checkbox"
+                    checked={Boolean(openAiState.form.wake_word_enabled)}
+                    onChange={(event) => setOpenAiState((prev) => ({
+                      ...prev,
+                      form: { ...prev.form, wake_word_enabled: event.target.checked },
+                    }))}
+                  />
+                  <label className="form-check-label" htmlFor="ba-openai-wake-word-enabled">
+                    Enable wake word when the chat box is open
+                  </label>
+                </div>
+                <div className="form-text">
+                  When enabled, the assistant listens for the wake phrase only while the chat window is open, then starts recording automatically.
+                </div>
+              </div>
+              <div className="col-12 col-md-6">
+                <label className="form-label">Wake Phrase</label>
+                <input
+                  className="form-control"
+                  value={openAiState.form.wake_phrase}
+                  onChange={(event) => setOpenAiState((prev) => ({
+                    ...prev,
+                    form: { ...prev.form, wake_phrase: event.target.value },
+                  }))}
+                  placeholder={`Hey ${String(openAiState.form.agent_name || "Assistant").trim() || "Assistant"}`}
+                  maxLength={120}
+                />
+              </div>
+              <div className="col-12 col-md-6">
+                <label className="form-label">Auto Stop Rule</label>
+                <input
+                  className="form-control"
+                  value="After 5 seconds silence"
+                  readOnly
+                />
+                <div className="form-text">Once the wake phrase is detected, recording stops automatically if you keep a 5-second gap.</div>
+              </div>
+            </div>
+            <div className="d-flex flex-wrap gap-2">
+              <button className="btn btn-primary btn-sm" type="submit" disabled={openAiState.loading}>
+                {openAiState.loading ? "Saving..." : "Save AI Office Assistant"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline-light btn-sm"
+                onClick={() => setProfileTopTab("openAiApi")}
+              >
+                Open AI Connection
               </button>
             </div>
           </form>

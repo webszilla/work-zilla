@@ -1245,6 +1245,24 @@ html[data-theme="light"] .wz-attendance-alert-text{
 .wz-data-table-wrap[data-wz-overflow-x="true"]{
   overflow-x:auto;
 }
+.wz-attendance-details-table th,
+.wz-attendance-details-table td{
+  white-space: normal;
+  min-width: 120px;
+}
+.wz-attendance-details-table th:nth-child(1),
+.wz-attendance-details-table td:nth-child(1),
+.wz-attendance-details-table th:nth-child(2),
+.wz-attendance-details-table td:nth-child(2),
+.wz-attendance-details-table th:nth-child(3),
+.wz-attendance-details-table td:nth-child(3),
+.wz-attendance-details-table th:nth-child(4),
+.wz-attendance-details-table td:nth-child(4),
+.wz-attendance-details-table th:nth-child(5),
+.wz-attendance-details-table td:nth-child(5){
+  white-space: nowrap;
+  min-width: 110px;
+}
 .wz-data-table{
   table-layout:auto !important;
   min-width: 980px;

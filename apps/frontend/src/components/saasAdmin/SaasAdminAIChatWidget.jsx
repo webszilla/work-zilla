@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import AiAvatar from "../chat/AiAvatar.jsx";
 import { getAiEmotionEmoji, getAiEmotionFromText } from "../chat/aiAvatarConfig.js";
+import PushToTalkButton from "../chat/PushToTalkButton.jsx";
+import { useBrowserSpeechInput } from "../chat/useBrowserSpeechInput.js";
 import {
   fetchAiArchitectHistory,
   fetchAiArchitectStatus,
@@ -53,6 +55,7 @@ export default function SaasAdminAIChatWidget() {
   const [prompt, setPrompt] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [voiceDraft, setVoiceDraft] = useState("");
   const listRef = useRef(null);
 
   const sessionId = useMemo(() => (typeof window === "undefined" ? "" : getSessionId()), []);
@@ -128,12 +131,13 @@ export default function SaasAdminAIChatWidget() {
   const budgetExceeded = Boolean(settings.usage?.exceeded && settings.usage?.hard_stop_enabled);
   const canChat = settings.enabled && settings.configured && !budgetExceeded;
 
-  const send = async () => {
-    const message = String(prompt || "").trim();
+  const send = async (overrideMessage = "") => {
+    const message = String(overrideMessage || prompt || "").trim();
     if (!message || sending) return;
     setError("");
     setSending(true);
     setPrompt("");
+    setVoiceDraft("");
     setMessages((prev) => [...prev, { role: "user", content: message, id: `local-${Date.now()}` }]);
     try {
       const result = await sendAiArchitectChat({ message, session_id: sessionId });
@@ -160,6 +164,22 @@ export default function SaasAdminAIChatWidget() {
     }
   };
 
+  const speech = useBrowserSpeechInput({
+    onInterimText: (text) => {
+      setVoiceDraft(text);
+      setPrompt(text);
+    },
+    onFinalText: (text) => {
+      const finalText = String(text || "").trim();
+      setVoiceDraft("");
+      if (!finalText || !canChat || sending) {
+        return;
+      }
+      setPrompt(finalText);
+      send(finalText);
+    },
+  });
+
   if (settings.loading) {
     return null;
   }
@@ -170,6 +190,13 @@ export default function SaasAdminAIChatWidget() {
   const warningAt = monthBudget ? (monthBudget * warningPercent) / 100 : 0;
   const showWarning = Boolean(monthBudget && monthCost >= warningAt && monthCost < monthBudget);
   const usageLine = monthBudget ? `This Month: ₹${monthCost.toFixed(2)} / ₹${monthBudget.toFixed(0)}` : "This Month: ₹0 / ₹0";
+  const voiceStatusNote = speech.error
+    ? `Voice input unavailable: ${speech.error}.`
+    : speech.listening
+      ? "Listening... speak now."
+      : voiceDraft
+        ? `Heard: ${voiceDraft}`
+        : "";
 
   return (
     <div className="ba-assistant saas-admin-assistant" aria-live="polite">
@@ -289,10 +316,14 @@ export default function SaasAdminAIChatWidget() {
           {error ? <div className="alert alert-danger m-3 mb-0">{error}</div> : null}
 
           <div className="ba-assistant__composer">
+            {voiceStatusNote ? <div className="ba-assistant__setup-note">{voiceStatusNote}</div> : null}
             <input
               className="form-control"
               value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
+              onChange={(e) => {
+                setVoiceDraft("");
+                setPrompt(e.target.value);
+              }}
               placeholder={canChat ? "Type a message…" : "Configure AI Architect first…"}
               disabled={!canChat || sending}
               onKeyDown={(e) => {
@@ -303,10 +334,17 @@ export default function SaasAdminAIChatWidget() {
               }}
             />
             <div className="ba-assistant__composer-actions">
+              <PushToTalkButton
+                supported={speech.supported}
+                listening={speech.listening}
+                disabled={!canChat || sending}
+                onStart={() => speech.startListening()}
+                onStop={() => speech.stopListening()}
+              />
               <button
                 type="button"
                 className="ba-assistant__send-btn"
-                onClick={send}
+                onClick={() => send()}
                 disabled={!canChat || sending || !String(prompt || "").trim()}
                 aria-label="Send"
               >

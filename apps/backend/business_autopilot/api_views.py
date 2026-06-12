@@ -30,8 +30,9 @@ from reportlab.pdfgen import canvas
 
 from apps.backend.common_auth.models import User
 from apps.backend.brand.models import SiteBrandSettings
+from apps.backend.core_platform.assistant_registry import build_assistant_training_context, get_assistant_product_profile
 from apps.backend.products.models import Product
-from core.models import BillingProfile, Organization, OrganizationSettings, UserProductAccess, UserProfile, Subscription as OrgSubscription, log_admin_activity
+from core.models import BillingProfile, Organization, OrganizationSettings, UserProductAccess, UserProfile, Subscription as OrgSubscription, BusinessAutopilotChatHistory, log_admin_activity
 from core.email_utils import send_templated_email
 from core.notification_emails import mark_email_verified
 
@@ -120,6 +121,8 @@ ERP_MODULE_SLUG_SET = set(MODULE_PATHS.keys())
 BUSINESS_AUTOPILOT_PRODUCT_SLUG = "business-autopilot-erp"
 BUSINESS_AUTOPILOT_PRODUCT_SLUG_ALIASES = {"business-autopilot-erp", "business-autopilot"}
 OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
+OPENAI_AUDIO_TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcriptions"
+OPENAI_AUDIO_SPEECH_URL = "https://api.openai.com/v1/audio/speech"
 DEFAULT_BA_OPENAI_AGENT_NAME = "Work Zilla AI Assistant"
 PUBLIC_LOGIN_URL = "https://getworkzilla.com/auth/login/"
 SUBSCRIPTION_STATUS_OPTIONS = ("Active", "Expired", "Cancelled")
@@ -1111,6 +1114,9 @@ def _hr_section_access_level(user: User, org: Organization, section_key: str = "
 
 
 def _serialize_openai_settings(settings_obj: OrganizationSettings):
+    voice_gender = str(getattr(settings_obj, "business_autopilot_ai_voice_gender", "") or "female").strip().lower()
+    if voice_gender not in {"male", "female"}:
+        voice_gender = "female"
     return {
         "enabled": bool(settings_obj.business_autopilot_openai_enabled),
         "agent_name": str(settings_obj.business_autopilot_ai_agent_name or DEFAULT_BA_OPENAI_AGENT_NAME).strip() or DEFAULT_BA_OPENAI_AGENT_NAME,
@@ -1118,7 +1124,1242 @@ def _serialize_openai_settings(settings_obj: OrganizationSettings):
         "model": str(settings_obj.business_autopilot_openai_model or "gpt-4o-mini").strip() or "gpt-4o-mini",
         "has_api_key": bool(str(settings_obj.business_autopilot_openai_api_key or "").strip()),
         "masked_api_key": _mask_secret(settings_obj.business_autopilot_openai_api_key),
+        "voice_gender": voice_gender,
+        "wake_word_enabled": bool(getattr(settings_obj, "business_autopilot_ai_wake_word_enabled", False)),
+        "wake_phrase": str(getattr(settings_obj, "business_autopilot_ai_wake_phrase", "") or "").strip(),
+        "silence_gap_seconds": 5,
     }
+
+
+def _business_autopilot_ai_scope(user: User, org: Organization):
+    membership = _get_org_membership(user, org)
+    user_type = str(getattr(membership, "user_type", "") or "").strip() or OrganizationUser.USER_TYPE_FULL
+    allowed_sections = set(_user_type_allowed_sections(user_type, org=org))
+    is_admin = _crm_is_admin(user, org)
+    if is_admin:
+        user_type = OrganizationUser.USER_TYPE_FULL
+        allowed_sections.update({"crm", "hr", "accounts", "billing", "projects", "dashboard", "profile", "users"})
+    scope = {
+        "membership": membership,
+        "user_type": user_type,
+        "label": (BUSINESS_AUTOPILOT_USER_TYPE_MAP.get(user_type) or {}).get("label", "Business User"),
+        "is_admin": is_admin,
+        "allowed_sections": sorted(allowed_sections),
+        "can_access_crm": is_admin or ("crm" in allowed_sections and _crm_has_view_access(user, org)),
+        "can_access_hr": is_admin or ("hr" in allowed_sections and _hr_section_access_level(user, org, "hr") != "No Access"),
+        "can_access_accounts": is_admin or "accounts" in allowed_sections,
+        "can_access_billing": is_admin or "billing" in allowed_sections,
+    }
+    scope["can_chat"] = any((
+        scope["can_access_crm"],
+        scope["can_access_hr"],
+        scope["can_access_accounts"],
+        scope["can_access_billing"],
+    ))
+    return scope
+
+
+def _format_decimal_text(value):
+    try:
+        amount = Decimal(str(value or 0))
+    except (InvalidOperation, TypeError, ValueError):
+        amount = Decimal("0")
+    return f"{amount.quantize(Decimal('0.01'))}"
+
+
+def _attendance_work_minutes(entry):
+    if not getattr(entry, "checkin_time", None) or not getattr(entry, "checkout_time", None):
+        return None
+    minutes = int((entry.checkout_time - entry.checkin_time).total_seconds() // 60)
+    return minutes if minutes >= 0 else None
+
+
+def _build_ba_assistant_scope_context(user: User, org: Organization, scope):
+    today = timezone.localdate()
+    assistant_profile = get_assistant_product_profile("business_autopilot")
+    active_subscription = _get_active_erp_subscription(org)
+    active_plan = getattr(active_subscription, "plan", None)
+    modules, enabled_modules = _serialize_modules(org)
+    active_user_type_rows = _get_subscription_user_types(active_subscription)
+    meeting_enabled_user_types = []
+    for row in active_user_type_rows:
+        allowed_modules = {
+            str(item or "").strip().lower()
+            for item in (row.get("allowed_modules") or [])
+            if str(item or "").strip()
+        }
+        if "crm" in allowed_modules:
+            meeting_enabled_user_types.append({
+                "key": str(row.get("key") or "").strip(),
+                "label": str(row.get("label") or "").strip(),
+            })
+    context = {
+        "today": today.isoformat(),
+        "scope": {
+            "user_type": scope["user_type"],
+            "label": scope["label"],
+            "allowed_sections": scope["allowed_sections"],
+        },
+        "product_capabilities": {
+            "product_key": "business_autopilot",
+            "product_label": getattr(assistant_profile, "label", "Business Autopilot"),
+            "operating_mode": getattr(assistant_profile, "operating_mode", "internal business copilot"),
+            "active_plan_name": str(getattr(active_plan, "name", "") or "").strip(),
+            "active_subscription_status": str(getattr(active_subscription, "status", "") or "").strip().lower(),
+            "enabled_modules": [
+                {
+                    "slug": str(row.get("slug") or "").strip(),
+                    "name": str(row.get("name") or "").strip(),
+                }
+                for row in enabled_modules
+            ],
+            "eligible_modules": [
+                {
+                    "slug": str(row.get("slug") or "").strip(),
+                    "name": str(row.get("name") or "").strip(),
+                }
+                for row in modules
+                if row.get("eligible")
+            ],
+            "crm_meetings_available": any(str(row.get("slug") or "").strip().lower() == "crm" for row in enabled_modules),
+            "meeting_enabled_user_types": meeting_enabled_user_types,
+        },
+    }
+    active_memberships = list(
+        OrganizationUser.objects.filter(
+            organization=org,
+            is_deleted=False,
+            is_active=True,
+        ).select_related("user")
+    )
+    context["org_summary"] = {
+        "organization_name": str(getattr(org, "name", "") or "").strip(),
+        "total_users": len(active_memberships),
+        "admin_users": len([row for row in active_memberships if _is_org_admin_account_member(org, row)]),
+        "employee_users": len([row for row in active_memberships if not _is_org_admin_account_member(org, row)]),
+    }
+
+    if scope["can_access_hr"]:
+        attendance_rows = list(
+            AttendanceEntry.objects.filter(
+                organization=org,
+                attendance_date__month=today.month,
+                attendance_date__year=today.year,
+            ).select_related("employee_membership")
+        )
+        today_rows = [row for row in attendance_rows if row.attendance_date == today]
+        overtime_rows = []
+        for row in attendance_rows:
+            work_minutes = _attendance_work_minutes(row)
+            if work_minutes and work_minutes > 480:
+                overtime_rows.append({
+                    "employee_name": row.employee_name,
+                    "attendance_date": row.attendance_date.isoformat(),
+                    "overtime_minutes": work_minutes - 480,
+                })
+        increments = EmployeeSalaryHistory.objects.filter(
+            organization=org,
+            effective_from__gte=today - timedelta(days=365),
+        ).order_by("-effective_from", "-id")[:10]
+        context["hr"] = {
+            "today_attendance_count": len(today_rows),
+            "employees_checked_in_today": [row.employee_name for row in today_rows[:20]],
+            "recent_increments": [
+                {
+                    "employee_name": row.employee_name,
+                    "effective_from": row.effective_from.isoformat() if row.effective_from else "",
+                    "increment_type": row.increment_type,
+                    "increment_value": _format_decimal_text(row.increment_value),
+                    "increment_amount": _format_decimal_text(row.increment_amount),
+                    "new_salary": _format_decimal_text(row.new_salary),
+                }
+                for row in increments
+            ],
+            "overtime_this_month": overtime_rows[:20],
+        }
+
+    if scope["can_access_crm"]:
+        leads_rows = list(CrmLead.objects.filter(organization=org, is_deleted=False).order_by("-created_at")[:50])
+        deals_rows = list(CrmDeal.objects.filter(organization=org, is_deleted=False).order_by("-created_at")[:50])
+        meetings_rows = list(CrmMeeting.objects.filter(organization=org, is_deleted=False).order_by("meeting_date", "meeting_time", "id")[:50])
+        sales_rows = list(CrmSalesOrder.objects.filter(organization=org, is_deleted=False).order_by("-created_at")[:50])
+        if not scope["is_admin"] and not _crm_has_unrestricted_row_access(user, org):
+            leads_rows = [row for row in leads_rows if _crm_can_view_row(user, org, row)]
+            deals_rows = [row for row in deals_rows if _crm_can_view_row(user, org, row)]
+            meetings_rows = [row for row in meetings_rows if _crm_can_view_row(user, org, row)]
+            sales_rows = [row for row in sales_rows if _crm_can_view_row(user, org, row)]
+        lead_assignments = {}
+        lead_amounts = {}
+        status_counts = {}
+        stage_counts = {}
+        for row in leads_rows:
+            owner_name = str(
+                getattr(getattr(row, "assigned_user", None), "first_name", "") or ""
+            ).strip()
+            owner_last_name = str(
+                getattr(getattr(row, "assigned_user", None), "last_name", "") or ""
+            ).strip()
+            full_name = " ".join(part for part in [owner_name, owner_last_name] if part).strip()
+            if not full_name:
+                full_name = str(getattr(getattr(row, "assigned_user", None), "username", "") or "").strip()
+            if not full_name:
+                full_name = str(row.assigned_team or "").strip()
+            if not full_name:
+                full_name = "Unassigned"
+            lead_assignments[full_name] = lead_assignments.get(full_name, 0) + 1
+            lead_amounts[full_name] = lead_amounts.get(full_name, Decimal("0")) + _crm_to_decimal(getattr(row, "lead_amount", 0))
+            status_name = str(getattr(row, "status", "") or "").strip() or "Unknown"
+            stage_name = str(getattr(row, "stage", "") or "").strip() or "Unknown"
+            status_counts[status_name] = status_counts.get(status_name, 0) + 1
+            stage_counts[stage_name] = stage_counts.get(stage_name, 0) + 1
+        lead_assignment_summary = [
+            {
+                "name": name,
+                "lead_count": count,
+                "total_amount": _format_decimal_text(lead_amounts.get(name, Decimal("0"))),
+            }
+            for name, count in sorted(lead_assignments.items(), key=lambda item: (-item[1], item[0].lower()))
+        ]
+        lead_status_summary = [
+            {"status": name, "count": count}
+            for name, count in sorted(status_counts.items(), key=lambda item: (-item[1], item[0].lower()))
+        ]
+        lead_stage_summary = [
+            {"stage": name, "count": count}
+            for name, count in sorted(stage_counts.items(), key=lambda item: (-item[1], item[0].lower()))
+        ]
+        context["crm"] = {
+            "visible_leads_count": len(leads_rows),
+            "open_leads_count": sum(1 for row in leads_rows if str(row.status or "").strip().lower() == "open"),
+            "today_meetings": [
+                {
+                    "title": row.title,
+                    "related_to": row.related_to,
+                    "meeting_date": row.meeting_date.isoformat() if row.meeting_date else "",
+                    "meeting_time": row.meeting_time.isoformat() if row.meeting_time else "",
+                    "status": row.status,
+                    "owners": row.owner_names,
+                }
+                for row in meetings_rows
+                if row.meeting_date == today
+            ][:12],
+            "upcoming_meetings": [
+                {
+                    "title": row.title,
+                    "related_to": row.related_to,
+                    "meeting_date": row.meeting_date.isoformat() if row.meeting_date else "",
+                    "meeting_time": row.meeting_time.isoformat() if row.meeting_time else "",
+                    "status": row.status,
+                }
+                for row in meetings_rows
+                if row.meeting_date and row.meeting_date >= today
+            ][:12],
+            "recent_leads": [
+                {
+                    "lead_name": row.lead_name,
+                    "company": row.company,
+                    "stage": row.stage,
+                    "status": row.status,
+                    "amount": _format_decimal_text(row.lead_amount),
+                }
+                for row in leads_rows[:10]
+            ],
+            "visible_leads": [
+                {
+                    "lead_name": row.lead_name,
+                    "company": row.company,
+                    "stage": row.stage,
+                    "status": row.status,
+                    "assigned_to": (
+                        " ".join(
+                            part
+                            for part in [
+                                str(getattr(getattr(row, "assigned_user", None), "first_name", "") or "").strip(),
+                                str(getattr(getattr(row, "assigned_user", None), "last_name", "") or "").strip(),
+                            ]
+                            if part
+                        ).strip()
+                        or str(getattr(getattr(row, "assigned_user", None), "username", "") or "").strip()
+                        or str(row.assigned_team or "").strip()
+                        or "Unassigned"
+                    ),
+                    "amount": _format_decimal_text(row.lead_amount),
+                }
+                for row in leads_rows[:30]
+            ],
+            "lead_assignment_summary": lead_assignment_summary[:20],
+            "lead_status_summary": lead_status_summary[:20],
+            "lead_stage_summary": lead_stage_summary[:20],
+            "top_lead_owner": lead_assignment_summary[0] if lead_assignment_summary else None,
+            "won_deals_count": sum(1 for row in deals_rows if str(row.status or "").strip().lower() == "won"),
+            "sales_orders_count": len(sales_rows),
+        }
+
+    if scope["can_access_accounts"] or scope["can_access_billing"]:
+        accounts_workspace = _get_accounts_workspace(org)
+        workspace_data = accounts_workspace.data if isinstance(getattr(accounts_workspace, "data", None), dict) else {}
+        invoice_rows = workspace_data.get("invoices") if isinstance(workspace_data.get("invoices"), list) else []
+        sales_rows = list(CrmSalesOrder.objects.filter(organization=org, is_deleted=False, created_at__date=today).order_by("-created_at")[:50])
+        if scope["can_access_crm"] and not scope["is_admin"] and not _crm_has_unrestricted_row_access(user, org):
+            sales_rows = [row for row in sales_rows if _crm_can_view_row(user, org, row)]
+        today_sales_total = sum((Decimal(str(getattr(row, "total_amount", 0) or 0)) for row in sales_rows), Decimal("0"))
+        invoice_status_counts = {}
+        total_invoice_amount = Decimal("0")
+        paid_invoices_count = 0
+        pending_invoices_count = 0
+        this_month_invoices_count = 0
+        for row in invoice_rows:
+            if not isinstance(row, dict):
+                continue
+            status_name = str(
+                row.get("status")
+                or row.get("paymentStatus")
+                or row.get("invoiceStatus")
+                or "Unknown"
+            ).strip() or "Unknown"
+            invoice_status_counts[status_name] = invoice_status_counts.get(status_name, 0) + 1
+            amount_value = _to_decimal(
+                row.get("grandTotal")
+                or row.get("grand_total")
+                or row.get("totalAmount")
+                or row.get("total_amount")
+                or row.get("amount")
+            )
+            total_invoice_amount += amount_value
+            normalized_status = status_name.strip().lower()
+            if normalized_status in {"paid", "completed", "settled"}:
+                paid_invoices_count += 1
+            elif normalized_status in {"pending", "unpaid", "partial", "partially paid", "overdue", "due"}:
+                pending_invoices_count += 1
+            issue_date = _crm_report_parse_date(
+                row.get("issueDate")
+                or row.get("issue_date")
+                or row.get("invoiceDate")
+                or row.get("invoice_date")
+                or row.get("date")
+                or row.get("createdDate")
+                or row.get("created_date")
+            ) or _crm_report_issue_date_from_doc_no(
+                row.get("docNo")
+                or row.get("doc_no")
+                or row.get("invoiceNo")
+                or row.get("invoice_no")
+            )
+            if issue_date and issue_date.year == today.year and issue_date.month == today.month:
+                this_month_invoices_count += 1
+        context["accounts"] = {
+            "today_sales_orders_count": len(sales_rows),
+            "today_sales_total": _format_decimal_text(today_sales_total),
+            "total_invoices_count": len([row for row in invoice_rows if isinstance(row, dict)]),
+            "total_invoices_amount": _format_decimal_text(total_invoice_amount),
+            "paid_invoices_count": paid_invoices_count,
+            "pending_invoices_count": pending_invoices_count,
+            "this_month_invoices_count": this_month_invoices_count,
+            "invoice_status_summary": [
+                {"status": name, "count": count}
+                for name, count in sorted(invoice_status_counts.items(), key=lambda item: (-item[1], item[0].lower()))
+            ][:20],
+        }
+
+    return context
+
+
+def _build_ba_assistant_system_prompt(agent_name: str, scope, product_context=None):
+    allowed_areas = []
+    if scope["can_access_hr"]:
+        allowed_areas.append("HR attendance, salary increments, overtime, and payroll-ready summaries")
+    if scope["can_access_crm"]:
+        allowed_areas.append("CRM leads, deals, meetings, and sales pipeline summaries")
+    if scope["can_access_accounts"] or scope["can_access_billing"]:
+        allowed_areas.append("accounts and billing summaries")
+    if not allowed_areas:
+        allowed_areas.append("no business data")
+    product_context = product_context if isinstance(product_context, dict) else {}
+    org_name = str(product_context.get("organization_name") or "").strip()
+    enabled_modules = [
+        str(row.get("name") or row.get("slug") or "").strip()
+        for row in (product_context.get("enabled_modules") or [])
+        if isinstance(row, dict)
+    ]
+    product_training_context = build_assistant_training_context(
+        "business_autopilot",
+        org_name=org_name,
+        enabled_modules=enabled_modules,
+        extra_notes=(
+            [
+                f"Current user type label: {scope['label']}",
+                f"Current allowed sections: {', '.join(scope.get('allowed_sections') or []) or 'none'}",
+            ]
+        ),
+    )
+    return (
+        (f"{product_training_context}\n\n" if product_training_context else "")
+        +
+        f"You are {agent_name}, a role-aware business assistant for Work Zilla Business Autopilot. "
+        f"This user is a {scope['label']}. Only answer within these allowed areas: {'; '.join(allowed_areas)}. "
+        "Use only the provided organization context. "
+        "If the user asks about a restricted module, clearly say that their current access is limited. "
+        "If data is missing, say it is not available in the current assistant data. "
+        "Do not confuse 'feature not enabled' with 'no records today'. If the application has a feature but the current data has zero rows, clearly say the feature exists and there is no data right now. "
+        "Behave like a capable internal employee of this organization: practical, context-aware, and responsible. "
+        "Remember the recent discussion that is provided and continue the conversation naturally instead of answering in isolation. "
+        "Mirror the user's language, script, and tone. "
+        "If the user writes in casual English, reply in casual English. "
+        "If the user writes in Tanglish or mixed Tamil-English, reply in the same natural mixed style and do not convert it into pure formal Tamil. "
+        "If the user writes in Tamil script, keep it conversational and modern, not overly literary or stiff. "
+        "If the user writes in Telugu, reply in Telugu. If the user writes in Kannada, reply in Kannada. "
+        "Avoid sounding like a formal notice unless the user explicitly asks for a formal draft. "
+        "Use the current module, recent conversation, and visible organization data together before concluding that data is unavailable. "
+        "If the answer can be derived by totaling, grouping, comparing, or filtering the visible records, do that reasoning and answer directly. "
+        "If the user's phrasing is referential like 'antha', 'that one', 'same user', or 'those leads', resolve it from recent conversation whenever possible. "
+        "Do not invent names, dates, counts, meetings, overtime, attendance, or billing figures. "
+        "If the question is simple like total users, total leads, top owner, today attendance, or sales total, answer directly in one or two natural lines. "
+        "Keep answers short, helpful, and business-focused."
+    )
+
+
+def _contains_tamil_chars(text: str):
+    return bool(re.search(r"[\u0B80-\u0BFF]", str(text or "")))
+
+
+def _contains_telugu_chars(text: str):
+    return bool(re.search(r"[\u0C00-\u0C7F]", str(text or "")))
+
+
+def _contains_kannada_chars(text: str):
+    return bool(re.search(r"[\u0C80-\u0CFF]", str(text or "")))
+
+
+def _contains_any(text: str, terms):
+    haystack = str(text or "").strip().lower()
+    for term in (terms or []):
+        needle = str(term or "").strip().lower()
+        if not needle:
+            continue
+        if len(re.sub(r"[^a-z0-9]", "", needle)) <= 2 and re.fullmatch(r"[a-z0-9]+", needle):
+            if re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", haystack):
+                return True
+            continue
+        if needle in haystack:
+            return True
+    return False
+
+
+def _ba_looks_like_tanglish(message: str):
+    text = str(message or "").strip().lower()
+    if not text or not re.search(r"[a-z]", text):
+        return False
+    tanglish_markers = [
+        "enna", "epdi", "eppo", "inga", "anga", "irukku", "venum", "venuma", "solu", "solunga",
+        "pa", "la", "ku", "motham", "yevalo", "evlo", "adhigama", "yaru", "yaaru", "kitta",
+        "innaiku", "inniku", "panna", "pananum", "theriyala", "illaya", "illa", "pesa",
+    ]
+    return any(marker in text for marker in tanglish_markers)
+
+
+def _ba_detect_user_style(message: str):
+    raw = str(message or "")
+    has_tamil = _contains_tamil_chars(raw)
+    has_telugu = _contains_telugu_chars(raw)
+    has_kannada = _contains_kannada_chars(raw)
+    has_english = bool(re.search(r"[A-Za-z]", raw))
+    if not has_tamil and has_english and _ba_looks_like_tanglish(raw):
+        return "tanglish"
+    if has_tamil and has_english:
+        return "tanglish"
+    if has_telugu and has_english:
+        return "telugu_mixed"
+    if has_kannada and has_english:
+        return "kannada_mixed"
+    if has_tamil:
+        return "tamil"
+    if has_telugu:
+        return "telugu"
+    if has_kannada:
+        return "kannada"
+    return "english"
+
+
+def _ba_language_instruction_from_text(text: str):
+    style = _ba_detect_user_style(text)
+    if style == "tanglish":
+        return "If the text mixes Tamil and English, use natural office-style Tanglish. Keep English business words in English and pronounce Tamil casually."
+    if style == "tamil":
+        return "If the text contains Tamil, pronounce it in a smooth colloquial Tamil style."
+    if style in {"telugu", "telugu_mixed"}:
+        return "If the text contains Telugu, pronounce it naturally in a conversational Telugu style."
+    if style in {"kannada", "kannada_mixed"}:
+        return "If the text contains Kannada, pronounce it naturally in a conversational Kannada style."
+    return "If the text is English or mixed business English, keep the delivery relaxed and natural."
+
+
+def _ba_style_reply(style: str, english: str, tanglish: str = "", tamil: str = "", telugu: str = "", kannada: str = ""):
+    normalized = str(style or "english").strip().lower()
+    if normalized == "tamil":
+        return str(tamil or tanglish or english)
+    if normalized == "tanglish":
+        return str(tanglish or english)
+    if normalized == "telugu":
+        return str(telugu or english)
+    if normalized == "telugu_mixed":
+        return str(telugu or english)
+    if normalized == "kannada":
+        return str(kannada or english)
+    if normalized == "kannada_mixed":
+        return str(kannada or english)
+    return str(english)
+
+
+def _ba_normalize_recent_messages(rows, limit=12):
+    if not isinstance(rows, list):
+        return []
+    normalized = []
+    for row in rows[-max(1, int(limit or 8)):]:
+        if not isinstance(row, dict):
+            continue
+        role = str(row.get("role") or "").strip().lower()
+        text = str(row.get("text") or row.get("content") or "").strip()
+        if role not in {"user", "assistant"} or not text:
+            continue
+        normalized.append({
+            "role": role,
+            "text": text[:800],
+        })
+    return normalized
+
+
+def _ba_normalize_history_messages(rows, limit=200):
+    if not isinstance(rows, list):
+        return []
+    normalized = []
+    for row in rows[-max(1, int(limit or 200)):]:
+        if not isinstance(row, dict):
+            continue
+        role = str(row.get("role") or "").strip().lower()
+        text = str(row.get("text") or row.get("content") or "").strip()
+        item_id = str(row.get("id") or "").strip()[:120]
+        if role not in {"user", "assistant"} or not text:
+            continue
+        normalized.append({
+            "id": item_id or f"{role}-{len(normalized) + 1}",
+            "role": role,
+            "text": text[:4000],
+        })
+    return normalized
+
+
+def _ba_assistant_question_route(message: str, scope):
+    text = str(message or "").strip().lower()
+    if not text:
+        return "general"
+    if _contains_any(
+        text,
+        [
+            "application la",
+            "app la",
+            "app-level",
+            "feature iruka",
+            "option iruka",
+            "module iruka",
+            "system la",
+            "namma application",
+            "our application",
+            "meeting schedule iruka",
+            "meeting schedules iruka",
+            "meetings option",
+            "meetings feature",
+        ],
+    ):
+        return "general"
+    if scope.get("can_access_crm"):
+        if _contains_any(
+            text,
+            [
+                "adhigama lead",
+                "most lead",
+                "highest lead",
+                "lead assign",
+                "assigned lead",
+                "open lead summary",
+                "meetings",
+                "meeting schedule",
+                "today meeting",
+                "total leads",
+                "motham leads",
+                "how many leads",
+                "lead count",
+                "leads total amount",
+                "lead total amount",
+                "total amount",
+                "lead amount",
+            ],
+        ):
+            return "crm"
+    if scope.get("can_access_hr"):
+        if _contains_any(text, ["overtime", "ot", "increment", "attendance", "leave"]):
+            return "hr"
+    if scope.get("can_access_accounts") or scope.get("can_access_billing"):
+        if _contains_any(text, ["billing", "sales summary", "today sales", "invoice", "amount sold"]):
+            return "accounts"
+    if _contains_any(
+        text,
+        [
+            "how many users",
+            "total users",
+            "user count",
+            "employee count",
+            "how many employees",
+            "motham users",
+            "motham employee",
+            "organization users",
+            "org users",
+            "restrictions",
+            "access level",
+            "what can i access",
+            "what data can i access",
+        ],
+    ):
+        return "general"
+    return "general"
+
+
+def _ba_assistant_direct_crm_answer(message: str, crm_context):
+    text = str(message or "").strip().lower()
+    style = _ba_detect_user_style(message)
+    if not isinstance(crm_context, dict):
+        return ""
+    assignment_rows = crm_context.get("lead_assignment_summary") if isinstance(crm_context.get("lead_assignment_summary"), list) else []
+    top_owner = crm_context.get("top_lead_owner") if isinstance(crm_context.get("top_lead_owner"), dict) else None
+    today_meetings = crm_context.get("today_meetings") if isinstance(crm_context.get("today_meetings"), list) else []
+    recent_leads = crm_context.get("recent_leads") if isinstance(crm_context.get("recent_leads"), list) else []
+    visible_leads_count = int(crm_context.get("visible_leads_count") or 0)
+    status_rows = crm_context.get("lead_status_summary") if isinstance(crm_context.get("lead_status_summary"), list) else []
+    amount_question = _contains_any(
+        text,
+        [
+            "total amount",
+            "amount evlo",
+            "amount yevalo",
+            "amount yevlo",
+            "evlo amount",
+            "yevalo amount",
+            "how much amount",
+            "sum of",
+            "total value",
+            "lead amount",
+        ],
+    )
+    matched_owner = None
+    matched_count = None
+
+    for row in assignment_rows:
+        owner_name = str(row.get("name") or "").strip()
+        if owner_name and owner_name.lower() in text:
+            matched_owner = row
+            break
+
+    if assignment_rows:
+        number_tokens = [int(value) for value in re.findall(r"\d+", text)]
+        if number_tokens:
+            unique_count_matches = []
+            for candidate in number_tokens:
+                rows = [row for row in assignment_rows if int(row.get("lead_count") or 0) == candidate]
+                if len(rows) == 1:
+                    unique_count_matches.append(rows[0])
+            if unique_count_matches:
+                matched_count = unique_count_matches[0]
+
+    if amount_question:
+        target_row = matched_owner or matched_count
+        if not target_row and _contains_any(text, ["antha", "that", "those"]) and top_owner:
+            target_row = top_owner
+        if target_row:
+            return _ba_style_reply(
+                style,
+                english=(
+                    f"{target_row.get('name') or 'Unknown'} has {target_row.get('lead_count') or 0} leads. "
+                    f"Total amount is Rs.{target_row.get('total_amount') or '0.00'}."
+                ),
+                tanglish=(
+                    f"{target_row.get('name') or 'Unknown'} kitta {target_row.get('lead_count') or 0} leads irukku. "
+                    f"Total amount Rs.{target_row.get('total_amount') or '0.00'}."
+                ),
+                tamil=(
+                    f"{target_row.get('name') or 'Unknown'} கிட்ட {target_row.get('lead_count') or 0} leads இருக்கு. "
+                    f"Total amount Rs.{target_row.get('total_amount') or '0.00'}."
+                ),
+                telugu=(
+                    f"{target_row.get('name') or 'Unknown'} దగ్గర {target_row.get('lead_count') or 0} leads ఉన్నాయి. "
+                    f"Total amount Rs.{target_row.get('total_amount') or '0.00'}."
+                ),
+                kannada=(
+                    f"{target_row.get('name') or 'Unknown'} ಬಳಿ {target_row.get('lead_count') or 0} leads ಇವೆ. "
+                    f"Total amount Rs.{target_row.get('total_amount') or '0.00'}."
+                ),
+            )
+        if assignment_rows:
+            return _ba_style_reply(
+                style,
+                english="Tell me whose leads total amount you want, and I will give the exact number.",
+                tanglish="Yaaroda leads total amount venumnu sollunga, naan exact-a solren.",
+                tamil="யாரோட leads total amount வேணும்னு சொல்லுங்க, நான் exact-a சொல்றேன்.",
+                telugu="ఎవరికి చెందిన leads total amount కావాలో చెప్పండి, నేను exact-ga చెప్తాను.",
+                kannada="ಯಾರ leads total amount ಬೇಕೋ ಹೇಳಿ, ನಾನು exact-a ಹೇಳ್ತೀನಿ.",
+            )
+        return _ba_style_reply(
+            style,
+            english="Lead amount summary is not available in the current visible CRM data.",
+            tanglish="Ippo visible CRM data-la lead amount summary illa.",
+            tamil="இப்போ visible CRM data-la lead amount summary illa.",
+            telugu="ప్రస్తుతం కనిపిస్తున్న CRM dataలో lead amount summary అందుబాటులో లేదు.",
+            kannada="ಈಗ ಕಾಣಿಸುತ್ತಿರುವ CRM dataನಲ್ಲಿ lead amount summary ಲಭ್ಯ ಇಲ್ಲ.",
+        )
+
+    if _contains_any(text, ["adhigama lead", "most lead", "highest lead", "lead assign", "assigned lead"]):
+        if not assignment_rows:
+            return _ba_style_reply(
+                style,
+                english="Lead assignment summary is not available in the current visible CRM data.",
+                tanglish="Ippo visible CRM data-la lead assignment summary illa.",
+                tamil="இப்போ visible CRM data-la lead assignment summary illa.",
+                telugu="ప్రస్తుతం కనిపిస్తున్న CRM dataలో lead assignment summary లేదు.",
+                kannada="ಈಗ ಕಾಣಿಸುತ್ತಿರುವ CRM dataನಲ್ಲಿ lead assignment summary ಇಲ್ಲ.",
+            )
+        if top_owner:
+            return _ba_style_reply(
+                style,
+                english=f"{top_owner.get('name') or 'Unknown'} has the highest leads. Count: {top_owner.get('lead_count') or 0}.",
+                tanglish=f"{top_owner.get('name') or 'Unknown'} kitta than adhigama leads irukku. Count: {top_owner.get('lead_count') or 0}.",
+                tamil=f"{top_owner.get('name') or 'Unknown'} கிட்ட தான் அதிகமான leads இருக்கு. Count: {top_owner.get('lead_count') or 0}.",
+                telugu=f"{top_owner.get('name') or 'Unknown'} దగ్గరే ఎక్కువ leads ఉన్నాయి. Count: {top_owner.get('lead_count') or 0}.",
+                kannada=f"{top_owner.get('name') or 'Unknown'} ಬಳಿ ಹೆಚ್ಚು leads ಇವೆ. Count: {top_owner.get('lead_count') or 0}.",
+            )
+        return _ba_style_reply(
+            style,
+            english="Lead assignment summary is available, but I could not identify the top owner clearly.",
+            tanglish="Lead assignment summary irukku, aana top owner identify panna mudiyala.",
+            tamil="Lead assignment summary இருக்கு, ஆனா top owner identify பண்ண முடியல.",
+            telugu="Lead assignment summary ఉంది, కానీ top owner-ni clear-ga identify చేయలేకపోయాను.",
+            kannada="Lead assignment summary ಇದೆ, ಆದರೆ top owner ಅನ್ನೋದು clear-a identify ಮಾಡಲಾಗಲಿಲ್ಲ.",
+        )
+
+    if _contains_any(text, ["total leads", "motham leads", "how many leads", "lead count"]):
+        return _ba_style_reply(
+            style,
+            english=f"There are {visible_leads_count} visible leads in CRM.",
+            tanglish=f"CRM-la total visible leads {visible_leads_count}.",
+            tamil=f"CRM-la total visible leads {visible_leads_count}.",
+            telugu=f"CRMలో మొత్తం visible leads {visible_leads_count}.",
+            kannada=f"CRMನಲ್ಲಿ ಒಟ್ಟು visible leads {visible_leads_count}.",
+        )
+
+    if _contains_any(text, [" leads", "lead ", "crm leads", "leads summary", "lead summary"]) or text in {"leads", "lead", "crm"}:
+        open_count = int(crm_context.get("open_leads_count") or 0)
+        converted_count = 0
+        for row in status_rows:
+            if str(row.get("status") or "").strip().lower() == "converted":
+                converted_count = int(row.get("count") or 0)
+                break
+        top_owner_name = str((top_owner or {}).get("name") or "").strip() or "nobody yet"
+        top_owner_count = int((top_owner or {}).get("lead_count") or 0)
+        return _ba_style_reply(
+            style,
+            english=(
+                f"Right now CRM has {visible_leads_count} visible leads. "
+                f"{open_count} are open and {converted_count} are converted. "
+                f"Top allocation is with {top_owner_name} at {top_owner_count} leads."
+            ),
+            tanglish=(
+                f"Ippo CRM-la {visible_leads_count} visible leads irukku. "
+                f"Adhula {open_count} open, {converted_count} converted. "
+                f"Top allocation {top_owner_name} kitta {top_owner_count} leads."
+            ),
+            tamil=(
+                f"இப்போ CRM-la {visible_leads_count} visible leads இருக்கு. "
+                f"அதுல {open_count} open, {converted_count} converted. "
+                f"Top allocation {top_owner_name} கிட்ட {top_owner_count} leads."
+            ),
+            telugu=(
+                f"ఇప్పుడే CRMలో {visible_leads_count} visible leads ఉన్నాయి. "
+                f"అందులో {open_count} open, {converted_count} converted. "
+                f"Top allocation {top_owner_name} దగ్గర {top_owner_count} leads ఉన్నాయి."
+            ),
+            kannada=(
+                f"ಈಗ CRMನಲ್ಲಿ {visible_leads_count} visible leads ಇವೆ. "
+                f"ಅದರಲ್ಲಿ {open_count} open, {converted_count} converted. "
+                f"Top allocation {top_owner_name} ಬಳಿ {top_owner_count} leads ಇವೆ."
+            ),
+        )
+
+    if _contains_any(text, ["open lead summary", "open leads", "my open leads"]):
+        open_count = crm_context.get("open_leads_count")
+        if recent_leads:
+            top_rows = ", ".join(
+                f"{row.get('lead_name') or 'Lead'} ({row.get('status') or '-'})"
+                for row in recent_leads[:3]
+            )
+            return _ba_style_reply(
+                style,
+                english=f"Open leads count is {open_count or 0}. Recent leads: {top_rows}.",
+                tanglish=f"Open leads count {open_count or 0}. Recent leads: {top_rows}.",
+                tamil=f"Open leads count {open_count or 0}. Recent leads: {top_rows}.",
+                telugu=f"Open leads count {open_count or 0}. Recent leads: {top_rows}.",
+                kannada=f"Open leads count {open_count or 0}. Recent leads: {top_rows}.",
+            )
+        return _ba_style_reply(
+            style,
+            english=f"Open leads count is {open_count or 0}.",
+            tanglish=f"Open leads count {open_count or 0}.",
+            tamil=f"Open leads count {open_count or 0}.",
+            telugu=f"Open leads count {open_count or 0}.",
+            kannada=f"Open leads count {open_count or 0}.",
+        )
+
+    if _contains_any(text, ["today meeting", "meetings", "meeting schedule"]):
+        if not today_meetings:
+            return _ba_style_reply(
+                style,
+                english="There are no meetings scheduled for today.",
+                tanglish="Innaikku scheduled meetings illa.",
+                tamil="இன்னைக்கு scheduled meetings illa.",
+                telugu="ఈ రోజు scheduled meetings లేవు.",
+                kannada="ಇವತ್ತು scheduled meetings ಇಲ್ಲ.",
+            )
+        meeting_text = "; ".join(
+            f"{row.get('title') or 'Meeting'} - {row.get('meeting_time') or 'time not set'}"
+            for row in today_meetings[:4]
+        )
+        return _ba_style_reply(
+            style,
+            english=f"There are {len(today_meetings)} meetings today: {meeting_text}.",
+            tanglish=f"Innaikku {len(today_meetings)} meeting irukku: {meeting_text}.",
+            tamil=f"இன்னைக்கு {len(today_meetings)} meeting இருக்கு: {meeting_text}.",
+            telugu=f"ఈ రోజు {len(today_meetings)} meetings ఉన్నాయి: {meeting_text}.",
+            kannada=f"ಇವತ್ತು {len(today_meetings)} meetings ಇವೆ: {meeting_text}.",
+        )
+
+    return ""
+
+
+def _ba_assistant_direct_hr_answer(message: str, hr_context):
+    text = str(message or "").strip().lower()
+    style = _ba_detect_user_style(message)
+    if not isinstance(hr_context, dict):
+        return ""
+    overtime_rows = hr_context.get("overtime_this_month") if isinstance(hr_context.get("overtime_this_month"), list) else []
+    increments = hr_context.get("recent_increments") if isinstance(hr_context.get("recent_increments"), list) else []
+    checked_in = hr_context.get("employees_checked_in_today") if isinstance(hr_context.get("employees_checked_in_today"), list) else []
+
+    if _contains_any(text, ["overtime", "ot"]):
+        if not overtime_rows:
+            return _ba_style_reply(
+                style,
+                english="There is no overtime data for this month.",
+                tanglish="Indha month-ku overtime data illa.",
+                tamil="இந்த month-ku overtime data illa.",
+                telugu="ఈ నెలకి overtime data లేదు.",
+                kannada="ಈ ತಿಂಗಳಿಗೆ overtime data ಇಲ್ಲ.",
+            )
+        top_row = sorted(overtime_rows, key=lambda row: int(row.get("overtime_minutes") or 0), reverse=True)[0]
+        return _ba_style_reply(
+            style,
+            english=f"{top_row.get('employee_name') or 'Unknown'} has the highest overtime with {top_row.get('overtime_minutes') or 0} minutes.",
+            tanglish=f"{top_row.get('employee_name') or 'Unknown'} kitta adhigama overtime irukku. {top_row.get('overtime_minutes') or 0} minutes.",
+            tamil=f"{top_row.get('employee_name') or 'Unknown'} கிட்ட அதிகமான overtime இருக்கு. {top_row.get('overtime_minutes') or 0} minutes.",
+            telugu=f"{top_row.get('employee_name') or 'Unknown'} దగ్గర అత్యధిక overtime ఉంది. {top_row.get('overtime_minutes') or 0} minutes.",
+            kannada=f"{top_row.get('employee_name') or 'Unknown'} ಬಳಿ ಹೆಚ್ಚು overtime ಇದೆ. {top_row.get('overtime_minutes') or 0} minutes.",
+        )
+
+    if _contains_any(text, ["increment"]):
+        if not increments:
+            return _ba_style_reply(
+                style,
+                english="Recent increment data is not available.",
+                tanglish="Recent increment data illa.",
+                tamil="Recent increment data illa.",
+                telugu="Recent increment data అందుబాటులో లేదు.",
+                kannada="Recent increment data ಲಭ್ಯ ಇಲ್ಲ.",
+            )
+        names = ", ".join(str(row.get("employee_name") or "").strip() for row in increments[:5] if str(row.get("employee_name") or "").strip())
+        return _ba_style_reply(
+            style,
+            english=f"Recent increments list: {names}.",
+            tanglish=f"Recent increments list-la: {names}.",
+            tamil=f"Recent increments list-la: {names}.",
+            telugu=f"Recent increments list: {names}.",
+            kannada=f"Recent increments list: {names}.",
+        )
+
+    if _contains_any(text, ["attendance", "checked in", "leave"]):
+        if checked_in:
+            return _ba_style_reply(
+                style,
+                english=f"Employees checked in today: {', '.join(checked_in[:8])}.",
+                tanglish=f"Innaikku checked-in employees: {', '.join(checked_in[:8])}.",
+                tamil=f"இன்னைக்கு checked-in employees: {', '.join(checked_in[:8])}.",
+                telugu=f"ఈ రోజు checked-in employees: {', '.join(checked_in[:8])}.",
+                kannada=f"ಇವತ್ತು checked-in employees: {', '.join(checked_in[:8])}.",
+            )
+        return _ba_style_reply(
+            style,
+            english="There is no attendance check-in data for today.",
+            tanglish="Innaikku attendance check-in data illa.",
+            tamil="இன்னைக்கு attendance check-in data illa.",
+            telugu="ఈ రోజు attendance check-in data లేదు.",
+            kannada="ಇವತ್ತು attendance check-in data ಇಲ್ಲ.",
+        )
+
+    return ""
+
+
+def _ba_assistant_direct_accounts_answer(message: str, accounts_context):
+    text = str(message or "").strip().lower()
+    style = _ba_detect_user_style(message)
+    if not isinstance(accounts_context, dict):
+        return ""
+    total_invoices_count = int(accounts_context.get("total_invoices_count") or 0)
+    total_invoices_amount = str(accounts_context.get("total_invoices_amount") or "0.00")
+    paid_invoices_count = int(accounts_context.get("paid_invoices_count") or 0)
+    pending_invoices_count = int(accounts_context.get("pending_invoices_count") or 0)
+    this_month_invoices_count = int(accounts_context.get("this_month_invoices_count") or 0)
+    invoice_status_summary = accounts_context.get("invoice_status_summary") if isinstance(accounts_context.get("invoice_status_summary"), list) else []
+    if _contains_any(
+        text,
+        [
+            "total invoice",
+            "invoice total",
+            "how many invoice",
+            "how many invoices",
+            "invoice count",
+            "motham invoice",
+            "motham invoices",
+            "evlo invoice",
+            "yevalo invoice",
+            "total-a invoice",
+        ],
+    ):
+        status_text = ", ".join(
+            f"{row.get('status')}: {int(row.get('count') or 0)}"
+            for row in invoice_status_summary[:4]
+        )
+        if status_text:
+            return _ba_style_reply(
+                style,
+                english=f"There are {total_invoices_count} invoices in your application right now. Status split: {status_text}.",
+                tanglish=f"Namma application-la ippo total {total_invoices_count} invoices irukku. Status split: {status_text}.",
+                tamil=f"நம்ம application-la இப்போ total {total_invoices_count} invoices இருக்கு. Status split: {status_text}.",
+                telugu=f"మీ application-lo ippudu total {total_invoices_count} invoices ఉన్నాయి. Status split: {status_text}.",
+                kannada=f"Nimma application-nalli iga total {total_invoices_count} invoices ive. Status split: {status_text}.",
+            )
+        return _ba_style_reply(
+            style,
+            english=f"There are {total_invoices_count} invoices in your application right now.",
+            tanglish=f"Namma application-la ippo total {total_invoices_count} invoices irukku.",
+            tamil=f"நம்ம application-la இப்போ total {total_invoices_count} invoices இருக்கு.",
+            telugu=f"మీ application-lo ippudu total {total_invoices_count} invoices ఉన్నాయి.",
+            kannada=f"Nimma application-nalli iga total {total_invoices_count} invoices ive.",
+        )
+    if _contains_any(
+        text,
+        [
+            "invoice total amount",
+            "total invoice value",
+            "invoice amount total",
+            "all invoice amount",
+            "motham invoice amount",
+            "invoice values yevlo",
+            "invoice values yevalo",
+            "how much invoice amount",
+        ],
+    ):
+        return _ba_style_reply(
+            style,
+            english=f"Total invoice amount in your application is Rs.{total_invoices_amount}.",
+            tanglish=f"Namma application-la total invoice amount Rs.{total_invoices_amount}.",
+            tamil=f"நம்ம application-la total invoice amount Rs.{total_invoices_amount}.",
+            telugu=f"మీ application-lo total invoice amount Rs.{total_invoices_amount}.",
+            kannada=f"Nimma application-nalli total invoice amount Rs.{total_invoices_amount}.",
+        )
+    if _contains_any(
+        text,
+        [
+            "paid invoices",
+            "how many paid invoices",
+            "paid invoice count",
+            "motham paid invoice",
+        ],
+    ):
+        return _ba_style_reply(
+            style,
+            english=f"There are {paid_invoices_count} paid invoices right now.",
+            tanglish=f"Ippo {paid_invoices_count} paid invoices irukku.",
+            tamil=f"இப்போ {paid_invoices_count} paid invoices இருக்கு.",
+            telugu=f"ప్రస్తుతం {paid_invoices_count} paid invoices ఉన్నాయి.",
+            kannada=f"Iga {paid_invoices_count} paid invoices ive.",
+        )
+    if _contains_any(
+        text,
+        [
+            "pending invoices",
+            "how many pending invoices",
+            "pending invoice count",
+            "unpaid invoices",
+            "due invoices",
+            "motham pending invoice",
+        ],
+    ):
+        return _ba_style_reply(
+            style,
+            english=f"There are {pending_invoices_count} pending invoices right now.",
+            tanglish=f"Ippo {pending_invoices_count} pending invoices irukku.",
+            tamil=f"இப்போ {pending_invoices_count} pending invoices இருக்கு.",
+            telugu=f"ప్రస్తుతం {pending_invoices_count} pending invoices ఉన్నాయి.",
+            kannada=f"Iga {pending_invoices_count} pending invoices ive.",
+        )
+    if _contains_any(
+        text,
+        [
+            "this month invoices",
+            "how many invoices this month",
+            "invoice this month",
+            "indha month invoice",
+            "this month invoice count",
+        ],
+    ):
+        return _ba_style_reply(
+            style,
+            english=f"There are {this_month_invoices_count} invoices for this month.",
+            tanglish=f"Indha month-ku {this_month_invoices_count} invoices irukku.",
+            tamil=f"இந்த month-ku {this_month_invoices_count} invoices இருக்கு.",
+            telugu=f"ఈ నెలకి {this_month_invoices_count} invoices ఉన్నాయి.",
+            kannada=f"Ii tingalige {this_month_invoices_count} invoices ive.",
+        )
+    if _contains_any(text, ["billing", "sales summary", "today sales", "invoice", "amount sold"]):
+        return _ba_style_reply(
+            style,
+            english=(
+                f"Today's sales orders count is {accounts_context.get('today_sales_orders_count') or 0}. "
+                f"Total value is {accounts_context.get('today_sales_total') or '0.00'}."
+            ),
+            tanglish=(
+                f"Today's sales orders count {accounts_context.get('today_sales_orders_count') or 0}. "
+                f"Total value {accounts_context.get('today_sales_total') or '0.00'}."
+            ),
+            tamil=(
+                f"Today's sales orders count {accounts_context.get('today_sales_orders_count') or 0}. "
+                f"Total value {accounts_context.get('today_sales_total') or '0.00'}."
+            ),
+            telugu=(
+                f"Today's sales orders count {accounts_context.get('today_sales_orders_count') or 0}. "
+                f"Total value {accounts_context.get('today_sales_total') or '0.00'}."
+            ),
+            kannada=(
+                f"Today's sales orders count {accounts_context.get('today_sales_orders_count') or 0}. "
+                f"Total value {accounts_context.get('today_sales_total') or '0.00'}."
+            ),
+        )
+    return ""
+
+
+def _ba_assistant_direct_general_answer(message: str, scoped_context):
+    text = str(message or "").strip().lower()
+    style = _ba_detect_user_style(message)
+    if not isinstance(scoped_context, dict):
+        return ""
+    org_summary = scoped_context.get("org_summary") if isinstance(scoped_context.get("org_summary"), dict) else {}
+    scope = scoped_context.get("scope") if isinstance(scoped_context.get("scope"), dict) else {}
+    product_capabilities = scoped_context.get("product_capabilities") if isinstance(scoped_context.get("product_capabilities"), dict) else {}
+
+    if _contains_any(
+        text,
+        [
+            "how many users",
+            "total users",
+            "user count",
+            "employee count",
+            "how many employees",
+            "motham users",
+            "motham employee",
+            "organization users",
+            "org users",
+        ],
+    ):
+        total_users = int(org_summary.get("total_users") or 0)
+        admin_users = int(org_summary.get("admin_users") or 0)
+        employee_users = int(org_summary.get("employee_users") or 0)
+        org_name = str(org_summary.get("organization_name") or "your organization").strip()
+        return _ba_style_reply(
+            style,
+            english=(
+                f"{org_name} currently has {total_users} active users. "
+                f"That includes {admin_users} admin users and {employee_users} employee users."
+            ),
+            tanglish=(
+                f"{org_name}-la ippo {total_users} active users irukanga. "
+                f"Adhula {admin_users} admin users, {employee_users} employee users."
+            ),
+            tamil=(
+                f"{org_name}-la இப்போ {total_users} active users இருக்காங்க. "
+                f"அதுல {admin_users} admin users, {employee_users} employee users."
+            ),
+            telugu=(
+                f"{org_name}లో ప్రస్తుతం {total_users} active users ఉన్నారు. "
+                f"అందులో {admin_users} admin users, {employee_users} employee users."
+            ),
+            kannada=(
+                f"{org_name}ನಲ್ಲಿ ಈಗ {total_users} active users ಇದ್ದಾರೆ. "
+                f"ಅದರಲ್ಲ {admin_users} admin users, {employee_users} employee users."
+            ),
+        )
+
+    if _contains_any(
+        text,
+        [
+            "meeting schedule iruka",
+            "meeting schedules iruka",
+            "meetings option",
+            "meetings feature",
+            "application la meeting",
+            "app la meeting",
+            "namma application la meeting",
+            "our application has meetings",
+            "meeting shedule option",
+        ],
+    ):
+        crm_meetings_available = bool(product_capabilities.get("crm_meetings_available"))
+        plan_name = str(product_capabilities.get("active_plan_name") or "").strip() or "current plan"
+        meeting_user_types = product_capabilities.get("meeting_enabled_user_types") if isinstance(product_capabilities.get("meeting_enabled_user_types"), list) else []
+        meeting_user_type_labels = ", ".join(
+            str(row.get("label") or "").strip()
+            for row in meeting_user_types
+            if str(row.get("label") or "").strip()
+        )
+        availability_line = (
+            "For this organization, it is currently enabled inside CRM."
+            if crm_meetings_available
+            else "For this organization, it is not currently enabled in the active modules."
+        )
+        user_type_line = (
+            f"Plan-wise, meeting access is available for: {meeting_user_type_labels}."
+            if meeting_user_type_labels
+            else "Plan-wise user type meeting access details are not available right now."
+        )
+        return _ba_style_reply(
+            style,
+            english=(
+                f"Yes, the application has a Meetings feature inside the CRM module. "
+                f"{availability_line} Active plan: {plan_name}. {user_type_line}"
+            ),
+            tanglish=(
+                f"Yes, namma application-la CRM module ullae Meetings feature irukku. "
+                f"{'Indha organization-ku idhu ippo CRM-la enabled-a irukku.' if crm_meetings_available else 'Indha organization-ku idhu active modules-la ippo enabled illa.'} "
+                f"Current plan {plan_name}. "
+                f"{f'Plan-wise paatha {meeting_user_type_labels} users-ku meeting access irukku.' if meeting_user_type_labels else 'Plan-wise meeting access details ippo available illa.'}"
+            ),
+            tamil=(
+                f"Yes, நம்ம application-la CRM module உள்ளே Meetings feature இருக்கு. "
+                f"{'இந்த organization-ku இது இப்போ CRM-la enabled-a இருக்கு.' if crm_meetings_available else 'இந்த organization-ku இது active modules-la இப்போ enabled இல்லை.'} "
+                f"Current plan {plan_name}. "
+                f"{f'Plan-wise பார்த்தா {meeting_user_type_labels} users-ku meeting access இருக்கு.' if meeting_user_type_labels else 'Plan-wise meeting access details இப்போ available இல்லை.'}"
+            ),
+            telugu=(
+                f"Yes, mana application-lo CRM module lopala Meetings feature undi. "
+                f"{'Ee organization-ki idi ippudu CRM-lo enabled ga undi.' if crm_meetings_available else 'Ee organization-ki idi active modules-lo ippudu enabled ledu.'} "
+                f"Current plan {plan_name}. "
+                f"{f'Plan-wise chusthe {meeting_user_type_labels} users-ki meeting access undi.' if meeting_user_type_labels else 'Plan-wise meeting access details ippudu available levu.'}"
+            ),
+            kannada=(
+                f"Yes, namma application-nalli CRM module olage Meetings feature ide. "
+                f"{'Ee organization-ge idu iga CRM-nalli enabled ide.' if crm_meetings_available else 'Ee organization-ge idu active modules-nalli iga enabled illa.'} "
+                f"Current plan {plan_name}. "
+                f"{f'Plan-wise nodidre {meeting_user_type_labels} users-ge meeting access ide.' if meeting_user_type_labels else 'Plan-wise meeting access details iga available illa.'}"
+            ),
+        )
+
+    if _contains_any(
+        text,
+        [
+            "plan wise",
+            "who has meeting access",
+            "which user type has meeting access",
+            "meeting access yaarukku",
+            "meeting features eruku",
+            "entha org user",
+            "crm user ku meeting",
+            "hrm user ku meeting",
+            "full access user ku meeting",
+        ],
+    ):
+        plan_name = str(product_capabilities.get("active_plan_name") or "").strip() or "current plan"
+        meeting_user_types = product_capabilities.get("meeting_enabled_user_types") if isinstance(product_capabilities.get("meeting_enabled_user_types"), list) else []
+        labels = [
+            str(row.get("label") or "").strip()
+            for row in meeting_user_types
+            if str(row.get("label") or "").strip()
+        ]
+        if labels:
+            labels_text = ", ".join(labels)
+            return _ba_style_reply(
+                style,
+                english=f"Under the active plan {plan_name}, meeting access is available for these user types: {labels_text}.",
+                tanglish=f"Active plan {plan_name} basis-la paatha, meeting access {labels_text} users-ku irukku.",
+                tamil=f"Active plan {plan_name} basis-la பார்த்தா, meeting access {labels_text} users-ku இருக்கு.",
+                telugu=f"Active plan {plan_name} ప్రకారం, meeting access {labels_text} users-ki ఉంది.",
+                kannada=f"Active plan {plan_name} prakara, meeting access {labels_text} users-ge ide.",
+            )
+        return _ba_style_reply(
+            style,
+            english=f"I could not find any user-type meeting access mapping under the active plan {plan_name} right now.",
+            tanglish=f"Active plan {plan_name}-ku user-type meeting access mapping ippo kidaikala.",
+            tamil=f"Active plan {plan_name}-ku user-type meeting access mapping இப்போ கிடைக்கல.",
+            telugu=f"Active plan {plan_name}కి user-type meeting access mapping ఇప్పుడు దొరకలేదు.",
+            kannada=f"Active plan {plan_name}-ge user-type meeting access mapping iga sigalilla.",
+        )
+
+    if _contains_any(
+        text,
+        [
+            "crm la enna iruku",
+            "crm module features",
+            "what is in crm",
+            "crm options",
+        ],
+    ):
+        return _ba_style_reply(
+            style,
+            english="CRM includes leads, contacts, teams, deals, sales orders, follow-ups, meetings, and reports.",
+            tanglish="CRM-la leads, contacts, teams, deals, sales orders, follow-ups, meetings, reports ellam irukku.",
+            tamil="CRM-la leads, contacts, teams, deals, sales orders, follow-ups, meetings, reports ellam irukku.",
+            telugu="CRMలో leads, contacts, teams, deals, sales orders, follow-ups, meetings, reports ఉన్నాయి.",
+            kannada="CRMನಲ್ಲಿ leads, contacts, teams, deals, sales orders, follow-ups, meetings, reports ಇವೆ.",
+        )
+
+    if _contains_any(text, ["restrictions", "access level", "what can i access", "what data can i access"]):
+        allowed_sections = ", ".join(scope.get("allowed_sections") or []) or "no modules"
+        label = str(scope.get("label") or "Business User").strip()
+        return _ba_style_reply(
+            style,
+            english=f"Your current access is {label}. You can access these modules: {allowed_sections}.",
+            tanglish=f"Ungaloda current access {label}. Neenga use panna mudiyura modules: {allowed_sections}.",
+            tamil=f"உங்களோட current access {label}. நீங்க use பண்ண முடிஞ்ச modules: {allowed_sections}.",
+            telugu=f"మీ current access {label}. మీరు access చేయగల modules: {allowed_sections}.",
+            kannada=f"ನಿಮ್ಮ current access {label}. ನೀವು access ಮಾಡಬಹುದು ಅನ್ನೋ modules: {allowed_sections}.",
+        )
+
+    return ""
+
+
+def _ba_assistant_direct_answer(message: str, scoped_context):
+    if not isinstance(scoped_context, dict):
+        return ""
+    route = _ba_assistant_question_route(message, scoped_context.get("scope") or {})
+    if route == "crm":
+        return _ba_assistant_direct_crm_answer(message, scoped_context.get("crm"))
+    if route == "hr":
+        return _ba_assistant_direct_hr_answer(message, scoped_context.get("hr"))
+    if route == "accounts":
+        return _ba_assistant_direct_accounts_answer(message, scoped_context.get("accounts"))
+    return _ba_assistant_direct_general_answer(message, scoped_context)
 
 
 def _get_org_membership(user: User, org: Organization):
@@ -1127,7 +2368,7 @@ def _get_org_membership(user: User, org: Organization):
     return (
         OrganizationUser.objects
         .filter(organization=org, user=user, is_active=True, is_deleted=False)
-        .only("id", "role", "department", "employee_role", "is_active", "is_deleted")
+        .only("id", "role", "department", "employee_role", "user_type", "is_active", "is_deleted")
         .first()
     )
 
@@ -5563,11 +6804,11 @@ def org_openai_settings(request):
     org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
-    if not _can_manage_openai(request.user, org):
-        return JsonResponse({"detail": "forbidden"}, status=403)
-
     settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
+    scope = _business_autopilot_ai_scope(request.user, org)
     if request.method == "POST":
+        if not _can_manage_openai(request.user, org):
+            return JsonResponse({"detail": "forbidden"}, status=403)
         try:
             payload = json.loads(request.body.decode("utf-8") or "{}")
         except json.JSONDecodeError:
@@ -5576,19 +6817,31 @@ def org_openai_settings(request):
         model = str(payload.get("model") or "gpt-4o-mini").strip() or "gpt-4o-mini"
         api_key = str(payload.get("api_key") or "").strip()
         enabled = bool(payload.get("enabled"))
+        agent_name = str(payload.get("agent_name") or DEFAULT_BA_OPENAI_AGENT_NAME).strip() or DEFAULT_BA_OPENAI_AGENT_NAME
+        voice_gender = str(payload.get("voice_gender") or "female").strip().lower()
+        if voice_gender not in {"male", "female"}:
+            voice_gender = "female"
+        wake_word_enabled = bool(payload.get("wake_word_enabled"))
+        wake_phrase = str(payload.get("wake_phrase") or "").strip()
         update_fields = []
         if "api_key" in payload and api_key:
             settings_obj.business_autopilot_openai_api_key = api_key
             update_fields.append("business_autopilot_openai_api_key")
-        settings_obj.business_autopilot_ai_agent_name = DEFAULT_BA_OPENAI_AGENT_NAME
+        settings_obj.business_autopilot_ai_agent_name = agent_name[:120]
         settings_obj.business_autopilot_openai_account_email = account_email[:254]
         settings_obj.business_autopilot_openai_model = model[:120]
         settings_obj.business_autopilot_openai_enabled = enabled
+        settings_obj.business_autopilot_ai_voice_gender = voice_gender
+        settings_obj.business_autopilot_ai_wake_word_enabled = wake_word_enabled
+        settings_obj.business_autopilot_ai_wake_phrase = wake_phrase[:120]
         update_fields.extend([
             "business_autopilot_ai_agent_name",
             "business_autopilot_openai_account_email",
             "business_autopilot_openai_model",
             "business_autopilot_openai_enabled",
+            "business_autopilot_ai_voice_gender",
+            "business_autopilot_ai_wake_word_enabled",
+            "business_autopilot_ai_wake_phrase",
         ])
         settings_obj.save(update_fields=list(dict.fromkeys(update_fields)))
         return JsonResponse({
@@ -5596,7 +6849,22 @@ def org_openai_settings(request):
             **_serialize_openai_settings(settings_obj),
         })
 
-    return JsonResponse(_serialize_openai_settings(settings_obj))
+    if not (_can_manage_openai(request.user, org) or scope["can_chat"]):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+    payload = _serialize_openai_settings(settings_obj)
+    if not _can_manage_openai(request.user, org):
+        payload["account_email"] = ""
+        payload["masked_api_key"] = ""
+    payload["scope"] = {
+        "user_type": scope["user_type"],
+        "label": scope["label"],
+        "allowed_sections": scope["allowed_sections"],
+        "can_access_crm": scope["can_access_crm"],
+        "can_access_hr": scope["can_access_hr"],
+        "can_access_accounts": scope["can_access_accounts"],
+        "can_access_billing": scope["can_access_billing"],
+    }
+    return JsonResponse(payload)
 
 
 @require_http_methods(["POST"])
@@ -5647,13 +6915,82 @@ def org_openai_test(request):
 
 
 @require_http_methods(["POST"])
-def org_openai_chat(request):
+def org_openai_transcribe(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
     org = _resolve_org(request.user, request)
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
-    if not _can_manage_openai(request.user, org):
+    scope = _business_autopilot_ai_scope(request.user, org)
+    if not scope["can_chat"]:
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
+    api_key = str(settings_obj.business_autopilot_openai_api_key or "").strip()
+    if not api_key:
+        return JsonResponse({"detail": "openai_api_key_missing"}, status=400)
+
+    audio_file = request.FILES.get("audio")
+    if not audio_file:
+        return JsonResponse({"detail": "audio_required"}, status=400)
+    current_section = str(request.POST.get("current_section") or "").strip().lower()
+    speech_context = str(request.POST.get("speech_context") or "").strip()
+    allow_empty = str(request.POST.get("allow_empty") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    filename = str(getattr(audio_file, "name", "") or "voice-note.webm").strip() or "voice-note.webm"
+    model = "gpt-4o-mini-transcribe"
+    prompt_parts = [
+        "This is a Work Zilla Business Autopilot organization voice command.",
+        "Common business terms include CRM, HRM, lead, leads, deal, deals, meeting, meetings, attendance, payroll, billing, invoice, follow-up, task, overtime, sales, and subscription.",
+        "Preserve English business words like CRM, leads, HRM, sales, billing, and the configured assistant name exactly when spoken.",
+        "For Tamil-English speech, preserve romanized words such as motham, yevalo, evlo, lead, leads, meeting, billing, users, and CRM naturally instead of forcing unrelated words.",
+    ]
+    if current_section:
+        prompt_parts.append(f"Current module is {current_section}.")
+    if speech_context:
+        prompt_parts.append(speech_context[:500])
+    prompt_text = " ".join(prompt_parts)[:900]
+    try:
+        response = requests.post(
+            OPENAI_AUDIO_TRANSCRIPTIONS_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+            },
+            data={
+                "model": model,
+                "prompt": prompt_text,
+            },
+            files={
+                "file": (filename, audio_file.read(), getattr(audio_file, "content_type", "application/octet-stream")),
+            },
+            timeout=120,
+        )
+    except requests.RequestException as exc:
+        return JsonResponse({"detail": f"openai_request_failed: {exc}"}, status=502)
+
+    data = response.json() if response.content else {}
+    if response.status_code >= 400:
+        detail = data.get("error", {}).get("message") or "openai_transcription_failed"
+        if allow_empty:
+            return JsonResponse({"text": "", "detail": detail})
+        return JsonResponse({"detail": detail}, status=400)
+    transcript_text = str((data or {}).get("text") or "").strip()
+    if not transcript_text:
+        if allow_empty:
+            return JsonResponse({"text": ""})
+        return JsonResponse({"detail": "transcript_empty"}, status=400)
+    return JsonResponse({"text": transcript_text})
+
+
+@require_http_methods(["POST"])
+def org_openai_tts(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    scope = _business_autopilot_ai_scope(request.user, org)
+    if not scope["can_chat"]:
         return JsonResponse({"detail": "forbidden"}, status=403)
 
     settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
@@ -5666,21 +7003,178 @@ def org_openai_chat(request):
     except json.JSONDecodeError:
         return JsonResponse({"detail": "invalid_json"}, status=400)
 
+    input_text = str(payload.get("text") or "").strip()
+    if not input_text:
+        return JsonResponse({"detail": "text_required"}, status=400)
+
+    configured_voice_gender = str(getattr(settings_obj, "business_autopilot_ai_voice_gender", "") or "female").strip().lower()
+    if configured_voice_gender not in {"male", "female"}:
+        configured_voice_gender = "female"
+    selected_voice = "alloy" if configured_voice_gender == "male" else "marin"
+    instructions = (
+        "Speak like a friendly office assistant in a natural, casual, human conversational way. "
+        "Avoid sounding robotic or like a formal announcement. "
+        "Use smooth pacing, a warm tone, and natural pauses. "
+        "If the text mixes languages, code-switch naturally instead of forcing one language style. "
+        + ("Use a slightly deeper voice style. " if configured_voice_gender == "male" else "Use a slightly softer voice style. ")
+        + _ba_language_instruction_from_text(input_text)
+    )
+    try:
+        response = requests.post(
+            OPENAI_AUDIO_SPEECH_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "gpt-4o-mini-tts",
+                "voice": selected_voice,
+                "input": input_text[:4096],
+                "instructions": instructions,
+                "response_format": "mp3",
+            },
+            timeout=120,
+        )
+    except requests.RequestException as exc:
+        return JsonResponse({"detail": f"openai_request_failed: {exc}"}, status=502)
+
+    if response.status_code >= 400:
+        try:
+            data = response.json() if response.content else {}
+        except ValueError:
+            data = {}
+        return JsonResponse({"detail": data.get("error", {}).get("message") or "openai_tts_failed"}, status=400)
+
+    audio_response = HttpResponse(response.content, content_type="audio/mpeg")
+    audio_response["Content-Disposition"] = 'inline; filename="assistant-reply.mp3"'
+    return audio_response
+
+
+@require_http_methods(["GET", "PUT", "DELETE"])
+def org_openai_chat_history(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    scope = _business_autopilot_ai_scope(request.user, org)
+    if not scope["can_chat"]:
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    raw_date = str(request.GET.get("date") or "").strip()
+    if request.method == "PUT":
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+        raw_date = str(payload.get("date") or raw_date).strip()
+    chat_date = parse_date(raw_date) if raw_date else timezone.localdate()
+    if not chat_date:
+        return JsonResponse({"detail": "invalid_date"}, status=400)
+
+    history_row = BusinessAutopilotChatHistory.objects.filter(
+        organization=org,
+        user=request.user,
+        chat_date=chat_date,
+    ).first()
+
+    if request.method == "GET":
+        return JsonResponse({
+            "date": chat_date.isoformat(),
+            "messages": _ba_normalize_history_messages(getattr(history_row, "messages", []), limit=250),
+            "updated_at": history_row.updated_at.isoformat() if history_row and history_row.updated_at else "",
+        })
+
+    if request.method == "DELETE":
+        if history_row:
+            history_row.delete()
+        return JsonResponse({"ok": True, "date": chat_date.isoformat()})
+
+    messages = _ba_normalize_history_messages(payload.get("messages"), limit=250)
+    history_row, _ = BusinessAutopilotChatHistory.objects.update_or_create(
+        organization=org,
+        user=request.user,
+        chat_date=chat_date,
+        defaults={"messages": messages},
+    )
+    return JsonResponse({
+        "ok": True,
+        "date": chat_date.isoformat(),
+        "messages": messages,
+        "updated_at": history_row.updated_at.isoformat() if history_row.updated_at else "",
+    })
+
+
+@require_http_methods(["POST"])
+def org_openai_chat(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    scope = _business_autopilot_ai_scope(request.user, org)
+    if not scope["can_chat"]:
+        return JsonResponse({"detail": "forbidden"}, status=403)
+
+    settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
+    if not settings_obj.business_autopilot_openai_enabled and not str(settings_obj.business_autopilot_openai_api_key or "").strip():
+        return JsonResponse({"detail": "assistant_not_enabled"}, status=400)
+    api_key = str(settings_obj.business_autopilot_openai_api_key or "").strip()
+    if not api_key:
+        return JsonResponse({"detail": "openai_api_key_missing"}, status=400)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_json"}, status=400)
+
     message = str(payload.get("message") or "").strip()
-    context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
     if not message:
         return JsonResponse({"detail": "message_required"}, status=400)
+    recent_messages = _ba_normalize_recent_messages(payload.get("recent_messages"))
+    current_section = str(payload.get("current_section") or "").strip().lower()
 
     agent_name = str(settings_obj.business_autopilot_ai_agent_name or DEFAULT_BA_OPENAI_AGENT_NAME).strip() or DEFAULT_BA_OPENAI_AGENT_NAME
     model = str(settings_obj.business_autopilot_openai_model or "gpt-4o-mini").strip() or "gpt-4o-mini"
+    context = _build_ba_assistant_scope_context(request.user, org, scope)
+    direct_answer = _ba_assistant_direct_answer(message, {
+        **context,
+        "scope": {
+            "can_access_crm": scope["can_access_crm"],
+            "can_access_hr": scope["can_access_hr"],
+            "can_access_accounts": scope["can_access_accounts"],
+            "can_access_billing": scope["can_access_billing"],
+        },
+    })
+    if direct_answer:
+        return JsonResponse({
+            "reply": direct_answer,
+            "agent_name": agent_name,
+            "model": "tool-direct",
+            "scope": {
+                "user_type": scope["user_type"],
+                "label": scope["label"],
+                "allowed_sections": scope["allowed_sections"],
+                "can_access_crm": scope["can_access_crm"],
+                "can_access_hr": scope["can_access_hr"],
+                "can_access_accounts": scope["can_access_accounts"],
+                "can_access_billing": scope["can_access_billing"],
+            },
+        })
     context_json = json.dumps(context, ensure_ascii=True)[:24000]
-    system_prompt = (
-        f"You are {agent_name}, an assistant for Work Zilla Business Autopilot. "
-        "Answer only from the provided organization context. "
-        "If data is missing, clearly say it is not available in the current dashboard data. "
-        "When appropriate, answer in short step-by-step bullets. "
-        "Do not invent names, counts, dates, or meetings."
+    system_prompt = _build_ba_assistant_system_prompt(
+        agent_name,
+        scope,
+        {
+            "organization_name": context.get("org_summary", {}).get("organization_name"),
+            "enabled_modules": context.get("product_capabilities", {}).get("enabled_modules") or [],
+        },
     )
+    conversation_text = "\n".join(
+        f"{row.get('role')}: {row.get('text')}"
+        for row in recent_messages
+    ).strip()
+    recent_conversation_block = f"Recent conversation:\n{conversation_text}\n\n" if conversation_text else ""
 
     try:
         response = requests.post(
@@ -5696,8 +7190,10 @@ def org_openai_chat(request):
                     {
                         "role": "user",
                         "content": (
+                            f"Current module/page: {current_section or 'unknown'}\n\n"
                             "Organization context JSON:\n"
                             f"{context_json}\n\n"
+                            f"{recent_conversation_block}"
                             f"User question: {message}"
                         ),
                     },
@@ -5723,6 +7219,15 @@ def org_openai_chat(request):
         "reply": answer_text,
         "agent_name": agent_name,
         "model": model,
+        "scope": {
+            "user_type": scope["user_type"],
+            "label": scope["label"],
+            "allowed_sections": scope["allowed_sections"],
+            "can_access_crm": scope["can_access_crm"],
+            "can_access_hr": scope["can_access_hr"],
+            "can_access_accounts": scope["can_access_accounts"],
+            "can_access_billing": scope["can_access_billing"],
+        },
     })
 
 

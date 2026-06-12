@@ -3,7 +3,7 @@ export const AI_EMOTION_MAP = {
   thinking: "🤔",
   explaining: "😊",
   happy: "😄",
-  concerned: "😐",
+  concerned: "😟",
 };
 
 const EMOTION_KEYWORDS = {
@@ -47,6 +47,7 @@ const EMOTION_KEYWORDS = {
     "saved",
   ],
   concerned: [
+    "sorry",
     "cannot",
     "can't",
     "unable",
@@ -55,6 +56,10 @@ const EMOTION_KEYWORDS = {
     "failed",
     "error",
     "not available",
+    "doesn't include",
+    "does not include",
+    "no access",
+    "forbidden",
     "blocked",
     "problem remains",
   ],

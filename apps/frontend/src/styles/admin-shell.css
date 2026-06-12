@@ -36,6 +36,10 @@ body {
   background: transparent;
 }
 
+.wz-admin-shell--assistant-fullscreen {
+  display: block;
+}
+
 .wz-sidebar {
   position: sticky;
   top: 0;
@@ -275,6 +279,12 @@ body {
   flex: 1;
   min-width: 0;
   flex-direction: column;
+  padding: 18px;
+}
+
+.wz-admin-shell--assistant-fullscreen .wz-workspace {
+  width: 100%;
+  min-height: 100vh;
   padding: 18px;
 }
 
@@ -940,6 +950,16 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
   align-items: flex-end;
 }
 
+.ba-assistant--page {
+  position: static;
+  right: auto;
+  bottom: auto;
+  align-items: stretch;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
 .saas-admin-assistant .ba-assistant__dock {
   justify-content: flex-end;
 }
@@ -986,6 +1006,11 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
   background: linear-gradient(180deg, rgba(var(--color-primary-rgb, 79, 70, 229), 0.08), transparent 24%), var(--wz-surface-3);
   box-shadow: 0 24px 60px rgba(2, 6, 23, 0.24);
   overflow: hidden;
+}
+
+.ba-assistant--page .ba-assistant__panel {
+  width: 100%;
+  min-height: 72vh;
 }
 
 .ba-assistant__header {
