@@ -5,6 +5,7 @@ import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, Vi
 import { apiGet, apiPost } from "@/core/api/http";
 import { useAuth } from "@/core/auth/AuthContext";
 import { API_BASE_URL } from "@/core/config/env";
+import { DEFAULT_PRODUCT_KEY, getMobileProduct } from "@/core/products/catalog";
 import { useThemeTokens } from "@/core/theme/useThemeTokens";
 import { AppTopHeader } from "@/modules/common/components/AppTopHeader";
 
@@ -42,16 +43,6 @@ type LoadState = {
   message: string;
 };
 
-const PRODUCT_HINTS: Record<string, string> = {
-  worksuite: "Employee monitoring, attendance, screenshots, and reports.",
-  "business-autopilot": "CRM, HRM, projects, accounts, subscriptions, and automation.",
-  "whatsapp-automation": "Campaigns, inbox, flows, and team messaging automation.",
-  "digital-automation": "Agency automation and managed service operations.",
-  "ai-chatbot": "Website chatbot, AI replies, agents, and conversation analytics.",
-  storage: "Cloud storage, device access, user slots, and bandwidth limits.",
-  "imposition-software": "Print marks, sheet sizes, and device-based licensing plans."
-};
-
 export default function PlansScreen() {
   const theme = useThemeTokens();
   const { loading: authLoading, session, refreshSession } = useAuth();
@@ -59,7 +50,7 @@ export default function PlansScreen() {
   const styles = createStyles(theme);
   const [state, setState] = useState<LoadState>({
     products: [],
-    selectedProduct: "worksuite",
+    selectedProduct: DEFAULT_PRODUCT_KEY,
     plans: [],
     trialDays: 15,
     freeEligible: true,
@@ -80,7 +71,7 @@ export default function PlansScreen() {
         const productData = await apiGet<PublicProductResponse>("/api/public/products");
         if (!active) return;
         const products = productData.products || [];
-        const selectedProduct = products[0]?.slug || "worksuite";
+        const selectedProduct = products[0]?.slug || DEFAULT_PRODUCT_KEY;
         setState((current) => ({ ...current, products, selectedProduct }));
         const planData = await apiGet<ProductPlansResponse>(`/api/public/plans?product=${selectedProduct}`);
         if (!active) return;
@@ -176,7 +167,7 @@ export default function PlansScreen() {
       <View style={styles.headerBlock}>
         <Text style={styles.eyebrow}>Pricing</Text>
         <Text style={styles.title}>Choose Your Plan</Text>
-        <Text style={styles.copy}>{PRODUCT_HINTS[state.selectedProduct] || "Choose a product and continue with its plan."}</Text>
+        <Text style={styles.copy}>{getMobileProduct(state.selectedProduct)?.planHint || "Choose a product and continue with its plan."}</Text>
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.productTabs}>

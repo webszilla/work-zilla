@@ -18,15 +18,7 @@ import { BrandedHeader } from "@/modules/common/components/BrandedHeader";
 import { WorksuiteDashboardPanel } from "@/modules/worksuite/components/WorksuiteDashboardPanel";
 import { WorksuiteEmployeesPanel } from "@/modules/worksuite/components/WorksuiteEmployeesPanel";
 import { WorksuiteProfilePanel } from "@/modules/worksuite/components/WorksuiteProfilePanel";
-
-const productDescriptions: Record<string, string> = {
-  monitor: "Work Suite mobile workspace for attendance, activity, and employee monitoring.",
-  worksuite: "Work Suite mobile workspace for attendance, activity, and employee monitoring.",
-  "business-autopilot-erp": "Business Autopilot mobile workspace for CRM, HR, projects, accounts, and stocks.",
-  storage: "Online Storage mobile workspace for organization files and folders.",
-  "ai-chatbot": "AI Chatbot mobile workspace for inbox, live chat, and leads.",
-  "imposition-software": "Print Marks mobile workspace for plan, license, and print operations."
-};
+import { getMobileProduct, normalizeMobileProductSlug } from "@/core/products/catalog";
 
 const worksuiteTabs = [
   { key: "dashboard", label: "Dashboard", icon: "home-outline" },
@@ -46,14 +38,15 @@ export default function ProductWorkspaceScreen() {
   const { slug } = useLocalSearchParams<{ slug: string }>();
   const theme = useThemeTokens();
   const styles = createStyles(theme);
-  const productSlug = String(slug || "monitor");
+  const productSlug = normalizeMobileProductSlug(slug);
+  const productMeta = getMobileProduct(productSlug);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [activeModule, setActiveModule] = useState<string | null>(null);
   const [attendanceNotice, setAttendanceNotice] = useState("");
   const [attendanceError, setAttendanceError] = useState("");
   const [attendanceSubmitting, setAttendanceSubmitting] = useState<"in" | "out" | "">("");
-  const isWorksuite = productSlug === "monitor" || productSlug === "worksuite" || productSlug === "work-suite";
-  const isBusinessAutopilot = productSlug === "business-autopilot-erp" || productSlug === "business-autopilot";
+  const isWorksuite = productSlug === "worksuite";
+  const isBusinessAutopilot = productSlug === "business-autopilot-erp";
 
   const handleBusinessTabPress = (nextTab: string) => {
     setActiveTab(nextTab);
@@ -122,8 +115,8 @@ export default function ProductWorkspaceScreen() {
           <View style={styles.hero}>
             <BrandedHeader
               eyebrow="Mobile Workspace"
-              title={isBusinessAutopilot ? "Business Autopilot" : productSlug}
-              subtitle={productDescriptions[productSlug] || "Native mobile product workspace."}
+              title={productMeta?.title || productSlug}
+              subtitle={productMeta?.mobileDescription || "Native mobile product workspace."}
               showBrandRow={false}
             />
           </View>

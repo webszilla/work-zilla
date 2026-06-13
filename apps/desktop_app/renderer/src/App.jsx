@@ -9,6 +9,12 @@ import SyncActivityScreen from "./screens/SyncActivityScreen.jsx";
 import UserActivityScreen from "./screens/UserActivityScreen.jsx";
 import ErrorsScreen from "./screens/ErrorsScreen.jsx";
 import SettingsScreen from "./screens/SettingsScreen.jsx";
+import {
+  getDesktopProduct,
+  hasDesktopLocalInstall,
+  hasDesktopProductAccess,
+  isKnownDesktopProduct
+} from "../../electron/productCatalog.js";
 const MonitorScreen = lazy(() => import("./screens/MonitorScreen.jsx"));
 const ImpositionScreen = lazy(() => import("./screens/ImpositionScreen.jsx"));
 const ChooseFoldersScreen = lazy(() => import("./screens/ChooseFoldersScreen.jsx"));
@@ -52,20 +58,17 @@ export default function App() {
     auth.user?.is_superuser ||
       (auth.role && ["company_admin", "superadmin", "super_admin"].includes(auth.role))
   );
-  const hasStorageAccess = useMemo(
-    () => new Set(auth?.enabled_products || []).has("storage"),
-    [auth?.enabled_products]
-  );
+  const hasStorageAccess = useMemo(() => hasDesktopProductAccess("storage", auth?.enabled_products), [auth?.enabled_products]);
   const hasLocalStorageInstall = useMemo(
-    () => new Set(auth?.local_installed_products || []).has("storage"),
+    () => hasDesktopLocalInstall("storage", auth?.local_installed_products),
     [auth?.local_installed_products]
   );
-  const hasImpositionAccess = useMemo(() => {
-    const enabled = new Set(auth?.enabled_products || []);
-    return enabled.has("imposition-software") || enabled.has("imposition");
-  }, [auth?.enabled_products]);
+  const hasImpositionAccess = useMemo(
+    () => hasDesktopProductAccess("imposition", auth?.enabled_products),
+    [auth?.enabled_products]
+  );
   const hasLocalImpositionInstall = useMemo(
-    () => new Set(auth?.local_installed_products || []).has("imposition"),
+    () => hasDesktopLocalInstall("imposition", auth?.local_installed_products),
     [auth?.local_installed_products]
   );
 
@@ -224,6 +227,31 @@ export default function App() {
     setPendingModule(null);
   }, [activeModule, auth.authenticated, hasImpositionAccess]);
 
+  function canLaunchProduct(productKey, nextAuth = auth) {
+    return (
+      hasDesktopProductAccess(productKey, nextAuth?.enabled_products) ||
+      hasDesktopLocalInstall(productKey, nextAuth?.local_installed_products)
+    );
+  }
+
+  function resolveNextModule(productKey, nextAuth) {
+    if (!isKnownDesktopProduct(productKey)) {
+      return "launcher";
+    }
+    const product = getDesktopProduct(productKey);
+    if (product?.requiresAuthForLaunch && !nextAuth?.authenticated) {
+      return "login";
+    }
+    if (productKey === "monitor") {
+      const enabledCount = new Set(nextAuth?.enabled_products || []).size;
+      if (nextAuth?.authenticated && enabledCount > 0 && !hasDesktopProductAccess(productKey, nextAuth?.enabled_products)) {
+        return "launcher";
+      }
+      return product.launchModule;
+    }
+    return canLaunchProduct(productKey, nextAuth) ? product.launchModule : "launcher";
+  }
+
   if (auth.loading) {
     return (
       <>
@@ -250,20 +278,7 @@ export default function App() {
             const next = await window.storageApi.login(payload);
             setAuth(next);
             if (pendingModule) {
-              const enabled = new Set(next?.enabled_products || []);
-              const localInstalled = new Set(next?.local_installed_products || []);
-              const nextHasStorage = new Set(next?.enabled_products || []).has("storage");
-              const nextHasMonitor = enabled.has("monitor") || enabled.has("worksuite");
-              const nextHasImposition = enabled.has("imposition-software") || enabled.has("imposition");
-              if (pendingModule === "storage" && !nextHasStorage && !localInstalled.has("storage")) {
-                setActiveModule("launcher");
-              } else if (pendingModule === "imposition" && !nextHasImposition && !localInstalled.has("imposition")) {
-                setActiveModule("launcher");
-              } else if (pendingModule === "monitor" && enabled.size > 0 && !nextHasMonitor) {
-                setActiveModule("launcher");
-              } else {
-                setActiveModule(pendingModule);
-              }
+              setActiveModule(resolveNextModule(pendingModule, next));
               setPendingModule(null);
             } else {
               setActiveModule("launcher");
@@ -294,33 +309,23 @@ export default function App() {
               setActiveModule("login");
               return;
             }
-            if (!connection.internet && (product === "storage" || product === "monitor" || product === "imposition")) {
+            if (!isKnownDesktopProduct(product)) {
               return;
             }
-            if (product === "storage" && !auth.authenticated) {
+            if (!connection.internet) {
+              return;
+            }
+            const productMeta = getDesktopProduct(product);
+            if (productMeta?.requiresAuthForLaunch && !auth.authenticated) {
               setPendingModule(product);
               setActiveModule("login");
               return;
             }
-            if (product === "storage" && auth.authenticated && !hasStorageAccess) {
-              if (!hasLocalStorageInstall) {
-                return;
-              }
-            }
-            if (product === "imposition" && auth.authenticated && !hasImpositionAccess) {
-              if (!hasLocalImpositionInstall) {
-                return;
-              }
-            }
-            if (product === "storage" && auth.authenticated && !hasStorageAccess && hasLocalStorageInstall) {
-              setActiveModule(product);
+            const nextModule = resolveNextModule(product, auth);
+            if (nextModule === "launcher") {
               return;
             }
-            if (product === "imposition" && auth.authenticated && !hasImpositionAccess && hasLocalImpositionInstall) {
-              setActiveModule(product);
-              return;
-            }
-            setActiveModule(product);
+            setActiveModule(nextModule);
             if (product === "storage" && hasStorageAccess) {
               window.storageApi.startSync();
             }

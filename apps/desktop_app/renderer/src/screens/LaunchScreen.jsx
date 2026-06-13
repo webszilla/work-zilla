@@ -1,17 +1,17 @@
 import { useEffect, useState } from "react";
+import {
+  canShowDesktopProduct,
+  getDesktopProducts,
+  hasDesktopLocalInstall,
+  hasDesktopProductAccess
+} from "../../../electron/productCatalog.js";
 
 export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
   const isAuthed = Boolean(auth?.authenticated);
   const isOnline = connection?.online !== false;
-  const enabledProducts = new Set(auth?.enabled_products || []);
   const [localInstalledProducts, setLocalInstalledProducts] = useState(
     () => new Set(auth?.local_installed_products || [])
   );
-  const canUseMonitor =
-    enabledProducts.has("monitor") || enabledProducts.has("worksuite") || localInstalledProducts.has("monitor");
-  const canUseStorage = enabledProducts.has("storage") || localInstalledProducts.has("storage");
-  const canUseImposition =
-    enabledProducts.has("imposition-software") || enabledProducts.has("imposition") || localInstalledProducts.has("imposition");
   const [agentVersion, setAgentVersion] = useState("");
   const [uninstalling, setUninstalling] = useState(false);
   const [uninstallMessage, setUninstallMessage] = useState("");
@@ -78,6 +78,20 @@ export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
   function handleClick(product) {
     onSelect(product);
   }
+
+  const productCards = getDesktopProducts()
+    .filter((product) =>
+      canShowDesktopProduct(product.key, {
+        ...auth,
+        local_installed_products: Array.from(localInstalledProducts)
+      })
+    )
+    .map((product) => ({
+      ...product,
+      canUse:
+        hasDesktopProductAccess(product.key, auth?.enabled_products) ||
+        hasDesktopLocalInstall(product.key, Array.from(localInstalledProducts))
+    }));
 
   async function refreshUpdateStatus() {
     if (!window.storageApi.checkForAppUpdate) {
@@ -286,47 +300,24 @@ export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
         </div>
 
         <div className="launch-grid">
-          {!isAuthed || canUseMonitor ? (
+          {productCards.map((product) => (
             <button
+              key={product.key}
               type="button"
               className="launch-tile"
-              onClick={() => handleClick("monitor")}
+              onClick={() => handleClick(product.key)}
               disabled={!isOnline}
             >
-              <div className="tile-title">Work Suite</div>
-              <div className="tile-desc">Activity visibility, screenshots, and productivity tracking.</div>
-              {workSuiteExpiryAlert ? <div className="tile-note tile-note-alert">{workSuiteExpiryAlert}</div> : null}
+              <div className="tile-title">{product.title}</div>
+              <div className="tile-desc">{product.description}</div>
+              {product.key === "monitor" && workSuiteExpiryAlert ? (
+                <div className="tile-note tile-note-alert">{workSuiteExpiryAlert}</div>
+              ) : null}
               {!isOnline ? <div className="tile-note">Offline. Reconnecting...</div> : null}
             </button>
-          ) : null}
-
-          {canUseStorage ? (
-            <button
-              type="button"
-              className="launch-tile"
-              onClick={() => handleClick("storage")}
-              disabled={!isOnline}
-            >
-              <div className="tile-title">Online Storage</div>
-              <div className="tile-desc">Secure storage sync and file backup.</div>
-              {!isOnline ? <div className="tile-note">Offline. Reconnecting...</div> : null}
-            </button>
-          ) : null}
-
-          {!isAuthed || canUseImposition ? (
-            <button
-              type="button"
-              className="launch-tile"
-              onClick={() => handleClick("imposition")}
-              disabled={!isOnline}
-            >
-              <div className="tile-title">Imposition Software</div>
-              <div className="tile-desc">Imposition Tool for Digital Printing Press.</div>
-              {!isOnline ? <div className="tile-note">Offline. Reconnecting...</div> : null}
-            </button>
-          ) : null}
+          ))}
         </div>
-        {isAuthed && !canUseMonitor && !canUseStorage && !canUseImposition ? (
+        {isAuthed && !productCards.some((product) => product.canUse) ? (
           <div className="launch-version">No active product enabled for this account.</div>
         ) : null}
         {uninstallMessage ? <div className="launch-uninstall-note">{uninstallMessage}</div> : null}

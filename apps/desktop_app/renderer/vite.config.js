@@ -8,7 +8,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
-    strictPort: true
+    strictPort: true,
+    fs: {
+      allow: [path.resolve(__dirname, "..")]
+    }
   },
   build: {
     outDir: path.resolve(__dirname, "dist"),

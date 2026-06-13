@@ -8,6 +8,7 @@ import { spawn, spawnSync } from "child_process";
 import { Readable } from "stream";
 import { pipeline } from "stream/promises";
 import { fileURLToPath } from "url";
+import { getDesktopProductKeys, isKnownDesktopProduct } from "./productCatalog.js";
 import SyncService from "./sync/SyncService.js";
 import { login, logout, checkAuth } from "./sync/auth.js";
 import { loadSettings, saveSettings, addFolder, removeFolder as removeLocalFolder, MAX_SYNC_FOLDERS_PER_DEVICE } from "./sync/settings.js";
@@ -61,7 +62,7 @@ const connectivityState = {
 };
 const SHARED_LAUNCH_PREF_PATH = path.join(os.homedir(), ".workzilla-product-launch.json");
 const SHARED_INSTALLED_PRODUCTS_PATH = path.join(os.homedir(), ".workzilla-installed-products.json");
-const PRODUCT_KEYS = ["monitor", "storage", "imposition"];
+const PRODUCT_KEYS = getDesktopProductKeys();
 
 process.on("uncaughtException", (error) => {
   const code = error?.code || error?.cause?.code || "";
@@ -90,7 +91,7 @@ function getSharedLaunchPreference() {
     }
     const raw = JSON.parse(fs.readFileSync(SHARED_LAUNCH_PREF_PATH, "utf8"));
     const preferredProduct = String(raw?.preferredProduct || "").trim().toLowerCase();
-    if (!["monitor", "storage", "imposition"].includes(preferredProduct)) {
+    if (!isKnownDesktopProduct(preferredProduct)) {
       return { preferredProduct: "" };
     }
     return { preferredProduct };
