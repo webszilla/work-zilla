@@ -408,6 +408,22 @@ def application_downloads_page(request):
         label = str(route.get("label") or "")
         path = str(route.get("path") or "")
         category = str(route.get("category") or "legacy")
+        if path == "/downloads/android-app/":
+            path = _build_latest_static_download_url(
+                request,
+                "Work Zilla Mobile-Android-*.apk",
+                "WorkZillaMobile-Android-*.apk",
+                "Work Zilla Mobile-Android-*.aab",
+                "WorkZillaMobile-Android-*.aab",
+                fallback_path=path,
+            )
+        elif path == "/downloads/ios-app/":
+            path = _build_latest_static_download_url(
+                request,
+                "Work Zilla Mobile-iOS-*.ipa",
+                "WorkZillaMobile-iOS-*.ipa",
+                fallback_path=path,
+            )
         haystack = f"{label} {path}".lower()
         icon_class = "bi-cloud-arrow-down"
         if "windows" in haystack:
@@ -426,10 +442,15 @@ def application_downloads_page(request):
         })
 
     table_rows = []
+    static_download_root = (Path(settings.BASE_DIR) / "static" / "downloads").resolve()
     for item in items:
         download_href = item["download_url"]
         if not download_href:
-            download_href = f"/downloads/files/{quote(item['filename'])}"
+            storage_key = item.get("storage_key")
+            if storage_key and Path(storage_key).resolve().is_relative_to(static_download_root):
+                download_href = f"/static/downloads/{quote(item['filename'])}"
+            else:
+                download_href = f"/downloads/files/{quote(item['filename'])}"
         table_rows.append({
             "filename": item["filename"],
             "product": item["product"],
