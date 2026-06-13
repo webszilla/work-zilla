@@ -358,7 +358,10 @@ def list_local_application_downloads():
             filename = os.path.basename(path)
             classifier = _classify_filename(filename)
             inferred_arch = _infer_arch_from_filename(filename)
-            stat = os.stat(path)
+            try:
+                stat = os.stat(path)
+            except OSError:
+                continue
             items.append({
                 "source": "local",
                 "family": family or classifier["family"],
