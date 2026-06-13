@@ -15,6 +15,8 @@ import requests
 
 from django.http import HttpResponse, JsonResponse, FileResponse
 from django.conf import settings
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.views.decorators.http import require_http_methods
 from django.db import DatabaseError, IntegrityError, OperationalError, transaction
 from django.db.models import Q, Min, Max
@@ -35,6 +37,14 @@ from apps.backend.products.models import Product
 from core.models import BillingProfile, Organization, OrganizationSettings, UserProductAccess, UserProfile, Subscription as OrgSubscription, BusinessAutopilotChatHistory, log_admin_activity
 from core.email_utils import send_templated_email
 from core.notification_emails import mark_email_verified
+from apps.backend.hrm.services.face_recognition_service import (
+    FaceRecognitionUnavailable,
+    FaceRecognitionValidationError,
+    compress_uploaded_photo,
+    encrypt_embeddings,
+    generate_embedding,
+    verify_employee_face,
+)
 
 from .models import (
     Module,
@@ -53,6 +63,9 @@ from .models import (
     EmployeeSalaryHistory,
     AttendanceEntry,
     AttendanceGeoSetting,
+    FaceRecognitionSetting,
+    EmployeeFaceProfile,
+    AttendancePhotoProof,
     PayrollEntry,
     PayrollSettings,
     Payslip,
@@ -2948,30 +2961,15 @@ def _attendance_geo_response(entry, *, action, message):
         "ok": True,
         "action": action,
         "message": message,
-        "attendance": {
-            "id": entry.id,
-            "employee_name": entry.employee_name,
-            "attendance_date": entry.attendance_date.isoformat(),
-            "checkin_time": entry.checkin_time.isoformat() if entry.checkin_time else None,
-            "checkout_time": entry.checkout_time.isoformat() if entry.checkout_time else None,
-            "checkin_latitude": float(entry.checkin_latitude) if entry.checkin_latitude is not None else None,
-            "checkin_longitude": float(entry.checkin_longitude) if entry.checkin_longitude is not None else None,
-            "checkin_accuracy": float(entry.checkin_accuracy) if entry.checkin_accuracy is not None else None,
-            "checkout_latitude": float(entry.checkout_latitude) if entry.checkout_latitude is not None else None,
-            "checkout_longitude": float(entry.checkout_longitude) if entry.checkout_longitude is not None else None,
-            "checkout_accuracy": float(entry.checkout_accuracy) if entry.checkout_accuracy is not None else None,
-            "checkin_distance_meters": float(entry.checkin_distance_meters) if entry.checkin_distance_meters is not None else None,
-            "checkout_distance_meters": float(entry.checkout_distance_meters) if entry.checkout_distance_meters is not None else None,
-            "checkin_inside_geofence": entry.checkin_inside_geofence,
-            "checkout_inside_geofence": entry.checkout_inside_geofence,
-            "geo_status": entry.geo_status,
-            "outside_reason": entry.outside_reason,
-            "device_info": entry.device_info,
-        },
+        "attendance": _serialize_attendance_entry(entry),
     }
 
 
 def _serialize_attendance_entry(entry):
+    latest_proof = getattr(entry, "_prefetched_latest_proof", None)
+    if latest_proof is None:
+        latest_proof = entry.photo_proofs.order_by("-created_at", "-id").select_related("verified_by").first() if getattr(entry, "pk", None) else None
+
     return {
         "id": entry.id,
         "employee_name": entry.employee_name,
@@ -2989,11 +2987,89 @@ def _serialize_attendance_entry(entry):
         "checkin_inside_geofence": entry.checkin_inside_geofence,
         "checkout_inside_geofence": entry.checkout_inside_geofence,
         "geo_status": entry.geo_status,
+        "attendance_mode": entry.attendance_mode,
+        "face_verified": bool(entry.face_verified),
+        "face_match_score": float(entry.face_match_score) if entry.face_match_score is not None else None,
+        "external_verification_status": str(entry.external_verification_status or "").strip(),
+        "verified_by": str(getattr(getattr(entry, "verified_by", None), "username", "") or "").strip(),
+        "verified_at": entry.verified_at.isoformat() if entry.verified_at else None,
+        "admin_notes": str(entry.admin_notes or "").strip(),
         "outside_reason": entry.outside_reason,
         "device_info": entry.device_info,
+        "photo_proof": _serialize_attendance_photo_proof(latest_proof) if latest_proof else None,
         "created_at": entry.created_at.isoformat() if entry.created_at else None,
         "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
     }
+
+
+def _serialize_face_recognition_setting(setting):
+    return {
+        "enabled": bool(getattr(setting, "enabled", False)),
+        "require_internal_face": bool(getattr(setting, "require_internal_face", False)),
+        "require_external_face": bool(getattr(setting, "require_external_face", False)),
+        "min_match_score": float(getattr(setting, "min_match_score", 0.90) or 0.90),
+        "photo_retention_days": int(getattr(setting, "photo_retention_days", 60) or 60),
+        "allow_external_photo_proof": bool(getattr(setting, "allow_external_photo_proof", True)),
+        "created_at": getattr(setting, "created_at", None).isoformat() if getattr(setting, "created_at", None) else None,
+        "updated_at": getattr(setting, "updated_at", None).isoformat() if getattr(setting, "updated_at", None) else None,
+    }
+
+
+def _can_view_attendance_proof(user: User, org: Organization, proof: AttendancePhotoProof) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_superuser or user.is_staff:
+        return True
+    if _can_manage_attendance_geo_settings(user, org):
+        return True
+    membership = _get_org_membership(user, org)
+    return bool(membership and membership.id == proof.employee_id)
+
+
+def _serialize_attendance_photo_proof(proof: AttendancePhotoProof, user: Optional[User] = None, org: Optional[Organization] = None):
+    can_view = bool(proof and user and org and _can_view_attendance_proof(user, org, proof))
+    photo_deleted = bool(proof and not getattr(proof, "image", None) and getattr(proof, "expires_at", None) and getattr(proof, "expires_at") <= timezone.now())
+    return {
+        "id": proof.id,
+        "attendance_mode": proof.attendance_mode,
+        "face_verified": bool(proof.face_verified),
+        "face_match_score": float(proof.face_match_score) if proof.face_match_score is not None else None,
+        "gps_latitude": float(proof.gps_latitude) if proof.gps_latitude is not None else None,
+        "gps_longitude": float(proof.gps_longitude) if proof.gps_longitude is not None else None,
+        "gps_accuracy": float(proof.gps_accuracy) if proof.gps_accuracy is not None else None,
+        "location_status": str(proof.location_status or "").strip(),
+        "external_verification_status": str(proof.external_verification_status or "").strip(),
+        "verified_by": str(getattr(getattr(proof, "verified_by", None), "username", "") or "").strip(),
+        "verified_at": proof.verified_at.isoformat() if proof.verified_at else None,
+        "admin_notes": str(proof.admin_notes or "").strip(),
+        "expires_at": proof.expires_at.isoformat() if proof.expires_at else None,
+        "created_at": proof.created_at.isoformat() if proof.created_at else None,
+        "photo_url": proof.image.url if can_view and getattr(proof, "image", None) else None,
+        "photo_deleted": photo_deleted,
+        "photo_deleted_message": "Photo deleted after retention period." if photo_deleted else "",
+        "can_view_photo": can_view,
+    }
+
+
+def cleanup_expired_attendance_photos(*, limit: int = 500) -> int:
+    now = timezone.now()
+    deleted_count = 0
+    rows = list(
+        AttendancePhotoProof.objects
+        .filter(expires_at__isnull=False, expires_at__lte=now)
+        .exclude(image="")
+        .exclude(image__isnull=True)
+        .order_by("expires_at", "id")[: max(1, int(limit or 500))]
+    )
+    for row in rows:
+        if row.image:
+            storage_name = row.image.name
+            row.image.delete(save=False)
+            if storage_name and default_storage.exists(storage_name):
+                default_storage.delete(storage_name)
+            row.save(update_fields=["image"])
+            deleted_count += 1
+    return deleted_count
 
 
 def _ensure_default_module_catalog():
@@ -6582,6 +6658,335 @@ def attendance_geo_checkin(request):
 @require_http_methods(["POST"])
 def attendance_geo_checkout(request):
     return _attendance_geo_punch(request, action="checkout")
+
+
+def _get_face_setting(org: Organization) -> FaceRecognitionSetting:
+    setting, _ = FaceRecognitionSetting.objects.get_or_create(
+        organization=org,
+        defaults={
+            "enabled": False,
+            "require_internal_face": False,
+            "require_external_face": False,
+            "min_match_score": Decimal("0.90"),
+            "photo_retention_days": 60,
+            "allow_external_photo_proof": True,
+        },
+    )
+    return setting
+
+
+@require_http_methods(["GET"])
+def hrm_face_settings(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    setting = _get_face_setting(org)
+    return JsonResponse({"setting": _serialize_face_recognition_setting(setting)})
+
+
+@require_http_methods(["POST"])
+def hrm_face_settings_update(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    if not _can_manage_attendance_geo_settings(request.user, org):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_json"}, status=400)
+
+    setting = _get_face_setting(org)
+    setting.enabled = bool(payload.get("enabled", setting.enabled))
+    setting.require_internal_face = bool(payload.get("require_internal_face", setting.require_internal_face))
+    setting.require_external_face = bool(payload.get("require_external_face", setting.require_external_face))
+    setting.allow_external_photo_proof = bool(payload.get("allow_external_photo_proof", setting.allow_external_photo_proof))
+    try:
+        setting.min_match_score = Decimal(str(payload.get("min_match_score", setting.min_match_score)))
+        setting.photo_retention_days = int(payload.get("photo_retention_days", setting.photo_retention_days))
+    except (InvalidOperation, TypeError, ValueError):
+        return JsonResponse({"detail": "invalid_face_settings"}, status=400)
+    if setting.min_match_score < Decimal("0.50") or setting.min_match_score > Decimal("0.99"):
+        return JsonResponse({"detail": "min_match_score_range"}, status=400)
+    if setting.photo_retention_days < 1 or setting.photo_retention_days > 365:
+        return JsonResponse({"detail": "photo_retention_days_range"}, status=400)
+    setting.save()
+    return JsonResponse({"setting": _serialize_face_recognition_setting(setting)})
+
+
+@require_http_methods(["GET"])
+def hrm_face_enrollment_status(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    setting = _get_face_setting(org)
+    membership = _get_org_membership(request.user, org)
+    if not membership:
+        return JsonResponse({"detail": "employee_not_found"}, status=403)
+    profile = EmployeeFaceProfile.objects.filter(organization=org, employee=membership, is_active=True).first()
+    enrolled = bool(profile and membership.face_enrolled)
+    return JsonResponse({
+        "enabled": bool(setting.enabled),
+        "employee_name": _get_org_user_display_name(request.user),
+        "employee_membership_id": membership.id,
+        "face_enrolled": enrolled,
+        "requires_enrollment": bool(setting.enabled and not enrolled),
+        "min_required_images": 3,
+        "max_required_images": 5,
+    })
+
+
+@require_http_methods(["POST"])
+def hrm_face_enrollment_capture(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    setting = _get_face_setting(org)
+    membership = _get_org_membership(request.user, org)
+    if not membership:
+        return JsonResponse({"detail": "employee_not_found"}, status=403)
+    if not setting.enabled:
+        return JsonResponse({"detail": "face_recognition_not_enabled"}, status=400)
+    images = request.FILES.getlist("images")
+    if len(images) < 3 or len(images) > 5:
+        return JsonResponse({"detail": "enrollment_images_3_to_5_required"}, status=400)
+
+    embeddings = []
+    try:
+        for image in images:
+            embeddings.append(generate_embedding(image))
+    except FaceRecognitionUnavailable as exc:
+        return JsonResponse({"detail": "face_library_unavailable", "message": str(exc)}, status=503)
+    except FaceRecognitionValidationError as exc:
+        return JsonResponse({"detail": "face_validation_failed", "message": str(exc)}, status=400)
+
+    profile, _ = EmployeeFaceProfile.objects.update_or_create(
+        organization=org,
+        employee=membership,
+        defaults={
+            "face_embedding": encrypt_embeddings(embeddings),
+            "embedding_model_name": "face_recognition/128d",
+            "enrolled_at": timezone.now(),
+            "is_active": True,
+        },
+    )
+    membership.face_enrolled = True
+    membership.save(update_fields=["face_enrolled", "updated_at"])
+    return JsonResponse({
+        "ok": True,
+        "face_enrolled": True,
+        "enrolled_at": profile.enrolled_at.isoformat() if profile.enrolled_at else None,
+    })
+
+
+def _face_upload_file(request):
+    uploaded = request.FILES.get("image") or request.FILES.get("photo") or request.FILES.get("selfie")
+    if not uploaded:
+        raise FaceRecognitionValidationError("Face photo is required.")
+    if uploaded.size > 8 * 1024 * 1024:
+        raise FaceRecognitionValidationError("Photo size must be 8 MB or less.")
+    content_type = str(getattr(uploaded, "content_type", "") or "").lower()
+    if content_type and not content_type.startswith("image/"):
+        raise FaceRecognitionValidationError("Only image uploads are allowed.")
+    return uploaded
+
+
+def _parse_attendance_mode(setting: AttendanceGeoSetting, latitude, longitude, accuracy):
+    if setting and setting.enabled and setting.latitude is not None and setting.longitude is not None and latitude is not None and longitude is not None:
+        distance_meters = _attendance_haversine_distance_meters(latitude, longitude, float(setting.latitude), float(setting.longitude))
+        inside_geofence = distance_meters <= float(setting.radius_meters or 0)
+        return (
+            AttendanceEntry.MODE_INTERNAL if inside_geofence else AttendanceEntry.MODE_EXTERNAL,
+            distance_meters,
+            inside_geofence,
+            AttendanceEntry.GEO_STATUS_INSIDE if inside_geofence else AttendanceEntry.GEO_STATUS_OUTSIDE,
+        )
+    return AttendanceEntry.MODE_SELF, None, None, AttendanceEntry.GEO_STATUS_MANUAL
+
+
+@require_http_methods(["POST"])
+def hrm_attendance_checkin_face(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    membership = _get_org_membership(request.user, org)
+    if not membership or _normalize_membership_status(membership) != OrganizationUser.STATUS_ACTIVE:
+        return JsonResponse({"detail": "employee_not_found"}, status=403)
+
+    face_setting = _get_face_setting(org)
+    if not face_setting.enabled:
+        return JsonResponse({"detail": "face_recognition_not_enabled"}, status=400)
+    face_profile = EmployeeFaceProfile.objects.filter(organization=org, employee=membership, is_active=True).first()
+    if not face_profile or not membership.face_enrolled:
+        return JsonResponse({"detail": "face_enrollment_required"}, status=400)
+
+    try:
+        uploaded = _face_upload_file(request)
+        latitude = _attendance_float(request.POST, "latitude")
+        longitude = _attendance_float(request.POST, "longitude")
+        accuracy = _attendance_float(request.POST, "accuracy")
+        outside_reason = str(request.POST.get("outside_reason") or "").strip()
+    except FaceRecognitionValidationError as exc:
+        return JsonResponse({"detail": "invalid_face_image", "message": str(exc)}, status=400)
+    except ValueError as exc:
+        return JsonResponse({"detail": str(exc)}, status=400)
+
+    geo_setting = AttendanceGeoSetting.objects.filter(organization=org).first()
+    attendance_mode, distance_meters, inside_geofence, geo_status = _parse_attendance_mode(geo_setting, latitude, longitude, accuracy)
+    if attendance_mode == AttendanceEntry.MODE_EXTERNAL and geo_setting and not geo_setting.allow_outside_fence:
+        return JsonResponse({"detail": "outside_office_radius", "message": "You are outside the allowed office radius."}, status=400)
+    if attendance_mode == AttendanceEntry.MODE_EXTERNAL and not face_setting.allow_external_photo_proof:
+        return JsonResponse({"detail": "external_photo_proof_disabled"}, status=400)
+    if attendance_mode == AttendanceEntry.MODE_EXTERNAL and not outside_reason:
+        return JsonResponse({"detail": "outside_reason_required", "message": "Outside reason is required."}, status=400)
+
+    require_face = (
+        attendance_mode == AttendanceEntry.MODE_INTERNAL and face_setting.require_internal_face
+    ) or (
+        attendance_mode == AttendanceEntry.MODE_EXTERNAL and face_setting.require_external_face
+    ) or attendance_mode == AttendanceEntry.MODE_SELF
+    if not require_face:
+        return JsonResponse({"detail": "face_verification_not_required"}, status=400)
+
+    try:
+        verification = verify_employee_face(face_profile, uploaded, min_score=float(face_setting.min_match_score))
+    except FaceRecognitionUnavailable as exc:
+        return JsonResponse({"detail": "face_library_unavailable", "message": str(exc)}, status=503)
+    except FaceRecognitionValidationError as exc:
+        return JsonResponse({"detail": "face_verification_failed", "message": str(exc)}, status=400)
+    if not verification.matched:
+        return JsonResponse({"detail": "face_mismatch", "score": verification.score, "threshold": verification.threshold}, status=400)
+
+    compressed = compress_uploaded_photo(uploaded)
+    now = timezone.now()
+    today = timezone.localdate()
+    employee_name = _get_org_user_display_name(request.user)
+    device_info = str(request.META.get("HTTP_USER_AGENT") or "").strip()[:1000]
+    retention_days = int(face_setting.photo_retention_days or 60)
+
+    with transaction.atomic():
+        entry, _ = AttendanceEntry.objects.select_for_update().get_or_create(
+            organization=org,
+            employee_membership=membership,
+            attendance_date=today,
+            defaults={"employee_name": employee_name},
+        )
+        if entry.checkin_time:
+            return JsonResponse({"detail": "duplicate_checkin", "message": "Check-in already exists for today."}, status=400)
+        entry.employee_name = employee_name
+        entry.checkin_time = now
+        entry.checkin_latitude = latitude
+        entry.checkin_longitude = longitude
+        entry.checkin_accuracy = accuracy
+        entry.checkin_distance_meters = distance_meters
+        entry.checkin_inside_geofence = inside_geofence
+        entry.geo_status = geo_status
+        entry.attendance_mode = attendance_mode
+        entry.face_verified = True
+        entry.face_match_score = verification.score
+        entry.device_info = device_info
+        entry.outside_reason = outside_reason
+        if attendance_mode == AttendanceEntry.MODE_EXTERNAL:
+            entry.external_verification_status = AttendanceEntry.EXTERNAL_STATUS_PENDING
+            entry.verified_by = None
+            entry.verified_at = None
+        entry.save()
+
+        proof = AttendancePhotoProof(
+            organization=org,
+            employee=membership,
+            attendance=entry,
+            attendance_mode=attendance_mode,
+            face_verified=True,
+            face_match_score=verification.score,
+            gps_latitude=latitude,
+            gps_longitude=longitude,
+            gps_accuracy=accuracy,
+            location_status="Inside Fence" if attendance_mode == AttendanceEntry.MODE_INTERNAL else ("Outside Fence" if attendance_mode == AttendanceEntry.MODE_EXTERNAL else "Manual"),
+            external_verification_status=AttendancePhotoProof.VERIFICATION_PENDING if attendance_mode == AttendanceEntry.MODE_EXTERNAL else AttendancePhotoProof.VERIFICATION_APPROVED,
+            expires_at=now + timedelta(days=retention_days),
+        )
+        proof.image.save(
+            f"attendance-proof-{membership.id}-{today.isoformat()}.jpg",
+            ContentFile(compressed.read()),
+            save=False,
+        )
+        proof.save()
+        entry._prefetched_latest_proof = proof
+
+    response = _attendance_geo_response(
+        entry,
+        action="checkin_face",
+        message="Face verified and attendance check-in saved successfully.",
+    )
+    response["proof"] = _serialize_attendance_photo_proof(proof, request.user, org)
+    return JsonResponse(response)
+
+
+def _update_external_proof_status(request, *, next_status: str):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    if not _can_manage_attendance_geo_settings(request.user, org):
+        return JsonResponse({"detail": "forbidden"}, status=403)
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_json"}, status=400)
+    proof_id = payload.get("proof_id")
+    attendance_id = payload.get("attendance_id")
+    proof = AttendancePhotoProof.objects.filter(organization=org).select_related("attendance", "verified_by").order_by("-created_at", "-id")
+    if proof_id:
+        proof = proof.filter(id=proof_id).first()
+    elif attendance_id:
+        proof = proof.filter(attendance_id=attendance_id).first()
+    else:
+        proof = None
+    if not proof:
+        return JsonResponse({"detail": "proof_not_found"}, status=404)
+
+    notes = str(payload.get("admin_notes") or "").strip()
+    proof.external_verification_status = next_status
+    proof.verified_by = request.user
+    proof.verified_at = timezone.now()
+    proof.admin_notes = notes
+    proof.save(update_fields=["external_verification_status", "verified_by", "verified_at", "admin_notes"])
+
+    attendance = proof.attendance
+    attendance.external_verification_status = next_status
+    attendance.verified_by = request.user
+    attendance.verified_at = proof.verified_at
+    attendance.admin_notes = notes
+    attendance.save(update_fields=["external_verification_status", "verified_by", "verified_at", "admin_notes", "updated_at"])
+    attendance._prefetched_latest_proof = proof
+
+    return JsonResponse({
+        "ok": True,
+        "attendance": _serialize_attendance_entry(attendance),
+        "proof": _serialize_attendance_photo_proof(proof, request.user, org),
+    })
+
+
+@require_http_methods(["POST"])
+def hrm_attendance_external_proof_verify(request):
+    return _update_external_proof_status(request, next_status=AttendancePhotoProof.VERIFICATION_APPROVED)
+
+
+@require_http_methods(["POST"])
+def hrm_attendance_external_proof_reject(request):
+    return _update_external_proof_status(request, next_status=AttendancePhotoProof.VERIFICATION_REJECTED)
 
 
 @require_http_methods(["GET"])

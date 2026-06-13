@@ -56,6 +56,13 @@ setuptools>=69.0.0
 # PDF / Reports
 reportlab==4.4.7
 openpyxl==3.1.5
+Pillow>=10.4.0
+
+# Local Face Recognition
+insightface>=0.7.3
+onnxruntime>=1.18.0
+opencv-python-headless>=4.10.0
+numpy>=1.26.0
 
 # Payments
 razorpay==2.0.0

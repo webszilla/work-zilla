@@ -74,6 +74,7 @@ class OrganizationUser(models.Model):
     user_type = models.CharField(max_length=32, choices=USER_TYPE_CHOICES, default=USER_TYPE_FULL, db_index=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_ACTIVE, db_index=True)
     is_active = models.BooleanField(default=True)
+    face_enrolled = models.BooleanField(default=False)
     is_deleted = models.BooleanField(default=False)
     deleted_at = models.DateTimeField(null=True, blank=True)
     resigned_at = models.DateTimeField(null=True, blank=True)
@@ -391,6 +392,24 @@ class AttendanceEntry(models.Model):
         (GEO_STATUS_GPS_NOT_AVAILABLE, "GPS Not Available"),
         (GEO_STATUS_MANUAL, "Manual"),
     )
+    MODE_INTERNAL = "internal"
+    MODE_EXTERNAL = "external"
+    MODE_ADMIN = "admin"
+    MODE_SELF = "self"
+    MODE_CHOICES = (
+        (MODE_INTERNAL, "Internal"),
+        (MODE_EXTERNAL, "External"),
+        (MODE_ADMIN, "Admin"),
+        (MODE_SELF, "Self"),
+    )
+    EXTERNAL_STATUS_PENDING = "pending"
+    EXTERNAL_STATUS_APPROVED = "approved"
+    EXTERNAL_STATUS_REJECTED = "rejected"
+    EXTERNAL_STATUS_CHOICES = (
+        (EXTERNAL_STATUS_PENDING, "Pending"),
+        (EXTERNAL_STATUS_APPROVED, "Approved"),
+        (EXTERNAL_STATUS_REJECTED, "Rejected"),
+    )
 
     organization = models.ForeignKey(
         "core.Organization",
@@ -417,6 +436,19 @@ class AttendanceEntry(models.Model):
     checkin_inside_geofence = models.BooleanField(null=True, blank=True)
     checkout_inside_geofence = models.BooleanField(null=True, blank=True)
     geo_status = models.CharField(max_length=24, choices=GEO_STATUS_CHOICES, default=GEO_STATUS_MANUAL)
+    attendance_mode = models.CharField(max_length=16, choices=MODE_CHOICES, default=MODE_SELF)
+    face_verified = models.BooleanField(default=False)
+    face_match_score = models.DecimalField(max_digits=5, decimal_places=4, null=True, blank=True)
+    external_verification_status = models.CharField(max_length=16, choices=EXTERNAL_STATUS_CHOICES, blank=True, default="")
+    verified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_attendance_verified_entries",
+    )
+    verified_at = models.DateTimeField(null=True, blank=True)
+    admin_notes = models.TextField(blank=True, default="")
     outside_reason = models.CharField(max_length=255, blank=True, default="")
     device_info = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -428,6 +460,115 @@ class AttendanceEntry(models.Model):
 
     def __str__(self):
         return f"{self.organization_id} - {self.employee_name} ({self.attendance_date})"
+
+
+class FaceRecognitionSetting(models.Model):
+    organization = models.OneToOneField(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_face_recognition_setting",
+    )
+    enabled = models.BooleanField(default=False)
+    require_internal_face = models.BooleanField(default=False)
+    require_external_face = models.BooleanField(default=False)
+    min_match_score = models.DecimalField(max_digits=4, decimal_places=2, default=0.90)
+    photo_retention_days = models.PositiveIntegerField(default=60)
+    allow_external_photo_proof = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at",)
+
+    def __str__(self):
+        return f"FaceRecognitionSetting(org={self.organization_id})"
+
+
+class EmployeeFaceProfile(models.Model):
+    organization = models.ForeignKey(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_employee_face_profiles",
+    )
+    employee = models.OneToOneField(
+        OrganizationUser,
+        on_delete=models.CASCADE,
+        related_name="face_profile",
+    )
+    face_embedding = models.TextField()
+    embedding_model_name = models.CharField(max_length=120, default="face_recognition/128d")
+    enrolled_at = models.DateTimeField(default=timezone.now)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at",)
+
+    def __str__(self):
+        return f"EmployeeFaceProfile(org={self.organization_id}, employee={self.employee_id})"
+
+
+def _attendance_photo_proof_upload_to(instance, filename: str):
+    org_id = getattr(instance, "organization_id", None) or "unknown"
+    attendance_id = getattr(instance, "attendance_id", None) or "unknown"
+    employee_id = getattr(instance, "employee_id", None) or "unknown"
+    timestamp = timezone.now().strftime("%Y%m%d%H%M%S")
+    safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", str(filename or "proof.jpg"))
+    return f"business_autopilot/attendance_proofs/{org_id}/{employee_id}/{attendance_id}/{timestamp}_{safe_name}"
+
+
+class AttendancePhotoProof(models.Model):
+    VERIFICATION_PENDING = "pending"
+    VERIFICATION_APPROVED = "approved"
+    VERIFICATION_REJECTED = "rejected"
+    VERIFICATION_CHOICES = (
+        (VERIFICATION_PENDING, "Pending"),
+        (VERIFICATION_APPROVED, "Approved"),
+        (VERIFICATION_REJECTED, "Rejected"),
+    )
+
+    organization = models.ForeignKey(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_attendance_photo_proofs",
+    )
+    employee = models.ForeignKey(
+        OrganizationUser,
+        on_delete=models.CASCADE,
+        related_name="attendance_photo_proofs",
+    )
+    attendance = models.ForeignKey(
+        AttendanceEntry,
+        on_delete=models.CASCADE,
+        related_name="photo_proofs",
+    )
+    image = models.ImageField(upload_to=_attendance_photo_proof_upload_to, null=True, blank=True)
+    attendance_mode = models.CharField(max_length=16, choices=AttendanceEntry.MODE_CHOICES, default=AttendanceEntry.MODE_SELF)
+    face_verified = models.BooleanField(default=False)
+    face_match_score = models.DecimalField(max_digits=5, decimal_places=4, null=True, blank=True)
+    gps_latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    gps_longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    gps_accuracy = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    location_status = models.CharField(max_length=64, blank=True, default="")
+    external_verification_status = models.CharField(max_length=16, choices=VERIFICATION_CHOICES, default=VERIFICATION_PENDING)
+    verified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_attendance_verified_proofs",
+    )
+    verified_at = models.DateTimeField(null=True, blank=True)
+    admin_notes = models.TextField(blank=True, default="")
+    expires_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"AttendancePhotoProof(org={self.organization_id}, attendance={self.attendance_id})"
 
 
 class PayrollEntry(models.Model):

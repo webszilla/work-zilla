@@ -5,6 +5,7 @@ import { apiFetch } from "../lib/api.js";
 import { DIAL_CODE_OPTIONS, DIAL_CODE_LABEL_OPTIONS, COUNTRY_OPTIONS, getStateOptionsForCountry } from "../lib/locationData.js";
 import TablePagination from "../components/TablePagination.jsx";
 import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
+import FaceCaptureModal from "../components/attendance/FaceCaptureModal.jsx";
 import { showUploadAlert } from "../lib/uploadAlert.js";
 import { getOrgCurrency, setOrgCurrency as applyOrgCurrency } from "../lib/orgCurrency.js";
 import { readSpreadsheetRows } from "../lib/spreadsheetImport.js";
@@ -24537,6 +24538,27 @@ export function HrManagementModule({
   const [geoSettingsNotice, setGeoSettingsNotice] = useState("");
   const [geoPunchNotice, setGeoPunchNotice] = useState("");
   const [geoPunchLoading, setGeoPunchLoading] = useState(false);
+  const [faceSettings, setFaceSettings] = useState({
+    enabled: false,
+    require_internal_face: false,
+    require_external_face: false,
+    min_match_score: "0.90",
+    photo_retention_days: "60",
+    allow_external_photo_proof: true,
+  });
+  const [faceSettingsNotice, setFaceSettingsNotice] = useState("");
+  const [faceEnrollmentState, setFaceEnrollmentState] = useState({
+    loaded: false,
+    enabled: false,
+    face_enrolled: false,
+    requires_enrollment: false,
+    min_required_images: 3,
+    max_required_images: 5,
+  });
+  const [faceEnrollmentBusy, setFaceEnrollmentBusy] = useState(false);
+  const [faceEnrollmentError, setFaceEnrollmentError] = useState("");
+  const [facePunchModal, setFacePunchModal] = useState({ open: false, action: "in" });
+  const [facePunchError, setFacePunchError] = useState("");
   const attendancePunchLockRef = useRef(false);
   const [myAttendanceGeoMeta, setMyAttendanceGeoMeta] = useState(null);
   const [formValues, setFormValues] = useState({
@@ -25637,6 +25659,59 @@ export function HrManagementModule({
       }
     }
     loadGeoAttendanceSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadFaceSettings() {
+      try {
+        const data = await apiFetch("/api/hrm/face-settings/");
+        if (cancelled) return;
+        const setting = data?.setting || {};
+        setFaceSettings({
+          enabled: Boolean(setting.enabled),
+          require_internal_face: Boolean(setting.require_internal_face),
+          require_external_face: Boolean(setting.require_external_face),
+          min_match_score: String(setting.min_match_score ?? "0.90"),
+          photo_retention_days: String(setting.photo_retention_days ?? "60"),
+          allow_external_photo_proof: setting.allow_external_photo_proof !== false,
+        });
+      } catch (_error) {
+        if (!cancelled) {
+          setFaceSettings((prev) => ({ ...prev, enabled: false }));
+        }
+      }
+    }
+    loadFaceSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadFaceEnrollmentStatus() {
+      try {
+        const data = await apiFetch("/api/hrm/face-enrollment/status/");
+        if (cancelled) return;
+        setFaceEnrollmentState({
+          loaded: true,
+          enabled: Boolean(data?.enabled),
+          face_enrolled: Boolean(data?.face_enrolled),
+          requires_enrollment: Boolean(data?.requires_enrollment),
+          min_required_images: Number(data?.min_required_images || 3),
+          max_required_images: Number(data?.max_required_images || 5),
+        });
+      } catch (_error) {
+        if (!cancelled) {
+          setFaceEnrollmentState((prev) => ({ ...prev, loaded: true }));
+        }
+      }
+    }
+    loadFaceEnrollmentStatus();
     return () => {
       cancelled = true;
     };
@@ -27137,10 +27212,51 @@ export function HrManagementModule({
     }
   }
 
+  async function saveFaceRecognitionSettings(event) {
+    event?.preventDefault?.();
+    const minScore = Number(faceSettings.min_match_score);
+    const retentionDays = Number(faceSettings.photo_retention_days);
+    if (!Number.isFinite(minScore) || minScore < 0.5 || minScore > 0.99) {
+      setFaceSettingsNotice("Minimum face match score must be between 0.50 and 0.99");
+      return;
+    }
+    if (!Number.isFinite(retentionDays) || retentionDays < 1 || retentionDays > 365) {
+      setFaceSettingsNotice("Photo retention days must be between 1 and 365");
+      return;
+    }
+    try {
+      const data = await apiFetch("/api/hrm/face-settings/update/", {
+        method: "POST",
+        body: JSON.stringify({
+          enabled: faceSettings.enabled,
+          require_internal_face: faceSettings.require_internal_face,
+          require_external_face: faceSettings.require_external_face,
+          min_match_score: minScore,
+          photo_retention_days: retentionDays,
+          allow_external_photo_proof: faceSettings.allow_external_photo_proof,
+        }),
+      });
+      const setting = data?.setting || {};
+      setFaceSettings({
+        enabled: Boolean(setting.enabled),
+        require_internal_face: Boolean(setting.require_internal_face),
+        require_external_face: Boolean(setting.require_external_face),
+        min_match_score: String(setting.min_match_score ?? "0.90"),
+        photo_retention_days: String(setting.photo_retention_days ?? "60"),
+        allow_external_photo_proof: setting.allow_external_photo_proof !== false,
+      });
+      setFaceSettingsNotice("Face recognition settings saved.");
+      setFaceEnrollmentState((prev) => ({ ...prev, enabled: Boolean(setting.enabled), requires_enrollment: Boolean(setting.enabled && !prev.face_enrolled) }));
+    } catch (error) {
+      setFaceSettingsNotice(String(error?.message || "Unable to save face recognition settings."));
+    }
+  }
+
   function syncGeoAttendanceRowFromApi(attendance = {}) {
     const attendanceDate = String(attendance.attendance_date || todayIso).trim() || todayIso;
     const employee = String(myAttendanceEmployee || currentHrEmployeeName || "").trim();
     if (!employee) return;
+    const proof = attendance.photo_proof || {};
     const checkinLat = attendance.checkin_latitude;
     const checkinLng = attendance.checkin_longitude;
     const checkoutLat = attendance.checkout_latitude;
@@ -27163,6 +27279,19 @@ export function HrManagementModule({
         checkoutLng,
         geoStatus: attendance.geo_status || "",
         outsideReason: attendance.outside_reason || "",
+        attendanceMode: attendance.attendance_mode || "",
+        faceVerified: Boolean(attendance.face_verified),
+        faceMatchScore: attendance.face_match_score ?? "",
+        externalVerificationStatus: attendance.external_verification_status || proof.external_verification_status || "",
+        verifiedBy: attendance.verified_by || proof.verified_by || "",
+        verifiedAt: attendance.verified_at || proof.verified_at || "",
+        adminNotes: attendance.admin_notes || proof.admin_notes || "",
+        photoProofId: proof.id || "",
+        photoProofUrl: proof.photo_url || "",
+        photoProofDeleted: Boolean(proof.photo_deleted),
+        photoProofDeletedMessage: proof.photo_deleted_message || "",
+        photoProofCanView: Boolean(proof.can_view_photo),
+        photoProof: proof,
       },
       action: "Geo Attendance",
     });
@@ -27233,6 +27362,86 @@ export function HrManagementModule({
       setGeoPunchLoading(false);
       setGeoPunchNotice("Location permission denied. Please enable GPS permission.");
     }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+  }
+
+  async function submitFaceEnrollment(files) {
+    setFaceEnrollmentBusy(true);
+    setFaceEnrollmentError("");
+    try {
+      const formData = new FormData();
+      files.forEach((file) => formData.append("images", file));
+      await apiFetch("/api/hrm/face-enrollment/capture/", {
+        method: "POST",
+        body: formData,
+      });
+      setFaceEnrollmentState((prev) => ({
+        ...prev,
+        face_enrolled: true,
+        requires_enrollment: false,
+      }));
+    } catch (error) {
+      setFaceEnrollmentError(String(error?.message || "Unable to complete face enrollment."));
+    } finally {
+      setFaceEnrollmentBusy(false);
+    }
+  }
+
+  function openFacePunchModal(action = "in") {
+    setFacePunchError("");
+    setFacePunchModal({ open: true, action });
+  }
+
+  async function submitFacePunch(files) {
+    const selectedEmployee = String(myAttendanceEmployee || "").trim();
+    const selfEmployee = String(currentHrEmployeeName || "").trim();
+    if (!selectedEmployee || (selfEmployee && selectedEmployee !== selfEmployee)) {
+      setFacePunchError("Employees can only check-in for themselves.");
+      return;
+    }
+    const file = files?.[0];
+    if (!file) {
+      setFacePunchError("Face photo is required.");
+      return;
+    }
+    setGeoPunchLoading(true);
+    setFacePunchError("");
+    try {
+      const coords = await new Promise((resolve) => {
+        if (!navigator.geolocation) {
+          resolve(null);
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          (position) => resolve(position.coords),
+          () => resolve(null),
+          { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+        );
+      });
+      const formData = new FormData();
+      formData.append("image", file);
+      if (coords) {
+        formData.append("latitude", String(coords.latitude));
+        formData.append("longitude", String(coords.longitude));
+        formData.append("accuracy", String(coords.accuracy));
+      }
+      if (coords && faceSettings.allow_external_photo_proof) {
+        const reason = window.prompt("If you are outside office/client location, enter reason. Otherwise leave blank.", "");
+        if (reason) {
+          formData.append("outside_reason", reason);
+        }
+      }
+      const data = await apiFetch("/api/hrm/attendance/checkin-face/", {
+        method: "POST",
+        body: formData,
+      });
+      syncGeoAttendanceRowFromApi({ ...(data?.attendance || {}), photo_proof: data?.proof || data?.attendance?.photo_proof || {} });
+      setGeoPunchNotice(String(data?.message || "Face verified and attendance saved."));
+      setFacePunchModal({ open: false, action: "in" });
+    } catch (error) {
+      setFacePunchError(String(error?.message || "Unable to verify face attendance."));
+    } finally {
+      setGeoPunchLoading(false);
+    }
   }
 
   function handleAttendancePunch(action, employeeName, source = "User Side") {
@@ -27634,7 +27843,7 @@ export function HrManagementModule({
       th, td {
         border: 1px solid var(--line);
         vertical-align: top;
-        padding: 8px 10px;
+        padding: 5px;
         text-align: left;
         font-size: 14px;
       }
@@ -27831,6 +28040,13 @@ export function HrManagementModule({
                   <th>GPS Accuracy</th>
                   <th>Map</th>
                   <th>Entry Mode</th>
+                  <th>Attendance Mode</th>
+                  <th>Face Verified</th>
+                  <th>Face Match Score</th>
+                  <th>Photo Proof</th>
+                  <th>External Verification</th>
+                  <th>Verified By</th>
+                  <th>Verified At</th>
                   <th>Completed Tasks</th>
                   <th>Task Notes</th>
                   <th>Admin Notes</th>
@@ -28090,7 +28306,7 @@ export function HrManagementModule({
       function renderRows(rows) {
         renderedRows = rows.slice();
         if (!rows.length) {
-          detailsTableBody.innerHTML = '<tr><td colspan="16" style="text-align:center;color:#607089;">No entries found for this month.</td></tr>';
+          detailsTableBody.innerHTML = '<tr><td colspan="23" style="text-align:center;color:#607089;">No entries found for this month.</td></tr>';
           return;
         }
         detailsTableBody.innerHTML = rows.map((row, index) => {
@@ -28107,6 +28323,8 @@ export function HrManagementModule({
           const hasNotes = Boolean(String(row && row.notes || "").trim());
           const hasHistory = Boolean(String(row && row.entryMode || "").trim() || String(row && row.sourceUserId || "").trim() || String(row && row.sourceUserEmail || "").trim());
           const mapUrl = String(row && row.mapUrl || "").trim();
+          const proof = row && row.photoProof || {};
+          const proofUrl = String(row && row.photoProofUrl || proof.photo_url || "").trim();
           return '<tr>' +
             '<td>' + escapeHtml(formatDateDisplay(row && row.date)) + '</td>' +
             '<td>' + escapeHtml(formatTime(row && row.inTime)) + '</td>' +
@@ -28120,9 +28338,16 @@ export function HrManagementModule({
             '<td>' + escapeHtml(formatAccuracy(row && row.gpsAccuracy)) + '</td>' +
             '<td>' + (mapUrl ? '<a class="map-link" href="' + escapeHtml(mapUrl) + '" target="_blank" rel="noreferrer">View Map</a>' : '-') + '</td>' +
             '<td>' + escapeHtml(toText(getEntryModeLabel(row && row.entryMode))) + '</td>' +
+            '<td>' + escapeHtml(toText(row && row.attendanceMode || "")) + '</td>' +
+            '<td>' + escapeHtml(Boolean(row && row.faceVerified) ? 'Yes' : 'No') + '</td>' +
+            '<td>' + escapeHtml(row && row.faceMatchScore !== "" && row && row.faceMatchScore !== null && typeof row.faceMatchScore !== "undefined" ? Number(row.faceMatchScore).toFixed(2) : "-") + '</td>' +
+            '<td>' + (proofUrl ? '<a class="map-link" href="' + escapeHtml(proofUrl) + '" target="_blank" rel="noreferrer">View Photo</a>' : escapeHtml(toText(row && row.photoProofDeletedMessage || ""))) + '</td>' +
+            '<td>' + escapeHtml(toText(row && row.externalVerificationStatus || "")) + '</td>' +
+            '<td>' + escapeHtml(toText(row && row.verifiedBy || "")) + '</td>' +
+            '<td>' + escapeHtml(toText(row && row.verifiedAt || "")) + '</td>' +
             '<td class="text-cell compact">' + toHtmlText(row && row.completedTasks, "-") + '</td>' +
             '<td class="text-cell compact">' + toHtmlText(row && row.taskNotes, "-") + '</td>' +
-            '<td class="text-cell compact">' + toHtmlText(row && row.notes, "-") + '</td>' +
+            '<td class="text-cell compact">' + toHtmlText((row && row.adminNotes) || (row && row.notes), "-") + '</td>' +
             '<td><div class="actions">' +
               '<button type="button" class="action-btn" data-action="view" data-index="' + index + '" title="View Details">👁</button>' +
               '<button type="button" class="action-btn" data-action="tasks" data-index="' + index + '" title="Tasks"' + (hasTasks ? '' : ' disabled') + '>≣</button>' +
@@ -28166,6 +28391,10 @@ export function HrManagementModule({
             { label: "OT", value: escapeHtml(toText(row.overtimeHours || row.overtime || "")) },
             { label: "Debit", value: escapeHtml(toText(row.attendanceDebit || row.debit || "")) },
             { label: "Status", value: escapeHtml(getStatusText(row)) },
+            { label: "Attendance Mode", value: escapeHtml(toText(row.attendanceMode || "")) },
+            { label: "Face Verified", value: escapeHtml(Boolean(row.faceVerified) ? "Yes" : "No") },
+            { label: "Face Match Score", value: escapeHtml(row.faceMatchScore !== "" && row.faceMatchScore !== null && typeof row.faceMatchScore !== "undefined" ? Number(row.faceMatchScore).toFixed(2) : "-") },
+            { label: "Photo Proof", value: String(row.photoProofUrl || "").trim() ? '<a class="map-link" href="' + escapeHtml(String(row.photoProofUrl || "").trim()) + '" target="_blank" rel="noreferrer">Open Photo</a>' : escapeHtml(toText(row.photoProofDeletedMessage || "")) },
           ]);
           return;
         }
@@ -28547,7 +28776,7 @@ export function HrManagementModule({
       th, td {
         border: 1px solid var(--line);
         vertical-align: top;
-        padding: 8px 10px;
+        padding: 5px;
       }
       th {
         background: rgba(34, 197, 94, 0.07);
@@ -29903,7 +30132,11 @@ export function HrManagementModule({
                                 type="button"
                                 className="btn btn-outline-success btn-sm"
                                 disabled={!myAttendanceEmployee || geoPunchLoading || Boolean(myAttendanceToday?.inTime)}
-                                onClick={() => (geoAttendanceSettings.enabled ? handleGeoAttendancePunch("in") : handleAttendancePunch("in", myAttendanceEmployee, "HR Self"))}
+                                onClick={() => (
+                                  faceSettings.enabled
+                                    ? openFacePunchModal("in")
+                                    : (geoAttendanceSettings.enabled ? handleGeoAttendancePunch("in") : handleAttendancePunch("in", myAttendanceEmployee, "HR Self"))
+                                )}
                               >
                                 {geoPunchLoading ? "Getting GPS..." : (myAttendanceToday?.inTime ? "In Saved" : "In")}
                               </button>
@@ -29969,7 +30202,7 @@ export function HrManagementModule({
                               type="button"
                               className="btn btn-outline-success btn-sm"
                               disabled={!String(formValues.employee || "").trim()}
-                              onClick={() => handleAttendancePunch("in", formValues.employee, "User Side")}
+                              onClick={() => (faceSettings.enabled ? openFacePunchModal("in") : handleAttendancePunch("in", formValues.employee, "User Side"))}
                             >
                               Attendance In
                             </button>
@@ -30072,7 +30305,11 @@ export function HrManagementModule({
                               type="button"
                               className="btn btn-outline-success btn-sm"
                               disabled={!myAttendanceEmployee || geoPunchLoading || Boolean(myAttendanceToday?.inTime)}
-                              onClick={() => (geoAttendanceSettings.enabled ? handleGeoAttendancePunch("in") : handleAttendancePunch("in", myAttendanceEmployee, "HR Self"))}
+                              onClick={() => (
+                                faceSettings.enabled
+                                  ? openFacePunchModal("in")
+                                  : (geoAttendanceSettings.enabled ? handleGeoAttendancePunch("in") : handleAttendancePunch("in", myAttendanceEmployee, "HR Self"))
+                              )}
                             >
                               {geoPunchLoading ? "Getting GPS..." : (myAttendanceToday?.inTime ? "In Saved" : "In")}
                             </button>
@@ -30283,6 +30520,45 @@ export function HrManagementModule({
                 </div>
                 <div className="col-12 col-lg-2 d-flex align-items-end justify-content-lg-end">
                   <button type="submit" className="btn btn-success btn-sm">Save Geo Settings</button>
+                </div>
+              </form>
+            </div>
+          </div>
+          <div className="col-12">
+            <div className="card p-3 h-100">
+              <div className="row g-3 align-items-start mb-3">
+                <div className="col-12 col-lg-5">
+                  <h6 className="mb-1 text-body">Face Recognition Settings</h6>
+                  <div className="small text-body-secondary">Optional local face verification for employee attendance check-in.</div>
+                </div>
+                <div className="col-12 col-lg-7">
+                  <div className="d-flex flex-wrap justify-content-lg-end align-items-center gap-3">
+                    {[
+                      ["enabled", "Enable Face Recognition Attendance"],
+                      ["require_internal_face", "Require Face Verification for Internal Check-In"],
+                      ["require_external_face", "Require Face Verification for External/Field Check-In"],
+                      ["allow_external_photo_proof", "Allow External Attendance With Photo Proof"],
+                    ].map(([key, label]) => (
+                      <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0" key={`face-settings-${key}`}>
+                        <input type="checkbox" className="form-check-input mt-0" checked={Boolean(faceSettings[key])} onChange={(event) => setFaceSettings((prev) => ({ ...prev, [key]: event.target.checked }))} />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              {faceSettingsNotice ? <div className="alert alert-secondary py-2 small">{faceSettingsNotice}</div> : null}
+              <form className="row g-3 align-items-end" onSubmit={saveFaceRecognitionSettings}>
+                <div className="col-12 col-lg-3">
+                  <label className="form-label small text-secondary mb-1">Minimum Face Match Score</label>
+                  <input className="form-control form-control-sm" value={faceSettings.min_match_score} onChange={(event) => setFaceSettings((prev) => ({ ...prev, min_match_score: event.target.value }))} placeholder="0.90" />
+                </div>
+                <div className="col-12 col-lg-3">
+                  <label className="form-label small text-secondary mb-1">Photo Retention Days</label>
+                  <input className="form-control form-control-sm" value={faceSettings.photo_retention_days} onChange={(event) => setFaceSettings((prev) => ({ ...prev, photo_retention_days: event.target.value }))} placeholder="60" />
+                </div>
+                <div className="col-12 col-lg-6 d-flex align-items-end justify-content-lg-end">
+                  <button type="submit" className="btn btn-success btn-sm">Save Face Settings</button>
                 </div>
               </form>
             </div>
@@ -31791,6 +32067,30 @@ export function HrManagementModule({
           </div>
         </div>
       ) : null}
+
+      <FaceCaptureModal
+        open={Boolean(!hasHrFullAccess && faceEnrollmentState.loaded && faceEnrollmentState.requires_enrollment)}
+        title="Face Enrollment Required"
+        subtitle="Capture 3 face photos to enable attendance check-in."
+        captureCount={Math.max(3, Number(faceEnrollmentState.min_required_images || 3))}
+        submitLabel="Complete Enrollment"
+        busy={faceEnrollmentBusy}
+        error={faceEnrollmentError}
+        onClose={() => {}}
+        onSubmit={submitFaceEnrollment}
+      />
+
+      <FaceCaptureModal
+        open={Boolean(facePunchModal.open)}
+        title="Face Attendance Check-In"
+        subtitle="Capture your current selfie for local face verification."
+        captureCount={1}
+        submitLabel="Verify & Check-In"
+        busy={geoPunchLoading}
+        error={facePunchError}
+        onClose={() => setFacePunchModal({ open: false, action: "in" })}
+        onSubmit={submitFacePunch}
+      />
         </>
       )}
     </div>
