@@ -359,7 +359,7 @@ def _ticket_author_name(message):
 def _build_latest_static_download_url(request, *candidates, fallback_path=None):
     try:
         resolved_url, filename = application_downloads.resolve_latest_download_url(*candidates)
-        if resolved_url.startswith(("http://", "https://")):
+        if resolved_url.startswith(("http://", "https://", "/")):
             return resolved_url
         return f"/downloads/files/{quote(filename)}"
     except Http404:

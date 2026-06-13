@@ -6,6 +6,7 @@ import os
 import re
 from datetime import datetime, timezone as dt_timezone
 from pathlib import Path
+from urllib.parse import quote
 
 from django.conf import settings
 from django.http import Http404
@@ -453,6 +454,10 @@ def resolve_latest_download_url(*candidates):
     item = resolve_latest_download_item(*candidates)
     if item["source"] == "object":
         return item["download_url"], item["filename"]
+    storage_path = Path(item["storage_key"]).resolve()
+    static_download_root = (Path(settings.BASE_DIR) / "static" / "downloads").resolve()
+    if storage_path.is_relative_to(static_download_root):
+        return f"/static/downloads/{quote(item['filename'])}", item["filename"]
     return item["relative_key"], item["filename"]
 
 
