@@ -49,6 +49,7 @@ urlpatterns = [
     path("downloads/android-app/", views.download_android_app, name="download_android_app"),
     path("downloads/ios-app/", views.download_ios_app, name="download_ios_app"),
     path("downloads/application-files/", views.application_downloads_page, name="application_downloads_page"),
-    path("downloads/files/<str:filename>/", views.download_managed_file, name="download_managed_file"),
+    path("downloads/files/<str:filename>", views.download_managed_file, name="download_managed_file"),
+    path("downloads/files/<str:filename>/", views.download_managed_file),
     path("downloads/bootstrap-products.json", views.bootstrap_products_config, name="bootstrap_products_config"),
 ]
