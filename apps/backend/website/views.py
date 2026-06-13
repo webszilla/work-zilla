@@ -396,20 +396,30 @@ def download_managed_file(request, filename):
 
 def application_downloads_page(request):
     items = application_downloads.list_application_downloads()
-    route_rows = []
+    route_groups = {
+        "desktop": [],
+        "mobile": [],
+        "legacy": [],
+    }
     for route in application_downloads.DIRECT_DOWNLOAD_ROUTES:
         label = str(route.get("label") or "")
         path = str(route.get("path") or "")
+        category = str(route.get("category") or "legacy")
         haystack = f"{label} {path}".lower()
         icon_class = "bi-cloud-arrow-down"
         if "windows" in haystack:
             icon_class = "bi-windows"
         elif "mac" in haystack:
             icon_class = "bi-apple"
-        route_rows.append({
+        elif "android" in haystack:
+            icon_class = "bi-android2"
+        elif "iphone" in haystack or "ipad" in haystack or "ios" in haystack:
+            icon_class = "bi-phone"
+        route_groups.setdefault(category, []).append({
             "label": label,
             "path": path,
             "icon_class": icon_class,
+            "description": str(route.get("description") or ""),
         })
 
     table_rows = []
@@ -431,7 +441,9 @@ def application_downloads_page(request):
         "public/application_downloads.html",
         {
             "download_items": table_rows,
-            "download_routes": route_rows,
+            "desktop_routes": route_groups["desktop"],
+            "mobile_routes": route_groups["mobile"],
+            "legacy_routes": route_groups["legacy"],
             "download_location_label": "Backblaze Application Downloads",
         },
     )
@@ -660,6 +672,32 @@ def download_mac_imposition_product_agent(request):
         "Work Zilla Imposition-*-arm64.dmg",
         "Work Zilla Imposition-*-arm64.pkg",
         "Work Zilla Imposition-*-arm64-mac.zip",
+    )
+
+
+def download_android_app(request):
+    redirect_response = _maybe_redirect_to_canonical_download(request, "/downloads/android-app/")
+    if redirect_response:
+        return redirect_response
+    return _redirect_to_latest_static_download(
+        request,
+        "Work Zilla Mobile-Android-*.apk",
+        "WorkZillaMobile-Android-*.apk",
+        "Work Zilla Mobile-Android-*.aab",
+        "WorkZillaMobile-Android-*.aab",
+        fallback_path="/downloads/application-files/#mobile-downloads",
+    )
+
+
+def download_ios_app(request):
+    redirect_response = _maybe_redirect_to_canonical_download(request, "/downloads/ios-app/")
+    if redirect_response:
+        return redirect_response
+    return _redirect_to_latest_static_download(
+        request,
+        "Work Zilla Mobile-iOS-*.ipa",
+        "WorkZillaMobile-iOS-*.ipa",
+        fallback_path="/downloads/application-files/#mobile-downloads",
     )
 
 

@@ -171,6 +171,30 @@ DOWNLOAD_CLASSIFIERS = [
             "Work Zilla Imposition-*-mac.zip",
         ],
     },
+    {
+        "family": "mobile_android",
+        "label": "Android App",
+        "product": "Work Zilla Mobile",
+        "platform": "Android",
+        "arch": "",
+        "patterns": [
+            "Work Zilla Mobile-Android-*.apk",
+            "Work Zilla Mobile-Android-*.aab",
+            "WorkZillaMobile-Android-*.apk",
+            "WorkZillaMobile-Android-*.aab",
+        ],
+    },
+    {
+        "family": "mobile_ios",
+        "label": "iPhone App",
+        "product": "Work Zilla Mobile",
+        "platform": "iOS",
+        "arch": "",
+        "patterns": [
+            "Work Zilla Mobile-iOS-*.ipa",
+            "WorkZillaMobile-iOS-*.ipa",
+        ],
+    },
 ]
 
 LOCAL_SOURCE_GLOBS = [
@@ -189,17 +213,73 @@ LOCAL_SOURCE_GLOBS = [
     ("imposition_windows", "apps/backend/static/downloads/Work Zilla Imposition Setup *.exe"),
     ("imposition_mac_arm64", "apps/backend/static/downloads/Work Zilla Imposition-*-arm64.*"),
     ("imposition_mac_x64", "apps/backend/static/downloads/Work Zilla Imposition-*.*"),
+    ("mobile_android", "apps/backend/static/downloads/Work Zilla Mobile-Android-*.*"),
+    ("mobile_android", "apps/backend/static/downloads/WorkZillaMobile-Android-*.*"),
+    ("mobile_ios", "apps/backend/static/downloads/Work Zilla Mobile-iOS-*.ipa"),
+    ("mobile_ios", "apps/backend/static/downloads/WorkZillaMobile-iOS-*.ipa"),
 ]
 
 DIRECT_DOWNLOAD_ROUTES = [
-    {"label": "Windows Installer", "path": "/downloads/windows-agent/"},
-    {"label": "macOS Installer", "path": "/downloads/mac-agent/"},
-    {"label": "Windows Work Suite Agent", "path": "/downloads/windows-monitor-product-agent/"},
-    {"label": "macOS Work Suite Agent", "path": "/downloads/mac-monitor-product-agent/"},
-    {"label": "Windows Online Storage Agent", "path": "/downloads/windows-storage-product-agent/"},
-    {"label": "macOS Online Storage Agent", "path": "/downloads/mac-storage-product-agent/"},
-    {"label": "Windows Imposition Installer", "path": "/downloads/windows-imposition-product-agent/"},
-    {"label": "macOS Imposition Installer", "path": "/downloads/mac-imposition-product-agent/"},
+    {
+        "label": "Windows Desktop Core Agent",
+        "path": "/downloads/windows-agent/",
+        "category": "desktop",
+        "description": "Single installer for Work Suite, Storage, and Print Marks modules.",
+    },
+    {
+        "label": "macOS Desktop Core Agent",
+        "path": "/downloads/mac-agent/",
+        "category": "desktop",
+        "description": "Single installer for Work Suite, Storage, and Print Marks modules.",
+    },
+    {
+        "label": "Android Mobile App",
+        "path": "/downloads/android-app/",
+        "category": "mobile",
+        "description": "Attendance, dashboard, reports, and mobile workspace access.",
+    },
+    {
+        "label": "iPhone / iPad App",
+        "path": "/downloads/ios-app/",
+        "category": "mobile",
+        "description": "Mobile workspace build distributed when signed iOS artifact is available.",
+    },
+    {
+        "label": "Windows Work Suite Agent",
+        "path": "/downloads/windows-monitor-product-agent/",
+        "category": "legacy",
+        "description": "Legacy direct route kept for compatibility.",
+    },
+    {
+        "label": "macOS Work Suite Agent",
+        "path": "/downloads/mac-monitor-product-agent/",
+        "category": "legacy",
+        "description": "Legacy direct route kept for compatibility.",
+    },
+    {
+        "label": "Windows Online Storage Agent",
+        "path": "/downloads/windows-storage-product-agent/",
+        "category": "legacy",
+        "description": "Legacy direct route kept for compatibility.",
+    },
+    {
+        "label": "macOS Online Storage Agent",
+        "path": "/downloads/mac-storage-product-agent/",
+        "category": "legacy",
+        "description": "Legacy direct route kept for compatibility.",
+    },
+    {
+        "label": "Windows Imposition Installer",
+        "path": "/downloads/windows-imposition-product-agent/",
+        "category": "legacy",
+        "description": "Legacy direct route kept for compatibility.",
+    },
+    {
+        "label": "macOS Imposition Installer",
+        "path": "/downloads/mac-imposition-product-agent/",
+        "category": "legacy",
+        "description": "Legacy direct route kept for compatibility.",
+    },
 ]
 
 
@@ -345,9 +425,14 @@ def list_remote_application_downloads(expires=SIGNED_URL_TTL_SECONDS):
 
 def list_application_downloads(expires=SIGNED_URL_TTL_SECONDS):
     remote_items = list_remote_application_downloads(expires=expires)
-    if remote_items:
-        return remote_items
-    return list_local_application_downloads()
+    local_items = list_local_application_downloads()
+    if not remote_items:
+        return local_items
+    seen = {item["filename"] for item in remote_items}
+    merged = list(remote_items)
+    merged.extend(item for item in local_items if item["filename"] not in seen)
+    merged.sort(key=lambda item: item["last_modified"] or datetime.min.replace(tzinfo=dt_timezone.utc), reverse=True)
+    return merged
 
 
 def resolve_latest_download_item(*candidates):

@@ -1,7 +1,7 @@
 {% extends "public/base.html" %}
 
 {% block meta_title %}Application Downloads | Work Zilla{% endblock %}
-{% block meta_description %}Browse the latest Work Zilla application installers and direct download links.{% endblock %}
+{% block meta_description %}Download the Work Zilla Desktop Core Agent and mobile app builds from one place.{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -119,6 +119,12 @@
     color: var(--color-muted);
     word-break: break-word;
   }
+  .adl-card-copy {
+    margin: 0 0 10px;
+    color: var(--color-muted);
+    font-size: 0.95rem;
+    line-height: 1.5;
+  }
   .adl-table-wrap {
     border: 1px solid var(--color-border);
     border-radius: 14px;
@@ -179,9 +185,9 @@
 <section class="section adl-shell">
   <div class="adl-hero">
     <span class="adl-kicker"><i class="bi bi-box-arrow-down"></i> Application Downloads</span>
-    <h1 class="adl-title">Latest Installer Files</h1>
+    <h1 class="adl-title">One Desktop Agent. Mobile Apps Separate.</h1>
     <p class="adl-lead">
-      Files are published from <strong>{{ download_location_label }}</strong> and exposed here with stable routes and direct download buttons.
+      Install the <strong>Desktop Core Agent</strong> once, then enable Work Suite, Online Storage, and Print Marks by organization plan. Mobile apps stay separate for Android and iPhone.
     </p>
     <div class="adl-hero-actions">
       <a class="btn btn-outline" href="/">
@@ -193,15 +199,54 @@
   <div class="adl-section">
     <div class="adl-section-head">
       <div>
-        <h2>Direct Download Routes</h2>
-        <p class="adl-sub">Use these permanent paths for application download links.</p>
+        <h2>Desktop Core Agent</h2>
+        <p class="adl-sub">Use one desktop installer per operating system. Product modules unlock after login based on the org admin plan.</p>
       </div>
     </div>
     <div class="adl-grid">
-      {% for route in download_routes %}
+      {% for route in desktop_routes %}
         <a class="adl-card" href="{{ route.path }}">
           <span class="adl-icon"><i class="bi {{ route.icon_class }}"></i></span>
           <h3 class="adl-card-title">{{ route.label }}</h3>
+          <p class="adl-card-copy">{{ route.description }}</p>
+          <div class="adl-card-path">{{ route.path }}</div>
+        </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="adl-section" id="mobile-downloads">
+    <div class="adl-section-head">
+      <div>
+        <h2>Mobile App Routes</h2>
+        <p class="adl-sub">Android and iPhone package links stay here when signed builds are available.</p>
+      </div>
+    </div>
+    <div class="adl-grid">
+      {% for route in mobile_routes %}
+        <a class="adl-card" href="{{ route.path }}">
+          <span class="adl-icon"><i class="bi {{ route.icon_class }}"></i></span>
+          <h3 class="adl-card-title">{{ route.label }}</h3>
+          <p class="adl-card-copy">{{ route.description }}</p>
+          <div class="adl-card-path">{{ route.path }}</div>
+        </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="adl-section">
+    <div class="adl-section-head">
+      <div>
+        <h2>Legacy Compatibility Routes</h2>
+        <p class="adl-sub">Older product-specific download links remain active so existing customer links do not break.</p>
+      </div>
+    </div>
+    <div class="adl-grid">
+      {% for route in legacy_routes %}
+        <a class="adl-card" href="{{ route.path }}">
+          <span class="adl-icon"><i class="bi {{ route.icon_class }}"></i></span>
+          <h3 class="adl-card-title">{{ route.label }}</h3>
+          <p class="adl-card-copy">{{ route.description }}</p>
           <div class="adl-card-path">{{ route.path }}</div>
         </a>
       {% endfor %}
