@@ -22,6 +22,7 @@ export function useAudioRecorder({ onRecorded } = {}) {
   const sourceRef = useRef(null);
   const monitorFrameRef = useRef(0);
   const silenceSinceRef = useRef(0);
+  const speechDetectedRef = useRef(false);
   const [supported, setSupported] = useState(false);
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState("");
@@ -78,6 +79,7 @@ export function useAudioRecorder({ onRecorded } = {}) {
 
   const stopSilenceMonitor = () => {
     silenceSinceRef.current = 0;
+    speechDetectedRef.current = false;
     if (monitorFrameRef.current) {
       window.cancelAnimationFrame(monitorFrameRef.current);
       monitorFrameRef.current = 0;
@@ -128,7 +130,8 @@ export function useAudioRecorder({ onRecorded } = {}) {
       analyserRef.current = analyser;
       silenceSinceRef.current = 0;
       const buffer = new Uint8Array(analyser.frequencyBinCount);
-      const noiseThreshold = 8;
+      const noiseThreshold = 12;
+      const speechThreshold = 18;
 
       const monitor = () => {
         if (!analyserRef.current || !recorderRef.current || recorderRef.current.state === "inactive") {
@@ -141,7 +144,12 @@ export function useAudioRecorder({ onRecorded } = {}) {
           peak = Math.max(peak, Math.abs(buffer[index] - 128));
         }
         const now = Date.now();
-        if (peak > noiseThreshold) {
+        if (peak >= speechThreshold) {
+          speechDetectedRef.current = true;
+          silenceSinceRef.current = 0;
+        } else if (!speechDetectedRef.current) {
+          silenceSinceRef.current = 0;
+        } else if (peak > noiseThreshold) {
           silenceSinceRef.current = 0;
         } else if (!silenceSinceRef.current) {
           silenceSinceRef.current = now;
@@ -165,7 +173,13 @@ export function useAudioRecorder({ onRecorded } = {}) {
     setError("");
     chunksRef.current = [];
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
       streamRef.current = stream;
       const mimeType = getSupportedMimeType();
       const recorder = mimeType ? new window.MediaRecorder(stream, { mimeType }) : new window.MediaRecorder(stream);

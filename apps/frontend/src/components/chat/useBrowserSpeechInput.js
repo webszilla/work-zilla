@@ -15,9 +15,27 @@ export function useBrowserSpeechInput({
   const recognitionRef = useRef(null);
   const shouldResumeRef = useRef(false);
   const restartTimerRef = useRef(null);
+  const interimHandlerRef = useRef(onInterimText);
+  const finalHandlerRef = useRef(onFinalText);
+  const langRef = useRef(lang);
   const [supported, setSupported] = useState(false);
   const [listening, setListening] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    interimHandlerRef.current = onInterimText;
+  }, [onInterimText]);
+
+  useEffect(() => {
+    finalHandlerRef.current = onFinalText;
+  }, [onFinalText]);
+
+  useEffect(() => {
+    langRef.current = lang;
+    if (recognitionRef.current) {
+      recognitionRef.current.lang = String(lang || (typeof navigator !== "undefined" ? navigator.language : "") || "en-IN");
+    }
+  }, [lang]);
 
   useEffect(() => {
     const RecognitionCtor = getSpeechRecognitionCtor();
@@ -29,7 +47,7 @@ export function useBrowserSpeechInput({
     const recognition = new RecognitionCtor();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = String(lang || (typeof navigator !== "undefined" ? navigator.language : "") || "en-IN");
+    recognition.lang = String(langRef.current || (typeof navigator !== "undefined" ? navigator.language : "") || "en-IN");
 
     recognition.onstart = () => {
       setError("");
@@ -51,11 +69,11 @@ export function useBrowserSpeechInput({
           interimText = `${interimText} ${transcript}`.trim();
         }
       }
-      if (interimText && typeof onInterimText === "function") {
-        onInterimText(interimText);
+      if (interimText && typeof interimHandlerRef.current === "function") {
+        interimHandlerRef.current(interimText);
       }
-      if (finalText && typeof onFinalText === "function") {
-        onFinalText(finalText);
+      if (finalText && typeof finalHandlerRef.current === "function") {
+        finalHandlerRef.current(finalText);
       }
     };
 
@@ -105,7 +123,7 @@ export function useBrowserSpeechInput({
         recognitionRef.current = null;
       }
     };
-  }, [lang, onFinalText, onInterimText]);
+  }, []);
 
   const startListening = () => {
     const recognition = recognitionRef.current;
@@ -115,7 +133,7 @@ export function useBrowserSpeechInput({
     setError("");
     shouldResumeRef.current = true;
     try {
-      recognition.lang = String(lang || (typeof navigator !== "undefined" ? navigator.language : "") || "en-IN");
+      recognition.lang = String(langRef.current || (typeof navigator !== "undefined" ? navigator.language : "") || "en-IN");
       recognition.start();
       return true;
     } catch {

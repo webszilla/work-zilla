@@ -144,9 +144,16 @@ export function useSpeechPlayback() {
     const utterance = new window.SpeechSynthesisUtterance(message);
     const targetLang = detectSpeechLanguage(message);
     const preferredGender = String(options?.voiceGender || "").trim().toLowerCase();
-    const nextVoice = pickVoiceByGender(voicesRef.current, preferredGender)
-      || pickVoice(voicesRef.current, targetLang)
-      || pickVoice(voicesRef.current, targetLang.split("-")[0])
+    const exactVoice = pickVoice(voicesRef.current, targetLang) || pickVoice(voicesRef.current, targetLang.split("-")[0]);
+    const isIndicTarget = targetLang !== "en-IN";
+    if (isIndicTarget && !exactVoice) {
+      return false;
+    }
+    const nextVoice = (exactVoice && pickVoiceByGender(voicesRef.current, preferredGender)?.lang?.toLowerCase?.().startsWith(targetLang.split("-")[0].toLowerCase())
+      ? pickVoiceByGender(voicesRef.current, preferredGender)
+      : null)
+      || exactVoice
+      || pickVoiceByGender(voicesRef.current, preferredGender)
       || pickVoice(voicesRef.current, "en-IN");
     utterance.lang = nextVoice?.lang || targetLang;
     if (nextVoice) {

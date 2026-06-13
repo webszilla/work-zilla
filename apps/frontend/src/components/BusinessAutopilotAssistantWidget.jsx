@@ -42,7 +42,7 @@ function buildWakePhrase(settings = {}) {
     return customWakePhrase;
   }
   const agentName = String(settings?.agent_name || "Assistant").trim() || "Assistant";
-  return `Hey ${agentName}`;
+  return `Hi ${agentName}`;
 }
 
 function detectScriptLanguage(value = "") {
@@ -57,6 +57,10 @@ function detectScriptLanguage(value = "") {
     return "kn-IN";
   }
   return "en-IN";
+}
+
+function containsIndicScript(value = "") {
+  return /[\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF]/.test(String(value || ""));
 }
 
 function levenshteinDistance(a = "", b = "") {
@@ -96,29 +100,15 @@ function buildWakeSkeleton(token = "") {
 }
 
 function buildWakeAliases(settings = {}) {
-  const agentName = normalizeWakeText(String(settings?.agent_name || "").trim());
-  const wakePhrase = normalizeWakeText(buildWakePhrase(settings));
-  const aliases = new Set([agentName, wakePhrase]);
-  if (agentName) {
-    aliases.add(`hey ${agentName}`);
-    aliases.add(`hi ${agentName}`);
-    aliases.add(`hello ${agentName}`);
-    const compact = normalizeWakeToken(agentName);
-    if (compact) {
-      aliases.add(compact);
-      aliases.add(compact.replace(/w/g, "v"));
-      aliases.add(compact.replace(/w/g, "u"));
-      aliases.add(compact.replace(/s$/g, "z"));
-      aliases.add(compact.replace(/s/g, "sh"));
-      aliases.add(compact.replace(/a/g, "aa"));
-      aliases.add(compact.replace(/o/g, "oa"));
-      aliases.add(compact.replace(/^g/, "j"));
-      aliases.add(compact.replace(/^g/, "ja"));
-      aliases.add(compact.replace(/^g/, "jar"));
-      aliases.add(compact.replace(/^g/, "jav"));
-    }
+  const customWakePhrase = normalizeWakeText(String(settings?.wake_phrase || "").trim());
+  if (customWakePhrase) {
+    return [customWakePhrase];
   }
-  return Array.from(aliases).filter(Boolean);
+  const agentName = normalizeWakeText(String(settings?.agent_name || "").trim());
+  if (!agentName) {
+    return [];
+  }
+  return [agentName, `hi ${agentName}`, `hey ${agentName}`];
 }
 
 function wakeTokenMatches(sourceToken = "", targetToken = "") {
@@ -148,63 +138,52 @@ function extractWakeCommand(inputText = "", settings = {}) {
     return { triggered: false, command: "" };
   }
   const normalizedText = normalizeWakeText(rawText);
-  const normalizedWords = normalizedText.split(" ").filter(Boolean);
+  const normalizedTokens = normalizedText.split(" ").filter(Boolean);
   const triggerPhrases = buildWakeAliases(settings);
   for (const trigger of triggerPhrases) {
-    const triggerWords = normalizeWakeText(trigger).split(" ").filter(Boolean);
-    if (!triggerWords.length) {
+    const normalizedTrigger = normalizeWakeText(trigger);
+    if (!normalizedTrigger) {
       continue;
     }
-    let matchedIndex = -1;
-    for (let index = 0; index <= normalizedWords.length - triggerWords.length; index += 1) {
-      const chunk = normalizedWords.slice(index, index + triggerWords.length);
-      const matches = chunk.every((word, wordIndex) => wakeTokenMatches(word, triggerWords[wordIndex]));
-      if (matches) {
-        matchedIndex = index;
-        break;
-      }
-    }
-    if (matchedIndex < 0) {
-      const index = normalizedText.indexOf(trigger);
-      if (index < 0) {
-        continue;
-      }
-      const tail = normalizedText.slice(index + trigger.length).trim();
+    const triggerTokens = normalizedTrigger.split(" ").filter(Boolean);
+    if (normalizedText === normalizedTrigger) {
       return {
         triggered: true,
-        command: tail,
+        command: "",
       };
     }
-    const tail = normalizedWords.slice(matchedIndex + triggerWords.length).join(" ").trim();
-    return {
-      triggered: true,
-      command: tail,
-    };
-  }
-  const agentToken = normalizeWakeToken(String(settings?.agent_name || "").trim());
-  if (agentToken && normalizedWords.some((word) => wakeTokenMatches(word, agentToken))) {
-    const matchedIndex = normalizedWords.findIndex((word) => wakeTokenMatches(word, agentToken));
-    const tail = normalizedWords.slice(matchedIndex + 1).join(" ").trim();
-    return {
-      triggered: true,
-      command: tail,
-    };
-  }
-  const greetingIndex = normalizedWords.findIndex((word) => ["hey", "hi", "hello"].includes(word));
-  if (greetingIndex >= 0) {
-    const trailingWords = normalizedWords.slice(greetingIndex + 1, greetingIndex + 4);
-    if (agentToken && trailingWords.some((word) => wakeTokenMatches(word, agentToken))) {
-      const matchedIndex = normalizedWords.findIndex((word, index) => index > greetingIndex && wakeTokenMatches(word, agentToken));
+    const prefixMatches = triggerTokens.length > 0
+      && triggerTokens.every((token, index) => wakeTokenMatches(normalizedTokens[index] || "", token));
+    if (prefixMatches && normalizedTokens.length > triggerTokens.length) {
+      const command = normalizedTokens.slice(triggerTokens.length).join(" ").trim();
       return {
         triggered: true,
-        command: normalizedWords.slice(matchedIndex + 1).join(" ").trim(),
+        command,
       };
     }
   }
   return { triggered: false, command: "" };
 }
 
-function buildAssistantContext({ quickStats = {}, crmMeetings = [], accountsWorkspace = {}, subscriptions = [] }) {
+function isWakeListeningStopCommand(inputText = "", settings = {}) {
+  const normalizedText = normalizeWakeText(inputText);
+  if (!normalizedText) {
+    return false;
+  }
+  const assistantName = String(settings?.agent_name || "Maya").trim();
+  const normalizedAssistantName = normalizeWakeText(assistantName);
+  const commandPhrases = [
+    `maya stop listening`,
+    `maya close our discussion`,
+    `maya you can leave now`,
+    `${normalizedAssistantName} stop listening`,
+    `${normalizedAssistantName} close our discussion`,
+    `${normalizedAssistantName} you can leave now`,
+  ].filter(Boolean);
+  return commandPhrases.some((phrase) => phrase && normalizedText === phrase);
+}
+
+function buildAssistantContext({ quickStats = {}, crmMeetings = [], accountsWorkspace = {}, subscriptions = [] } = {}) {
   const todayIso = getTodayIso();
   const hrData = readStorage(HR_STORAGE_KEY);
   const crmData = readStorage(CRM_STORAGE_KEY);
@@ -217,7 +196,8 @@ function buildAssistantContext({ quickStats = {}, crmMeetings = [], accountsWork
   const followUps = Array.isArray(crmData.followUps) ? crmData.followUps : [];
   const meetings = Array.isArray(crmMeetings) && crmMeetings.length ? crmMeetings : (Array.isArray(crmData.meetings) ? crmData.meetings : []);
   const activities = Array.isArray(crmData.activities) ? crmData.activities : [];
-  const openTickets = Array.isArray(ticketingData.tickets) ? ticketingData.tickets : [];
+  const allTickets = Array.isArray(ticketingData.tickets) ? ticketingData.tickets : [];
+  const openTickets = allTickets.filter((row) => String(row?.status || "").trim().toLowerCase() !== "closed");
   const invoices = Array.isArray(accountsData.invoices) ? accountsData.invoices : [];
 
   const todaysLeaveEmployees = attendanceRows
@@ -313,8 +293,8 @@ function buildAssistantContext({ quickStats = {}, crmMeetings = [], accountsWork
       recentDiscussions,
     },
     ticketing: {
+      totalTicketsCount: allTickets.length,
       openTickets: openTickets
-        .filter((row) => String(row?.status || "").trim().toLowerCase() !== "closed")
         .slice(0, 10)
         .map((row) => ({
           ticketId: row?.id || "",
@@ -380,6 +360,10 @@ async function requestAssistantTts(text) {
   return response.blob();
 }
 
+function buildLiveAssistantContext() {
+  return buildAssistantContext();
+}
+
 function wait(ms) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
@@ -438,6 +422,7 @@ export default function BusinessAutopilotAssistantWidget({
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [voiceStage, setVoiceStage] = useState("");
   const [wakeModeActive, setWakeModeActive] = useState(false);
+  const [wakeListeningEnabled, setWakeListeningEnabled] = useState(false);
   const [showAssistantHints, setShowAssistantHints] = useState(false);
   const [wakeDebugText, setWakeDebugText] = useState("");
   const listRef = useRef(null);
@@ -448,17 +433,24 @@ export default function BusinessAutopilotAssistantWidget({
   const wakeDetectorBusyRef = useRef(false);
   const wakeAckCountRef = useRef(0);
   const wakeTranscriptBufferRef = useRef("");
+  const wakeArmedRef = useRef(true);
+  const voiceTurnPendingWakeResetRef = useRef(false);
   const historyLoadedRef = useRef(false);
   const historyPersistTimerRef = useRef(null);
   const historyLoadRequestRef = useRef(0);
   const historySignatureRef = useRef("");
+  const messagesRef = useRef([]);
+
+  useEffect(() => {
+    messagesRef.current = Array.isArray(messages) ? messages : [];
+  }, [messages]);
 
   async function playAssistantCue(text, fallbackDelay = 800) {
     try {
-      const spoken = speechPlayback.speak(text, { voiceGender: settings.voice_gender });
-      if (!spoken) {
-        const audioBlob = await requestAssistantTts(text);
-        await speechPlayback.playBlob(audioBlob);
+      const audioBlob = await requestAssistantTts(text);
+      const played = await speechPlayback.playBlob(audioBlob);
+      if (!played) {
+        speechPlayback.speak(text, { voiceGender: settings.voice_gender });
       }
     } catch {
       speechPlayback.speak(text, { voiceGender: settings.voice_gender });
@@ -466,13 +458,34 @@ export default function BusinessAutopilotAssistantWidget({
     await wait(fallbackDelay);
   }
 
+  function appendAssistantMessage(text) {
+    const messageText = String(text || "").trim();
+    if (!messageText) {
+      return;
+    }
+    const nextMessages = [
+      ...(Array.isArray(messagesRef.current) ? messagesRef.current : []),
+      {
+        id: `assistant-${Date.now()}`,
+        role: "assistant",
+        text: messageText,
+      },
+    ];
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
+  }
+
+  async function disableWakeListeningWithGoodbye(goodbyeText = `${settings.agent_name || "Maya"} signing off. Goodbye!`) {
+    setWakeListeningEnabled(false);
+    stopAllVoiceListening({ preserveManualToggle: true });
+    appendAssistantMessage(goodbyeText);
+    setVoiceStage("Speaking");
+    await playAssistantCue(goodbyeText, 900);
+  }
+
   async function startWakeCommandCapture() {
-    const nextCue = wakeAckCountRef.current === 0
-      ? "Yes?"
-      : (wakeAckCountRef.current % 2 === 0 ? "Yes?" : "Yeah?");
     wakeAckCountRef.current += 1;
     setVoiceStage("Wake Word Detected");
-    await playAssistantCue(nextCue, 850);
     if (audioRecorder.supported) {
       setVoiceStage("Recording");
       await audioRecorder.startRecording({ stopAfterSilenceMs: (settings.silence_gap_seconds || 5) * 1000 });
@@ -495,9 +508,10 @@ export default function BusinessAutopilotAssistantWidget({
     }
     wakeTranscriptBufferRef.current = "";
     wakeTriggeredRef.current = true;
+    wakeArmedRef.current = false;
+    voiceTurnPendingWakeResetRef.current = true;
     setWakeModeActive(false);
     setVoiceDraft("");
-    wakeSpeech.stopListening();
     if (wakeMatch.command && wakeMatch.command.length >= 2) {
       setPrompt(wakeMatch.command);
       setVoiceStage("Question Ready");
@@ -547,6 +561,7 @@ export default function BusinessAutopilotAssistantWidget({
     historyLoadedRef.current = true;
     if (nextSignature !== historySignatureRef.current) {
       historySignatureRef.current = nextSignature;
+      messagesRef.current = resolvedMessages;
       setMessages(resolvedMessages);
     }
     if (!serverMessages.length && !silent) {
@@ -683,12 +698,6 @@ export default function BusinessAutopilotAssistantWidget({
 
   const wakeSpeech = useBrowserSpeechInput({
     lang: detectScriptLanguage(buildWakePhrase(settings)),
-    onInterimText: async (text) => {
-      await handleWakeTranscript(text);
-    },
-    onFinalText: async (text) => {
-      await handleWakeTranscript(text);
-    },
   });
 
   const audioRecorder = useAudioRecorder({
@@ -706,6 +715,7 @@ export default function BusinessAutopilotAssistantWidget({
         const formData = new FormData();
         formData.append("audio", file);
         formData.append("current_section", currentSectionKey || "dashboard");
+        formData.append("preferred_input_language", "ta-IN");
         formData.append("speech_context", `Work Zilla Business Autopilot. Assistant name is ${settings.agent_name || "Assistant"}. Common business terms: CRM, HRM, leads, lead, deals, meetings, attendance, payroll, billing, invoice, sales, follow-up, task, overtime, users, employee count, total users, total leads, motham leads, yevalo leads, evlo leads, ${settings.agent_name || "Assistant"}.`);
         const transcript = await apiFetch("/api/business-autopilot/openai/transcribe", {
           method: "POST",
@@ -736,7 +746,6 @@ export default function BusinessAutopilotAssistantWidget({
         ]);
       } finally {
         setVoiceBusy(false);
-        wakeTriggeredRef.current = false;
       }
     },
   });
@@ -752,6 +761,7 @@ export default function BusinessAutopilotAssistantWidget({
       && !audioRecorder.recording
       && !speechPlayback.speaking
       && !wakeTriggeredRef.current
+      && wakeArmedRef.current
     ),
     chunkMs: 3200,
     onChunk: async (blob) => {
@@ -767,7 +777,7 @@ export default function BusinessAutopilotAssistantWidget({
         formData.append("audio", file);
         formData.append("allow_empty", "1");
         formData.append("current_section", currentSectionKey || "dashboard");
-        formData.append("speech_context", `Wake phrase examples: ${buildWakePhrase(settings)}, ${settings.agent_name || "Assistant"}, ${wakeAliases.join(", ")}. Prefer wake phrase words if audio sounds close to them. Common commands include CRM leads, HR attendance, billing summary, meetings.`);
+        formData.append("speech_context", `Assistant name: ${settings.agent_name || "Maya"}. Treat audio as a wake trigger only when human speech starts with the assistant name or a wake phrase such as ${wakeAliases.join(", ")}. Ignore fan noise, wind noise, background office talk, and any speech that does not begin with the assistant name. Common commands include CRM leads, HR attendance, billing summary, meetings.`);
         const transcript = await apiFetch("/api/business-autopilot/openai/transcribe", {
           method: "POST",
           body: formData,
@@ -828,10 +838,19 @@ export default function BusinessAutopilotAssistantWidget({
     }
     const question = String(seedQuestion || prompt || "").trim();
     if (!question || sending) return;
+    if (isWakeListeningStopCommand(question, settings)) {
+      setPrompt("");
+      setVoiceDraft("");
+      await disableWakeListeningWithGoodbye("Goodbye! Wake listening is now turned off.");
+      return;
+    }
     setPrompt("");
     setVoiceStage("Sending");
     const userMessage = { id: `user-${Date.now()}`, role: "user", text: question };
-    setMessages((prev) => [...prev, userMessage]);
+    const baseMessages = Array.isArray(messagesRef.current) ? messagesRef.current : [];
+    const nextMessages = [...baseMessages, userMessage];
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
     setSending(true);
     try {
       const data = await apiFetch("/api/business-autopilot/openai/chat", {
@@ -839,20 +858,21 @@ export default function BusinessAutopilotAssistantWidget({
         body: JSON.stringify({
           message: question,
           current_section: currentSectionKey,
-          recent_messages: messages.slice(-12).map((item) => ({
+          local_context: buildLiveAssistantContext(),
+          recent_messages: baseMessages.slice(-12).map((item) => ({
             role: item?.role || "",
             text: item?.text || "",
           })),
         }),
       });
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `assistant-${Date.now()}`,
-          role: "assistant",
-          text: data?.reply || "No response received.",
-        },
-      ]);
+      const assistantMessage = {
+        id: `assistant-${Date.now()}`,
+        role: "assistant",
+        text: data?.reply || "No response received.",
+      };
+      const resolvedMessages = [...nextMessages, assistantMessage];
+      messagesRef.current = resolvedMessages;
+      setMessages(resolvedMessages);
       setVoiceStage("Reply Ready");
       if (data?.scope) {
         setSettings((prev) => ({
@@ -862,13 +882,15 @@ export default function BusinessAutopilotAssistantWidget({
         }));
       }
       try {
-        const audioBlob = await requestAssistantTts(data?.reply || "No response received.");
+        const replyText = data?.reply || "No response received.";
+        const replySpeechText = String(data?.tts_text || replyText || "").trim() || replyText;
+        const audioBlob = await requestAssistantTts(replySpeechText);
         const played = await speechPlayback.playBlob(audioBlob);
         if (!played) {
-          speechPlayback.speak(data?.reply || "No response received.", { voiceGender: settings.voice_gender });
+          speechPlayback.speak(replySpeechText, { voiceGender: settings.voice_gender });
         }
       } catch {
-        speechPlayback.speak(data?.reply || "No response received.", { voiceGender: settings.voice_gender });
+        speechPlayback.speak(String(data?.tts_text || data?.reply || "No response received."), { voiceGender: settings.voice_gender });
       }
     } catch (error) {
       setVoiceStage("");
@@ -884,6 +906,26 @@ export default function BusinessAutopilotAssistantWidget({
       setSending(false);
     }
   }
+
+  useEffect(() => {
+    if (sending || voiceBusy || audioRecorder.recording || speechPlayback.speaking) {
+      return;
+    }
+    if (!voiceTurnPendingWakeResetRef.current) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      wakeTriggeredRef.current = false;
+      wakeTranscriptBufferRef.current = "";
+      wakeArmedRef.current = true;
+      voiceTurnPendingWakeResetRef.current = false;
+      setWakeModeActive(false);
+      setVoiceStage("");
+    }, 900);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [audioRecorder.recording, sending, speechPlayback.speaking, voiceBusy]);
 
   useEffect(() => {
     if (open) {
@@ -931,6 +973,12 @@ export default function BusinessAutopilotAssistantWidget({
   }, [audioRecorder, open, settings.hasApiKey, speech, speechPlayback, wakeSpeech]);
 
   useEffect(() => {
+    if (!settings.wake_word_enabled) {
+      setWakeListeningEnabled(false);
+    }
+  }, [settings.wake_word_enabled]);
+
+  useEffect(() => {
     if (speechPlayback.speaking) {
       setVoiceStage("Speaking");
       return;
@@ -940,12 +988,13 @@ export default function BusinessAutopilotAssistantWidget({
 
   useEffect(() => {
     const canWakeListen = Boolean(
-      open
+      (pageMode || open)
       && settings.hasApiKey
       && isViewingToday
       && settings.wake_word_enabled
-      && wakeSpeech.supported
-      && audioRecorder.supported
+      && wakeListeningEnabled
+      && wakeDetector.supported
+      && (audioRecorder.supported || speech.supported)
       && !sending
       && !voiceBusy
       && !audioRecorder.recording
@@ -953,33 +1002,29 @@ export default function BusinessAutopilotAssistantWidget({
       && !speech.listening
     );
     if (!canWakeListen) {
-      wakeSpeech.stopListening();
+      wakeDetector.stopDetector();
       setWakeModeActive(false);
       return;
     }
-    if (!wakeSpeech.listening && !wakeTriggeredRef.current) {
-      const started = wakeSpeech.startListening();
-      setWakeModeActive(Boolean(started));
-      if (started) {
-        setVoiceStage("Wake Listening");
-      }
-      return;
+    setWakeModeActive(wakeDetector.running);
+    if (wakeDetector.running) {
+      setVoiceStage("Wake Listening");
     }
-    setWakeModeActive(wakeSpeech.listening);
   }, [
     audioRecorder.recording,
     audioRecorder.supported,
     isViewingToday,
     open,
+    pageMode,
     sending,
     settings.hasApiKey,
     settings.wake_word_enabled,
+    wakeListeningEnabled,
     speech.listening,
     speechPlayback.speaking,
     voiceBusy,
-    wakeSpeech,
-    wakeSpeech.listening,
-    wakeSpeech.supported,
+    wakeDetector.running,
+    wakeDetector.supported,
   ]);
 
   function openOpenAiSettings() {
@@ -1004,6 +1049,7 @@ export default function BusinessAutopilotAssistantWidget({
     })];
     historySignatureRef.current = "";
     historyLoadedRef.current = true;
+    messagesRef.current = resetMessages;
     setMessages(resetMessages);
   }
 
@@ -1032,11 +1078,25 @@ export default function BusinessAutopilotAssistantWidget({
     if (pageMode) {
       return;
     }
-    const nextOpen = !open;
-    if (nextOpen && settings.wake_word_enabled) {
-      await primeMicrophoneAccess();
+    setOpen((prev) => !prev);
+  }
+
+  function stopAllVoiceListening({ preserveManualToggle = false } = {}) {
+    wakeSpeech.stopListening();
+    wakeDetector.stopDetector();
+    speech.stopListening();
+    audioRecorder.stopRecording();
+    wakeTriggeredRef.current = false;
+    wakeTranscriptBufferRef.current = "";
+    wakeArmedRef.current = true;
+    voiceTurnPendingWakeResetRef.current = false;
+    if (!preserveManualToggle) {
+      setWakeListeningEnabled(Boolean(settings.wake_word_enabled));
     }
-    setOpen(nextOpen);
+    setWakeModeActive(false);
+    setWakeDebugText("");
+    setVoiceDraft("");
+    setVoiceStage("");
   }
 
   if (!enabled || settings.loading || !settings.enabled || (!pageMode && dismissed)) {
@@ -1075,18 +1135,42 @@ export default function BusinessAutopilotAssistantWidget({
     ? "Current page module is outside your assistant scope, so replies stay within your allowed business access."
     : "";
   const wakePhraseLabel = buildWakePhrase(settings);
-  const wakeModeReady = Boolean(panelOpen && settings.wake_word_enabled && settings.hasApiKey && (wakeSpeech.supported || wakeDetector.supported) && audioRecorder.supported);
-  const wakeListeningActive = wakeModeActive || wakeSpeech.listening || wakeDetector.running;
+  const wakeModeReady = Boolean(
+    panelOpen
+    && settings.wake_word_enabled
+    && settings.hasApiKey
+    && wakeDetector.supported
+    && (audioRecorder.supported || speech.supported)
+  );
+  const wakeListeningActive = wakeModeActive || wakeDetector.running;
+  const wakeListeningToggleActive = Boolean(
+    settings.wake_word_enabled
+    && wakeListeningEnabled
+    && settings.hasApiKey
+    && isViewingToday
+  );
+  const showVoiceVisualizer = voiceStage === "Wake Word Detected" || audioRecorder.recording || voiceBusy || sending || speechPlayback.speaking;
+  const voiceVisualizerMode = audioRecorder.recording
+    ? "recording"
+    : voiceStage === "Wake Word Detected"
+      ? "listening"
+      : voiceBusy
+        ? "transcribing"
+        : sending
+          ? "sending"
+          : speechPlayback.speaking
+            ? "speaking"
+            : "idle";
   const latestAssistantMessage = [...messages].reverse().find((item) => item.role === "assistant" && String(item.text || "").trim());
   const latestAssistantEmotion = latestAssistantMessage ? getAiEmotionFromText(latestAssistantMessage.text) : (settings.hasApiKey ? "happy" : "neutral");
   const headerAssistantEmotion = sending ? "thinking" : latestAssistantEmotion;
   const fullPagePath = "/assistant";
   const voiceStatusNote = (wakeListeningActive && showAssistantHints)
-    ? `Wake mode ready. Say "${wakePhraseLabel}" to start recording.`
+    ? `Wake mode ready. Say "${wakePhraseLabel}" or "Hey ${settings.agent_name || "Maya"}" to start recording.`
     : voiceStage === "Wake Word Detected"
       ? `Wake word detected. ${audioRecorder.recording ? "Recording started." : "Processing your command..."}`
     : audioRecorder.recording
-    ? "Recording voice... release to send."
+    ? `Recording voice... auto-sending after ${settings.silence_gap_seconds || 5} seconds silence.`
     : voiceBusy
       ? "Transcribing voice note..."
       : speechPlayback.speaking
@@ -1097,6 +1181,8 @@ export default function BusinessAutopilotAssistantWidget({
     ? `Voice input unavailable: ${speech.error}.`
     : speech.listening
       ? "Listening... speak now."
+      : (wakeModeReady && !wakeListeningToggleActive && showAssistantHints)
+        ? `Wake mode is off. Turn on Wake first, then start each voice query with "${settings.agent_name || "Maya"}".`
       : voiceDraft
         ? `Heard: ${voiceDraft}`
         : "";
@@ -1123,10 +1209,9 @@ export default function BusinessAutopilotAssistantWidget({
             <div className="ba-assistant__header-actions">
               {!pageMode ? (
                 <Link
-                  className="ba-assistant__icon-link"
+                  className="ba-assistant__icon-link saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
                   to={fullPagePath}
                   aria-label="Open full page chat"
-                  title="Open full page chat"
                   onClick={() => setOpen(false)}
                 >
                   <i className="bi bi-arrows-fullscreen" aria-hidden="true" />
@@ -1134,7 +1219,8 @@ export default function BusinessAutopilotAssistantWidget({
               ) : null}
               <button
                 type="button"
-                className="ba-assistant__close"
+                className="ba-assistant__close d-inline-flex align-items-center justify-content-center"
+                aria-label={pageMode ? "Close full page chat" : "Close assistant"}
                 onClick={() => {
                   if (pageMode) {
                     navigate("/");
@@ -1217,11 +1303,47 @@ export default function BusinessAutopilotAssistantWidget({
               />
               {wakeModeReady && showAssistantHints ? (
                 <div className="ba-assistant__setup-note">
-                  Wake word mode: say <strong>{wakePhraseLabel}</strong>. After that, voice recording starts and auto-stops after {settings.silence_gap_seconds || 5} seconds silence.
+                  Wake word mode is manual. Turn on <strong>Wake</strong> first, then start every voice query with <strong>{settings.agent_name || "Maya"}</strong>, <strong>{wakePhraseLabel}</strong>, or <strong>Hey {settings.agent_name || "Maya"}</strong>. Recording stops only after {settings.silence_gap_seconds || 5} seconds of silence.
                 </div>
               ) : null}
               {wakeDebugText ? <div className="ba-assistant__setup-note">{wakeDebugText}</div> : null}
               {voiceStatusNote ? <div className="ba-assistant__setup-note">{voiceStatusNote}</div> : null}
+              {showVoiceVisualizer ? (
+                <div className={`ba-assistant__voice-visualizer ba-assistant__voice-visualizer--${voiceVisualizerMode}`}>
+                  <div className="ba-assistant__voice-visualizer-head">
+                    <div>
+                      <div className="ba-assistant__voice-visualizer-title">
+                        {audioRecorder.recording ? "Recording In Progress" : voiceStage === "Wake Word Detected" ? "Wake Listening Active" : voiceBusy ? "Transcribing Voice" : sending ? "Sending Voice Query" : "Speaking Reply"}
+                      </div>
+                      <div className="ba-assistant__voice-visualizer-subtitle">
+                        {audioRecorder.recording
+                          ? `Speak now. Auto-send happens after ${settings.silence_gap_seconds || 5} seconds silence.`
+                          : voiceStage === "Wake Word Detected"
+                            ? `Wake phrase heard. Speak now. If voice is silent for ${settings.silence_gap_seconds || 5} seconds, recording stops automatically.`
+                            : voiceBusy
+                              ? "Converting your voice into text."
+                              : sending
+                                ? "Sending your recognized command."
+                                : "Assistant reply playback is active."}
+                      </div>
+                    </div>
+                    {(wakeListeningActive || audioRecorder.recording || speech.listening) ? (
+                      <button
+                        type="button"
+                        className="btn btn-outline-danger btn-sm"
+                        onClick={stopAllVoiceListening}
+                      >
+                        Listen Stop
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="ba-assistant__voice-wave" aria-hidden="true">
+                    {[0, 1, 2, 3, 4, 5, 6].map((bar) => (
+                      <span key={bar} className="ba-assistant__voice-wave-bar" />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               {(audioRecorder.recording || voiceBusy || sending || speechPlayback.speaking || voiceStage) ? (
                 <div className="ba-assistant__voice-timeline" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
                   {voiceTimelineSteps.map((step) => (
@@ -1245,24 +1367,53 @@ export default function BusinessAutopilotAssistantWidget({
               <div className="ba-assistant__composer-actions">
                 <button
                   type="button"
-                  className="ba-assistant__round-btn"
+                  className="ba-assistant__round-btn saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
                   onClick={clearChatHistory}
                   title="Clear Chat"
+                  data-wz-tooltip="Clear Chat"
+                  aria-label="Clear Chat"
                 >
                   <i className="bi bi-trash3" aria-hidden="true" />
                 </button>
                 <button
                   type="button"
-                  className="ba-assistant__round-btn"
+                  className="ba-assistant__round-btn saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
                   onClick={() => setShowHistoryPicker((prev) => !prev)}
                   title="Chat History"
+                  data-wz-tooltip="Chat History"
+                  aria-label="Chat History"
                 >
                   <i className="bi bi-calendar3" aria-hidden="true" />
                 </button>
+                {wakeModeReady ? (
+                  <button
+                    type="button"
+                    className={`ba-assistant__wake-toggle saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center ${wakeListeningToggleActive ? "is-on" : "is-off"}`}
+                    onClick={() => {
+                      const nextEnabled = !wakeListeningEnabled;
+                      setWakeListeningEnabled(nextEnabled);
+                      if (!nextEnabled) {
+                        stopAllVoiceListening({ preserveManualToggle: true });
+                        return;
+                      }
+                      setWakeDebugText("");
+                      setVoiceStage("Wake Listening");
+                    }}
+                    data-wz-tooltip={wakeListeningToggleActive ? "Disable Wake Listening" : "Enable Wake Listening"}
+                    aria-label={wakeListeningToggleActive ? "Disable Wake Listening" : "Enable Wake Listening"}
+                    disabled={!settings.hasApiKey || !isViewingToday}
+                  >
+                    <i className={`bi ${wakeListeningToggleActive ? "bi-ear-fill" : "bi-ear"}`} aria-hidden="true" />
+                  </button>
+                ) : null}
                 <PushToTalkButton
                   supported={audioRecorder.supported || speech.supported}
                   listening={audioRecorder.recording || speech.listening || voiceBusy}
                   disabled={!settings.hasApiKey || !isViewingToday || sending || voiceBusy}
+                  className="ba-assistant__round-btn saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
+                  title={audioRecorder.recording || speech.listening || voiceBusy ? "Release to send voice" : "Hold to talk"}
+                  tooltip={audioRecorder.recording || speech.listening || voiceBusy ? "Release to send voice" : "Hold to talk"}
+                  ariaLabel={audioRecorder.recording || speech.listening || voiceBusy ? "Release to send voice" : "Hold to talk"}
                   onStart={() => {
                     wakeSpeech.stopListening();
                     setWakeModeActive(false);
@@ -1285,7 +1436,7 @@ export default function BusinessAutopilotAssistantWidget({
                 {speechPlayback.supported ? (
                   <button
                     type="button"
-                    className="ba-assistant__round-btn"
+                    className="ba-assistant__round-btn saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
                     onClick={() => {
                       if (speechPlayback.speaking) {
                         speechPlayback.stop();
@@ -1303,6 +1454,8 @@ export default function BusinessAutopilotAssistantWidget({
                       }
                     }}
                     title={speechPlayback.speaking ? "Stop Voice Reply" : "Replay Voice Reply"}
+                    data-wz-tooltip={speechPlayback.speaking ? "Stop Voice Reply" : "Replay Voice Reply"}
+                    aria-label={speechPlayback.speaking ? "Stop Voice Reply" : "Replay Voice Reply"}
                   >
                     <i className={`bi ${speechPlayback.speaking ? "bi-volume-mute" : "bi-volume-up"}`} aria-hidden="true" />
                   </button>
@@ -1329,10 +1482,11 @@ export default function BusinessAutopilotAssistantWidget({
         <div className="ba-assistant__dock">
           <button
             type="button"
-            className="ba-assistant__dismiss"
+            className="ba-assistant__dismiss saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
             onClick={() => setDismissed(true)}
             aria-label="Dismiss AI Assistant"
             title="Dismiss AI Assistant"
+            data-wz-tooltip="Dismiss AI Assistant"
           >
             <i className="bi bi-x-lg" aria-hidden="true" />
           </button>

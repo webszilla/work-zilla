@@ -143,19 +143,26 @@ VERIFY (AFTER DEPLOY)
 - `pgrep -af "core_platform.wsgi:application"`
 
 ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
-- Published at (UTC): `2026-06-12T02:45:32Z`
-- Local SHA: `0460ea96552a35b0cf17caf88efc941fc83c7912`
-- GitHub main SHA: `0460ea96552a35b0cf17caf88efc941fc83c7912`
-- Server SHA: `0460ea96552a35b0cf17caf88efc941fc83c7912`
+- Published at (UTC): `2026-06-13T03:19:21Z`
+- Local SHA: `PENDING`
+- GitHub main SHA: `PENDING`
+- Server SHA: `PENDING`
 - Deploy method: `git-pull`
-- Gunicorn: listening on `:8000` (`yes`)
+- Gunicorn: listening on `:8000` (`PENDING`)
 - Verified URLs:
-  - `/` -> `200`
-  - `/downloads/bootstrap-products.json` -> `200`
-  - `/downloads/windows-agent/` -> `404`
-  - `/downloads/mac-agent/` -> `404`
+  - `/` -> `PENDING`
+  - `/downloads/bootstrap-products.json` -> `PENDING`
+  - `/downloads/windows-agent/` -> `PENDING`
+  - `/downloads/mac-agent/` -> `PENDING`
 
-LATEST WORK LOG (2026-06-12)
+LATEST WORK LOG (2026-06-13)
+- Business Autopilot assistant refinements deployed:
+  - wake-word flow tightened for manual Maya-prefixed recording
+  - fullscreen assistant layout cleanup and dashboard return behavior
+  - icon tooltip cleanup for assistant controls
+  - improved Tamil / Tanglish transcription guidance and natural TTS-first playback
+  - ticketing-aware direct answers added with total/open ticket summaries
+  - large dataset answers now redirect users to manual in-app checking instead of dumping long lists
 - Business Autopilot AI assistant upgraded as reusable module:
   - shared assistant registry / prompt context
   - org-aware assistant profile and lightweight training context

@@ -7,10 +7,18 @@ export default function PushToTalkButton({
   onStart,
   onStop,
   className = "ba-assistant__round-btn",
+  title,
+  ariaLabel,
+  tooltip,
 }) {
   const pressedRef = useRef(false);
 
   const canUse = supported && !disabled;
+  const resolvedLabel = ariaLabel || title || (supported
+    ? (listening ? "Release to send voice" : "Hold to talk")
+    : "Voice input unsupported");
+  const resolvedTitle = title || resolvedLabel;
+  const resolvedTooltip = tooltip || resolvedLabel;
 
   const handlePressStart = (event) => {
     if (!canUse || pressedRef.current) {
@@ -39,16 +47,9 @@ export default function PushToTalkButton({
       type="button"
       className={className}
       disabled={!canUse}
-      title={
-        supported
-          ? (listening ? "Release to send voice" : "Hold to talk")
-          : "Voice input is not supported in this browser"
-      }
-      aria-label={
-        supported
-          ? (listening ? "Release to send voice" : "Hold to talk")
-          : "Voice input unsupported"
-      }
+      title={resolvedTitle}
+      data-wz-tooltip={resolvedTooltip}
+      aria-label={resolvedLabel}
       onPointerDown={handlePressStart}
       onPointerUp={handlePressEnd}
       onPointerLeave={handlePressEnd}

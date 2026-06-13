@@ -22,8 +22,13 @@ export function useWakeWordDetector({
   const streamRef = useRef(null);
   const processingRef = useRef(false);
   const activeRef = useRef(false);
+  const onChunkRef = useRef(onChunk);
   const [supported, setSupported] = useState(false);
   const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    onChunkRef.current = onChunk;
+  }, [onChunk]);
 
   useEffect(() => {
     setSupported(
@@ -78,7 +83,7 @@ export function useWakeWordDetector({
           }
           processingRef.current = true;
           try {
-            await onChunk?.(event.data);
+            await onChunkRef.current?.(event.data);
           } finally {
             processingRef.current = false;
           }
@@ -95,7 +100,7 @@ export function useWakeWordDetector({
       cancelled = true;
       stopDetector();
     };
-  }, [chunkMs, enabled, onChunk, supported]);
+  }, [chunkMs, enabled, supported]);
 
   function stopDetector() {
     activeRef.current = false;

@@ -1167,6 +1167,134 @@ def _format_decimal_text(value):
     return f"{amount.quantize(Decimal('0.01'))}"
 
 
+def _ba_to_decimal_amount(value, default="0.00"):
+    try:
+        return Decimal(str(value if value is not None else default))
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal(str(default or "0"))
+
+
+def _ba_currency_symbol(currency_code):
+    code = str(currency_code or "").strip().upper()
+    mapping = {
+        "INR": "Rs.",
+        "USD": "$",
+        "EUR": "EUR",
+        "GBP": "GBP",
+        "AED": "AED",
+        "SAR": "SAR",
+    }
+    return mapping.get(code, code or "INR")
+
+
+def _ba_number_words_under_1000(number: int):
+    units = [
+        "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+        "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+        "seventeen", "eighteen", "nineteen",
+    ]
+    tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+    value = int(number or 0)
+    if value < 20:
+        return units[value]
+    if value < 100:
+        return tens[value // 10] + (f"-{units[value % 10]}" if value % 10 else "")
+    return (
+        f"{units[value // 100]} hundred"
+        + (f" { _ba_number_words_under_1000(value % 100) }" if value % 100 else "")
+    )
+
+
+def _ba_integer_to_indian_words(number: int):
+    value = int(number or 0)
+    if value == 0:
+        return "zero"
+    parts = []
+    units = [
+        (10_000_000, "crore"),
+        (100_000, "lakh"),
+        (1_000, "thousand"),
+        (100, "hundred"),
+    ]
+    remainder = value
+    for divisor, label in units:
+        chunk = remainder // divisor
+        if chunk:
+            if divisor == 100:
+                parts.append(f"{_ba_number_words_under_1000(chunk)} {label}")
+            else:
+                parts.append(f"{_ba_number_words_under_1000(chunk)} {label}")
+            remainder %= divisor
+    if remainder:
+        parts.append(_ba_number_words_under_1000(remainder))
+    return " ".join(parts).strip()
+
+
+def _ba_integer_to_international_words(number: int):
+    value = int(number or 0)
+    if value == 0:
+        return "zero"
+    parts = []
+    units = [
+        (1_000_000_000, "billion"),
+        (1_000_000, "million"),
+        (1_000, "thousand"),
+    ]
+    remainder = value
+    for divisor, label in units:
+        chunk = remainder // divisor
+        if chunk:
+            parts.append(f"{_ba_number_words_under_1000(chunk)} {label}")
+            remainder %= divisor
+    if remainder:
+        parts.append(_ba_number_words_under_1000(remainder))
+    return " ".join(parts).strip()
+
+
+def _ba_format_currency_amount_display(currency_code, amount, country=""):
+    code = str(currency_code or "INR").strip().upper() or "INR"
+    country_name = str(country or "").strip().lower()
+    if code == "INR" or "india" in country_name:
+        amount_text = _format_indian_currency_value(amount, "0.00")
+    else:
+        amount_text = _decimal_to_string(amount)
+    return f"{_ba_currency_symbol(code)} {amount_text}"
+
+
+def _ba_currency_amount_spoken(currency_code, amount, country=""):
+    code = str(currency_code or "INR").strip().upper() or "INR"
+    country_name = str(country or "").strip().lower()
+    amount_value = _ba_to_decimal_amount(amount)
+    sign = "minus " if amount_value < 0 else ""
+    absolute_value = abs(amount_value)
+    integer_part = int(absolute_value)
+    decimals = int((absolute_value - Decimal(integer_part)).quantize(Decimal("0.01")) * 100)
+    if code == "INR" or "india" in country_name:
+        integer_words = _ba_integer_to_indian_words(integer_part)
+    else:
+        integer_words = _ba_integer_to_international_words(integer_part)
+    currency_word = {
+        "INR": "rupees",
+        "USD": "dollars",
+        "EUR": "euros",
+        "GBP": "pounds",
+        "AED": "dirhams",
+        "SAR": "riyals",
+    }.get(code, code.lower())
+    if decimals:
+        paise_word = "paise" if code == "INR" else "cents"
+        return f"{sign}{integer_words} {currency_word} and {_ba_number_words_under_1000(decimals)} {paise_word}"
+    return f"{sign}{integer_words} {currency_word}"
+
+
+def _ba_direct_response(reply, tts_text=""):
+    response_text = str(reply or "").strip()
+    return {
+        "reply": response_text,
+        "tts_text": str(tts_text or response_text).strip() or response_text,
+    }
+
+
 def _attendance_work_minutes(entry):
     if not getattr(entry, "checkin_time", None) or not getattr(entry, "checkout_time", None):
         return None
@@ -1234,9 +1362,32 @@ def _build_ba_assistant_scope_context(user: User, org: Organization, scope):
     )
     context["org_summary"] = {
         "organization_name": str(getattr(org, "name", "") or "").strip(),
+        "country": str(getattr(org, "country", "") or "India").strip(),
+        "currency": str(getattr(org, "currency", "") or "INR").strip().upper() or "INR",
         "total_users": len(active_memberships),
         "admin_users": len([row for row in active_memberships if _is_org_admin_account_member(org, row)]),
         "employee_users": len([row for row in active_memberships if not _is_org_admin_account_member(org, row)]),
+        "sample_user_names": [
+            " ".join(
+                part for part in [
+                    str(getattr(getattr(row, "user", None), "first_name", "") or "").strip(),
+                    str(getattr(getattr(row, "user", None), "last_name", "") or "").strip(),
+                ]
+                if part
+            ).strip()
+            or str(getattr(getattr(row, "user", None), "username", "") or "").strip()
+            for row in active_memberships[:5]
+            if (
+                " ".join(
+                    part for part in [
+                        str(getattr(getattr(row, "user", None), "first_name", "") or "").strip(),
+                        str(getattr(getattr(row, "user", None), "last_name", "") or "").strip(),
+                    ]
+                    if part
+                ).strip()
+                or str(getattr(getattr(row, "user", None), "username", "") or "").strip()
+            )
+        ],
     }
 
     if scope["can_access_hr"]:
@@ -1329,6 +1480,8 @@ def _build_ba_assistant_scope_context(user: User, org: Organization, scope):
             for name, count in sorted(stage_counts.items(), key=lambda item: (-item[1], item[0].lower()))
         ]
         context["crm"] = {
+            "currency": str(getattr(org, "currency", "") or "INR").strip().upper() or "INR",
+            "country": str(getattr(org, "country", "") or "India").strip(),
             "visible_leads_count": len(leads_rows),
             "open_leads_count": sum(1 for row in leads_rows if str(row.status or "").strip().lower() == "open"),
             "today_meetings": [
@@ -1448,6 +1601,8 @@ def _build_ba_assistant_scope_context(user: User, org: Organization, scope):
             if issue_date and issue_date.year == today.year and issue_date.month == today.month:
                 this_month_invoices_count += 1
         context["accounts"] = {
+            "currency": str(getattr(org, "currency", "") or "INR").strip().upper() or "INR",
+            "country": str(getattr(org, "country", "") or "India").strip(),
             "today_sales_orders_count": len(sales_rows),
             "today_sales_total": _format_decimal_text(today_sales_total),
             "total_invoices_count": len([row for row in invoice_rows if isinstance(row, dict)]),
@@ -1514,7 +1669,10 @@ def _build_ba_assistant_system_prompt(agent_name: str, scope, product_context=No
         "If the user's phrasing is referential like 'antha', 'that one', 'same user', or 'those leads', resolve it from recent conversation whenever possible. "
         "Do not invent names, dates, counts, meetings, overtime, attendance, or billing figures. "
         "If the question is simple like total users, total leads, top owner, today attendance, or sales total, answer directly in one or two natural lines. "
-        "Keep answers short, helpful, and business-focused."
+        "Do not answer with a bare number alone when the user asks by voice or chat. Always respond as a complete natural sentence with enough context to feel human. "
+        "If the user asks for a very large list, many names, or huge detailed records, do not enumerate everything. Briefly explain that the dataset is too large to read out fully and ask them to check it manually in the application. "
+        "Reply in the same language or mixed-language style used by the user question. "
+        "Keep answers short, helpful, human, and business-focused."
     )
 
 
@@ -1610,6 +1768,75 @@ def _ba_style_reply(style: str, english: str, tanglish: str = "", tamil: str = "
     return str(english)
 
 
+def _ba_is_large_list_request(message: str):
+    text = str(message or "").strip().lower()
+    if not text:
+        return False
+    return _contains_any(
+        text,
+        [
+            "list all",
+            "show all",
+            "all users",
+            "all employees",
+            "all leads",
+            "all meetings",
+            "all invoices",
+            "all names",
+            "all details",
+            "full list",
+            "complete list",
+            "entire list",
+            "user list",
+            "employee list",
+            "lead list",
+            "meetings list",
+            "meeting list",
+            "invoice list",
+            "members list",
+            "member list",
+            "names list",
+            "ella per",
+            "ella peru",
+            "ellarayum",
+            "motha list",
+            "motham list",
+            "list sollu",
+            "show pannunga",
+            "show me all",
+            "tell all",
+            "give all",
+        ],
+    )
+
+
+def _ba_large_dataset_response(style: str, subject_english: str, count: int = 0, threshold: int = 5):
+    safe_count = max(0, int(count or 0))
+    safe_threshold = max(1, int(threshold or 5))
+    if safe_count and safe_count <= safe_threshold:
+        return ""
+    if safe_count >= 100:
+        english = f"{subject_english.capitalize()} {safe_count}-plus is too large to read out here. Please check it manually in the application."
+        tanglish = f"{subject_english.capitalize()} {safe_count}-ku mela irukku. Ella details-um inga solla mudiyadhu. Application-la manual-a check pannunga."
+        tamil = f"{subject_english.capitalize()} {safe_count}-ku mela இருக்கு. எல்லா details-um இங்க சொல்ல முடியாது. Application-la manual-a check pannunga."
+        telugu = f"{subject_english.capitalize()} {safe_count}-ku paiga unnayi. Anni details ikkada cheppadam kashtam. Application-lo manual-ga check cheyyandi."
+        kannada = f"{subject_english.capitalize()} {safe_count}-kkinta hecchu ide. Ella details-anna illi helakke agalla. Application-nalli manual-a check madi."
+    else:
+        english = f"There are {safe_count} {subject_english}. Listing everything here will be too long. Please check manually in the application."
+        tanglish = f"{subject_english.capitalize()} total {safe_count} irukku. Ella details-um inga solla romba long aagum. Application-la manual-a check pannunga."
+        tamil = f"{subject_english.capitalize()} total {safe_count} இருக்கு. எல்லா details-um இங்க சொல்ல ரொம்ப long ஆகும். Application-la manual-a check pannunga."
+        telugu = f"Total {safe_count} {subject_english} unnayi. Anni details ikkada chepthe chala long avuthundi. Application-lo manual-ga check cheyyandi."
+        kannada = f"Total {safe_count} {subject_english} ive. Ella details illi helidre tumba long agutte. Application-nalli manual-a check madi."
+    return _ba_style_reply(
+        style,
+        english=english,
+        tanglish=tanglish,
+        tamil=tamil,
+        telugu=telugu,
+        kannada=kannada,
+    )
+
+
 def _ba_normalize_recent_messages(rows, limit=12):
     if not isinstance(rows, list):
         return []
@@ -1701,6 +1928,9 @@ def _ba_assistant_question_route(message: str, scope):
     if scope.get("can_access_accounts") or scope.get("can_access_billing"):
         if _contains_any(text, ["billing", "sales summary", "today sales", "invoice", "amount sold"]):
             return "accounts"
+    if scope.get("can_access_ticketing"):
+        if _contains_any(text, ["ticket", "tickets", "open ticket", "pending ticket", "ticket count", "ticket summary"]):
+            return "ticketing"
     if _contains_any(
         text,
         [
@@ -1723,6 +1953,41 @@ def _ba_assistant_question_route(message: str, scope):
     return "general"
 
 
+def _ba_merge_local_assistant_context(context, local_context):
+    if not isinstance(context, dict) or not isinstance(local_context, dict):
+        return context
+    ticketing_context = local_context.get("ticketing") if isinstance(local_context.get("ticketing"), dict) else {}
+    open_tickets = ticketing_context.get("openTickets") if isinstance(ticketing_context.get("openTickets"), list) else []
+    total_tickets_count = int(ticketing_context.get("totalTicketsCount") or 0)
+    normalized_open_tickets = []
+    status_counts = {}
+    for row in open_tickets[:50]:
+        if not isinstance(row, dict):
+            continue
+        title = str(row.get("title") or row.get("subject") or "Ticket").strip() or "Ticket"
+        status = str(row.get("status") or "Unknown").strip() or "Unknown"
+        priority = str(row.get("priority") or "").strip()
+        ticket_id = str(row.get("ticketId") or row.get("id") or "").strip()
+        normalized_open_tickets.append({
+            "ticket_id": ticket_id,
+            "title": title,
+            "status": status,
+            "priority": priority,
+        })
+        status_counts[status] = status_counts.get(status, 0) + 1
+    if normalized_open_tickets:
+        context["ticketing"] = {
+            "total_tickets_count": total_tickets_count or len(normalized_open_tickets),
+            "open_tickets_count": len(normalized_open_tickets),
+            "open_tickets": normalized_open_tickets[:12],
+            "ticket_status_summary": [
+                {"status": name, "count": count}
+                for name, count in sorted(status_counts.items(), key=lambda item: (-item[1], item[0].lower()))
+            ][:12],
+        }
+    return context
+
+
 def _ba_assistant_direct_crm_answer(message: str, crm_context):
     text = str(message or "").strip().lower()
     style = _ba_detect_user_style(message)
@@ -1734,6 +1999,19 @@ def _ba_assistant_direct_crm_answer(message: str, crm_context):
     recent_leads = crm_context.get("recent_leads") if isinstance(crm_context.get("recent_leads"), list) else []
     visible_leads_count = int(crm_context.get("visible_leads_count") or 0)
     status_rows = crm_context.get("lead_status_summary") if isinstance(crm_context.get("lead_status_summary"), list) else []
+    currency_code = str(crm_context.get("currency") or "INR").strip().upper() or "INR"
+    country_name = str(crm_context.get("country") or "India").strip()
+    if _ba_is_large_list_request(message) and _contains_any(text, ["lead", "leads", "meeting", "meetings", "crm"]):
+        list_count = visible_leads_count
+        subject = "crm records"
+        if _contains_any(text, ["meeting", "meetings"]):
+            list_count = len(today_meetings)
+            subject = "meetings"
+        elif _contains_any(text, ["lead", "leads"]):
+            subject = "leads"
+        large_reply = _ba_large_dataset_response(style, subject, list_count, threshold=5)
+        if large_reply:
+            return large_reply
     amount_question = _contains_any(
         text,
         [
@@ -1774,46 +2052,58 @@ def _ba_assistant_direct_crm_answer(message: str, crm_context):
         if not target_row and _contains_any(text, ["antha", "that", "those"]) and top_owner:
             target_row = top_owner
         if target_row:
-            return _ba_style_reply(
+            amount_display = _ba_format_currency_amount_display(currency_code, target_row.get("total_amount") or "0.00", country_name)
+            amount_spoken = _ba_currency_amount_spoken(currency_code, target_row.get("total_amount") or "0.00", country_name)
+            reply_text = _ba_style_reply(
                 style,
                 english=(
                     f"{target_row.get('name') or 'Unknown'} has {target_row.get('lead_count') or 0} leads. "
-                    f"Total amount is Rs.{target_row.get('total_amount') or '0.00'}."
+                    f"Total amount is {amount_display}."
                 ),
                 tanglish=(
                     f"{target_row.get('name') or 'Unknown'} kitta {target_row.get('lead_count') or 0} leads irukku. "
-                    f"Total amount Rs.{target_row.get('total_amount') or '0.00'}."
+                    f"Total amount {amount_display}."
                 ),
                 tamil=(
                     f"{target_row.get('name') or 'Unknown'} கிட்ட {target_row.get('lead_count') or 0} leads இருக்கு. "
-                    f"Total amount Rs.{target_row.get('total_amount') or '0.00'}."
+                    f"Total amount {amount_display}."
                 ),
                 telugu=(
                     f"{target_row.get('name') or 'Unknown'} దగ్గర {target_row.get('lead_count') or 0} leads ఉన్నాయి. "
-                    f"Total amount Rs.{target_row.get('total_amount') or '0.00'}."
+                    f"Total amount {amount_display}."
                 ),
                 kannada=(
                     f"{target_row.get('name') or 'Unknown'} ಬಳಿ {target_row.get('lead_count') or 0} leads ಇವೆ. "
-                    f"Total amount Rs.{target_row.get('total_amount') or '0.00'}."
+                    f"Total amount {amount_display}."
                 ),
             )
-        if assignment_rows:
-            return _ba_style_reply(
+            tts_text = _ba_style_reply(
                 style,
-                english="Tell me whose leads total amount you want, and I will give the exact number.",
-                tanglish="Yaaroda leads total amount venumnu sollunga, naan exact-a solren.",
-                tamil="யாரோட leads total amount வேணும்னு சொல்லுங்க, நான் exact-a சொல்றேன்.",
-                telugu="ఎవరికి చెందిన leads total amount కావాలో చెప్పండి, నేను exact-ga చెప్తాను.",
-                kannada="ಯಾರ leads total amount ಬೇಕೋ ಹೇಳಿ, ನಾನು exact-a ಹೇಳ್ತೀನಿ.",
+                english=(
+                    f"{target_row.get('name') or 'Unknown'} has {target_row.get('lead_count') or 0} leads. "
+                    f"Total amount is {amount_spoken}."
+                ),
+                tanglish=(
+                    f"{target_row.get('name') or 'Unknown'} kitta {target_row.get('lead_count') or 0} leads irukku. "
+                    f"Total amount {amount_spoken}."
+                ),
+                tamil=(
+                    f"{target_row.get('name') or 'Unknown'} kitta {target_row.get('lead_count') or 0} leads irukku. "
+                    f"Total amount {amount_spoken}."
+                ),
+                telugu=(
+                    f"{target_row.get('name') or 'Unknown'} daggara {target_row.get('lead_count') or 0} leads unnayi. "
+                    f"Total amount {amount_spoken}."
+                ),
+                kannada=(
+                    f"{target_row.get('name') or 'Unknown'} bali {target_row.get('lead_count') or 0} leads ive. "
+                    f"Total amount {amount_spoken}."
+                ),
             )
-        return _ba_style_reply(
-            style,
-            english="Lead amount summary is not available in the current visible CRM data.",
-            tanglish="Ippo visible CRM data-la lead amount summary illa.",
-            tamil="இப்போ visible CRM data-la lead amount summary illa.",
-            telugu="ప్రస్తుతం కనిపిస్తున్న CRM dataలో lead amount summary అందుబాటులో లేదు.",
-            kannada="ಈಗ ಕಾಣಿಸುತ್ತಿರುವ CRM dataನಲ್ಲಿ lead amount summary ಲಭ್ಯ ಇಲ್ಲ.",
-        )
+            return _ba_direct_response(reply_text, tts_text)
+        # Fall back to the full assistant context search when the amount question
+        # mentions a person/name we could not confidently map in the direct shortcut.
+        return ""
 
     if _contains_any(text, ["adhigama lead", "most lead", "highest lead", "lead assign", "assigned lead"]):
         if not assignment_rows:
@@ -1834,23 +2124,16 @@ def _ba_assistant_direct_crm_answer(message: str, crm_context):
                 telugu=f"{top_owner.get('name') or 'Unknown'} దగ్గరే ఎక్కువ leads ఉన్నాయి. Count: {top_owner.get('lead_count') or 0}.",
                 kannada=f"{top_owner.get('name') or 'Unknown'} ಬಳಿ ಹೆಚ್ಚು leads ಇವೆ. Count: {top_owner.get('lead_count') or 0}.",
             )
-        return _ba_style_reply(
-            style,
-            english="Lead assignment summary is available, but I could not identify the top owner clearly.",
-            tanglish="Lead assignment summary irukku, aana top owner identify panna mudiyala.",
-            tamil="Lead assignment summary இருக்கு, ஆனா top owner identify பண்ண முடியல.",
-            telugu="Lead assignment summary ఉంది, కానీ top owner-ni clear-ga identify చేయలేకపోయాను.",
-            kannada="Lead assignment summary ಇದೆ, ಆದರೆ top owner ಅನ್ನೋದು clear-a identify ಮಾಡಲಾಗಲಿಲ್ಲ.",
-        )
+        return ""
 
     if _contains_any(text, ["total leads", "motham leads", "how many leads", "lead count"]):
         return _ba_style_reply(
             style,
-            english=f"There are {visible_leads_count} visible leads in CRM.",
-            tanglish=f"CRM-la total visible leads {visible_leads_count}.",
-            tamil=f"CRM-la total visible leads {visible_leads_count}.",
-            telugu=f"CRMలో మొత్తం visible leads {visible_leads_count}.",
-            kannada=f"CRMನಲ್ಲಿ ಒಟ್ಟು visible leads {visible_leads_count}.",
+            english=f"Right now your CRM has {visible_leads_count} visible leads in total.",
+            tanglish=f"Namma CRM-la ippo total-a {visible_leads_count} leads irukku.",
+            tamil=f"நம்ம CRM-la இப்போ total-a {visible_leads_count} leads இருக்கு.",
+            telugu=f"మీ CRMలో ప్రస్తుతం మొత్తం {visible_leads_count} visible leads ఉన్నాయి.",
+            kannada=f"Nimma CRMnalli iga ottu {visible_leads_count} visible leads ive.",
         )
 
     if _contains_any(text, [" leads", "lead ", "crm leads", "leads summary", "lead summary"]) or text in {"leads", "lead", "crm"}:
@@ -1949,6 +2232,21 @@ def _ba_assistant_direct_hr_answer(message: str, hr_context):
     overtime_rows = hr_context.get("overtime_this_month") if isinstance(hr_context.get("overtime_this_month"), list) else []
     increments = hr_context.get("recent_increments") if isinstance(hr_context.get("recent_increments"), list) else []
     checked_in = hr_context.get("employees_checked_in_today") if isinstance(hr_context.get("employees_checked_in_today"), list) else []
+    if _ba_is_large_list_request(message) and _contains_any(text, ["employee", "employees", "attendance", "checked in", "increment", "increments", "overtime", "ot", "leave"]):
+        list_count = 0
+        subject = "employee records"
+        if _contains_any(text, ["increment", "increments"]):
+            list_count = len(increments)
+            subject = "increment records"
+        elif _contains_any(text, ["attendance", "checked in", "leave"]):
+            list_count = len(checked_in)
+            subject = "attendance records"
+        elif _contains_any(text, ["overtime", "ot"]):
+            list_count = len(overtime_rows)
+            subject = "overtime records"
+        large_reply = _ba_large_dataset_response(style, subject, list_count, threshold=5)
+        if large_reply:
+            return large_reply
 
     if _contains_any(text, ["overtime", "ot"]):
         if not overtime_rows:
@@ -2017,12 +2315,19 @@ def _ba_assistant_direct_accounts_answer(message: str, accounts_context):
     style = _ba_detect_user_style(message)
     if not isinstance(accounts_context, dict):
         return ""
+    currency_code = str(accounts_context.get("currency") or "INR").strip().upper() or "INR"
+    country_name = str(accounts_context.get("country") or "India").strip()
     total_invoices_count = int(accounts_context.get("total_invoices_count") or 0)
     total_invoices_amount = str(accounts_context.get("total_invoices_amount") or "0.00")
     paid_invoices_count = int(accounts_context.get("paid_invoices_count") or 0)
     pending_invoices_count = int(accounts_context.get("pending_invoices_count") or 0)
     this_month_invoices_count = int(accounts_context.get("this_month_invoices_count") or 0)
     invoice_status_summary = accounts_context.get("invoice_status_summary") if isinstance(accounts_context.get("invoice_status_summary"), list) else []
+    if _ba_is_large_list_request(message) and _contains_any(text, ["invoice", "invoices", "billing", "sales"]):
+        subject = "invoices" if _contains_any(text, ["invoice", "invoices"]) else "billing records"
+        large_reply = _ba_large_dataset_response(style, subject, total_invoices_count, threshold=5)
+        if large_reply:
+            return large_reply
     if _contains_any(
         text,
         [
@@ -2072,14 +2377,25 @@ def _ba_assistant_direct_accounts_answer(message: str, accounts_context):
             "how much invoice amount",
         ],
     ):
-        return _ba_style_reply(
+        amount_display = _ba_format_currency_amount_display(currency_code, total_invoices_amount, country_name)
+        amount_spoken = _ba_currency_amount_spoken(currency_code, total_invoices_amount, country_name)
+        reply_text = _ba_style_reply(
             style,
-            english=f"Total invoice amount in your application is Rs.{total_invoices_amount}.",
-            tanglish=f"Namma application-la total invoice amount Rs.{total_invoices_amount}.",
-            tamil=f"நம்ம application-la total invoice amount Rs.{total_invoices_amount}.",
-            telugu=f"మీ application-lo total invoice amount Rs.{total_invoices_amount}.",
-            kannada=f"Nimma application-nalli total invoice amount Rs.{total_invoices_amount}.",
+            english=f"Total invoice amount in your application is {amount_display}.",
+            tanglish=f"Namma application-la total invoice amount {amount_display}.",
+            tamil=f"நம்ம application-la total invoice amount {amount_display}.",
+            telugu=f"మీ application-lo total invoice amount {amount_display}.",
+            kannada=f"Nimma application-nalli total invoice amount {amount_display}.",
         )
+        tts_text = _ba_style_reply(
+            style,
+            english=f"Total invoice amount in your application is {amount_spoken}.",
+            tanglish=f"Namma application-la total invoice amount {amount_spoken}.",
+            tamil=f"Namma application-la total invoice amount {amount_spoken}.",
+            telugu=f"Mee application-lo total invoice amount {amount_spoken}.",
+            kannada=f"Nimma application-nalli total invoice amount {amount_spoken}.",
+        )
+        return _ba_direct_response(reply_text, tts_text)
     if _contains_any(
         text,
         [
@@ -2161,6 +2477,71 @@ def _ba_assistant_direct_accounts_answer(message: str, accounts_context):
     return ""
 
 
+def _ba_assistant_direct_ticketing_answer(message: str, ticketing_context):
+    text = str(message or "").strip().lower()
+    style = _ba_detect_user_style(message)
+    if not isinstance(ticketing_context, dict):
+        return ""
+    open_tickets = ticketing_context.get("open_tickets") if isinstance(ticketing_context.get("open_tickets"), list) else []
+    total_tickets_count = int(ticketing_context.get("total_tickets_count") or len(open_tickets) or 0)
+    open_tickets_count = int(ticketing_context.get("open_tickets_count") or len(open_tickets) or 0)
+    status_summary = ticketing_context.get("ticket_status_summary") if isinstance(ticketing_context.get("ticket_status_summary"), list) else []
+    if _ba_is_large_list_request(message) and _contains_any(text, ["ticket", "tickets"]):
+        large_reply = _ba_large_dataset_response(style, "tickets", open_tickets_count, threshold=5)
+        if large_reply:
+            return large_reply
+    if _contains_any(text, ["how many tickets", "ticket count", "total tickets", "open tickets", "pending tickets", "ticket summary", "motham ticket", "motham ticketing", "evlo ticket", "yevalo ticket", "ticketing count", "ticketing la motham"]):
+        is_total_question = _contains_any(text, ["how many", "total", "motham", "evlo", "yevalo", "count"])
+        if is_total_question and not _contains_any(text, ["open ticket", "pending ticket"]):
+            return _ba_style_reply(
+                style,
+                english=f"Right now your ticketing has {total_tickets_count} tickets in total. Out of that, {open_tickets_count} are currently open.",
+                tanglish=f"Namma ticketing-la ippo total-a {total_tickets_count} tickets irukku. Adhula {open_tickets_count} tickets open-a irukku.",
+                tamil=f"நம்ம ticketing-la இப்போ total-a {total_tickets_count} tickets இருக்கு. அதுல {open_tickets_count} tickets open-a இருக்கு.",
+                telugu=f"మీ ticketing-lo ippudu total-ga {total_tickets_count} tickets ఉన్నాయి. వాటిలో {open_tickets_count} tickets open-ga ఉన్నాయి.",
+                kannada=f"Nimma ticketing-nalli iga total {total_tickets_count} tickets ive. Adaralli {open_tickets_count} tickets open ide.",
+            )
+        status_text = ", ".join(
+            f"{row.get('status')}: {int(row.get('count') or 0)}"
+            for row in status_summary[:4]
+        )
+        if status_text:
+            return _ba_style_reply(
+                style,
+                english=f"Right now you have {open_tickets_count} open tickets. Status split: {status_text}.",
+                tanglish=f"Ippo unga kitta {open_tickets_count} open tickets irukku. Status split: {status_text}.",
+                tamil=f"இப்போ உங்களிடம் {open_tickets_count} open tickets இருக்கு. Status split: {status_text}.",
+                telugu=f"ప్రస్తుతం మీ దగ్గర {open_tickets_count} open tickets ఉన్నాయి. Status split: {status_text}.",
+                kannada=f"Iga nimma hattira {open_tickets_count} open tickets ive. Status split: {status_text}.",
+            )
+        return _ba_style_reply(
+            style,
+            english=f"Right now you have {open_tickets_count} open tickets.",
+            tanglish=f"Ippo unga kitta {open_tickets_count} open tickets irukku.",
+            tamil=f"இப்போ உங்களிடம் {open_tickets_count} open tickets இருக்கு.",
+            telugu=f"ప్రస్తుతం మీ దగ్గర {open_tickets_count} open tickets ఉన్నాయి.",
+            kannada=f"Iga nimma hattira {open_tickets_count} open tickets ive.",
+        )
+    if _contains_any(text, ["ticket list", "ticket details", "which tickets", "show tickets"]):
+        if open_tickets_count <= 5 and open_tickets:
+            ticket_text = ", ".join(
+                f"{row.get('title') or 'Ticket'} ({row.get('status') or 'Unknown'})"
+                for row in open_tickets[:5]
+            )
+            return _ba_style_reply(
+                style,
+                english=f"Your open tickets are: {ticket_text}.",
+                tanglish=f"Unga open tickets: {ticket_text}.",
+                tamil=f"உங்களோட open tickets: {ticket_text}.",
+                telugu=f"మీ open tickets ఇవి: {ticket_text}.",
+                kannada=f"Nimma open tickets ivu: {ticket_text}.",
+            )
+        large_reply = _ba_large_dataset_response(style, "tickets", open_tickets_count, threshold=5)
+        if large_reply:
+            return large_reply
+    return ""
+
+
 def _ba_assistant_direct_general_answer(message: str, scoped_context):
     text = str(message or "").strip().lower()
     style = _ba_detect_user_style(message)
@@ -2169,6 +2550,12 @@ def _ba_assistant_direct_general_answer(message: str, scoped_context):
     org_summary = scoped_context.get("org_summary") if isinstance(scoped_context.get("org_summary"), dict) else {}
     scope = scoped_context.get("scope") if isinstance(scoped_context.get("scope"), dict) else {}
     product_capabilities = scoped_context.get("product_capabilities") if isinstance(scoped_context.get("product_capabilities"), dict) else {}
+    total_users = int(org_summary.get("total_users") or 0)
+    employee_users = int(org_summary.get("employee_users") or 0)
+    if _ba_is_large_list_request(message) and _contains_any(text, ["user", "users", "employee", "employees", "member", "members", "name", "names"]):
+        large_reply = _ba_large_dataset_response(style, "employee users", employee_users or total_users, threshold=5)
+        if large_reply:
+            return large_reply
 
     if _contains_any(
         text,
@@ -2184,9 +2571,7 @@ def _ba_assistant_direct_general_answer(message: str, scoped_context):
             "org users",
         ],
     ):
-        total_users = int(org_summary.get("total_users") or 0)
         admin_users = int(org_summary.get("admin_users") or 0)
-        employee_users = int(org_summary.get("employee_users") or 0)
         org_name = str(org_summary.get("organization_name") or "your organization").strip()
         return _ba_style_reply(
             style,
@@ -2210,6 +2595,66 @@ def _ba_assistant_direct_general_answer(message: str, scoped_context):
                 f"{org_name}ನಲ್ಲಿ ಈಗ {total_users} active users ಇದ್ದಾರೆ. "
                 f"ಅದರಲ್ಲ {admin_users} admin users, {employee_users} employee users."
             ),
+        )
+
+    if _contains_any(
+        text,
+        [
+            "total user list",
+            "user list",
+            "employee list",
+            "list all users",
+            "show users list",
+            "show employee list",
+            "members list",
+            "member list",
+            "users oda list",
+            "employee oda list",
+            "total user peru",
+            "employee peru",
+        ],
+    ):
+        org_name = str(org_summary.get("organization_name") or "your organization").strip()
+        sample_user_names = [
+            str(item or "").strip()
+            for item in (org_summary.get("sample_user_names") or [])
+            if str(item or "").strip()
+        ]
+        if total_users <= 5 and sample_user_names:
+            names_text = ", ".join(sample_user_names[:5])
+            return _ba_style_reply(
+                style,
+                english=f"{org_name} has {total_users} users. Their names are: {names_text}.",
+                tanglish=f"{org_name}-la {total_users} users irukanga. Avanga peru: {names_text}.",
+                tamil=f"{org_name}-la {total_users} users இருக்காங்க. அவங்க பேரு: {names_text}.",
+                telugu=f"{org_name}లో {total_users} users ఉన్నారు. వారి పేర్లు: {names_text}.",
+                kannada=f"{org_name}ನಲ್ಲಿ {total_users} users ಇದ್ದಾರೆ. Avra hesaru: {names_text}.",
+            )
+        if employee_users >= 100:
+            return _ba_style_reply(
+                style,
+                english=f"There are more than 100 employee users. I cannot list all names here. Please check the application manually.",
+                tanglish=f"Employee users 100-ku mela irukanga. Ella peraiyum inga solla mudiyadhu. Application-la manual-a check pannunga.",
+                tamil=f"Employee users 100-ku mela இருக்காங்க. எல்லா பேரையும் இங்க சொல்ல முடியாது. Application-la manual-a check pannunga.",
+                telugu=f"Employee users 100 కంటే ఎక్కువ మంది ఉన్నారు. అన్ని పేర్లు ఇక్కడ చెప్పలేను. Applicationలో manual-ga check చేయండి.",
+                kannada=f"Employee users 100ಕ್ಕಿಂತ ಹೆಚ್ಚು ಇದ್ದಾರೆ. Ella hesarugalan illi helakke agalla. Application-nalli manual-a check madi.",
+            )
+        if total_users > 5:
+            return _ba_style_reply(
+                style,
+                english=f"{org_name} has {total_users} users. Showing every name here will be too long. Please check the application manually.",
+                tanglish=f"{org_name}-la {total_users} users irukanga. Ella peraiyum inga solla romba long aagum. Application-la manual-a check pannunga.",
+                tamil=f"{org_name}-la {total_users} users இருக்காங்க. எல்லா பேரையும் இங்க சொல்ல ரொம்ப long ஆகும். Application-la manual-a check pannunga.",
+                telugu=f"{org_name}లో {total_users} users ఉన్నారు. అన్ని పేర్లు ఇక్కడ చెప్పితే చాలా long అవుతుంది. Applicationలో manual-ga check చేయండి.",
+                kannada=f"{org_name}ನಲ್ಲಿ {total_users} users ಇದ್ದಾರೆ. Ella hesarugalan illi helidre tumba long agutte. Application-nalli manual-a check madi.",
+            )
+        return _ba_style_reply(
+            style,
+            english="User list is not available right now.",
+            tanglish="User list ippo available illa.",
+            tamil="User list இப்போ available illa.",
+            telugu="User list ఇప్పుడు available లేదు.",
+            kannada="User list iga available illa.",
         )
 
     if _contains_any(
@@ -2359,7 +2804,22 @@ def _ba_assistant_direct_answer(message: str, scoped_context):
         return _ba_assistant_direct_hr_answer(message, scoped_context.get("hr"))
     if route == "accounts":
         return _ba_assistant_direct_accounts_answer(message, scoped_context.get("accounts"))
+    if route == "ticketing":
+        return _ba_assistant_direct_ticketing_answer(message, scoped_context.get("ticketing"))
     return _ba_assistant_direct_general_answer(message, scoped_context)
+
+
+def _ba_normalize_direct_response_payload(value):
+    if isinstance(value, dict):
+        reply_text = str(value.get("reply") or "").strip()
+        tts_text = str(value.get("tts_text") or reply_text).strip() or reply_text
+        if reply_text:
+            return {"reply": reply_text, "tts_text": tts_text}
+        return None
+    reply_text = str(value or "").strip()
+    if not reply_text:
+        return None
+    return {"reply": reply_text, "tts_text": reply_text}
 
 
 def _get_org_membership(user: User, org: Organization):
@@ -6934,6 +7394,7 @@ def org_openai_transcribe(request):
     if not audio_file:
         return JsonResponse({"detail": "audio_required"}, status=400)
     current_section = str(request.POST.get("current_section") or "").strip().lower()
+    preferred_input_language = str(request.POST.get("preferred_input_language") or "").strip().lower()
     speech_context = str(request.POST.get("speech_context") or "").strip()
     allow_empty = str(request.POST.get("allow_empty") or "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -6943,10 +7404,15 @@ def org_openai_transcribe(request):
         "This is a Work Zilla Business Autopilot organization voice command.",
         "Common business terms include CRM, HRM, lead, leads, deal, deals, meeting, meetings, attendance, payroll, billing, invoice, follow-up, task, overtime, sales, and subscription.",
         "Preserve English business words like CRM, leads, HRM, sales, billing, and the configured assistant name exactly when spoken.",
-        "For Tamil-English speech, preserve romanized words such as motham, yevalo, evlo, lead, leads, meeting, billing, users, and CRM naturally instead of forcing unrelated words.",
+        "For Tamil-English speech, preserve romanized words such as motham, yevalo, evlo, thevaiya, lead, leads, meeting, billing, users, and CRM naturally instead of forcing unrelated words.",
+        "Do not over-correct partial Tamil colloquial speech into different Tamil words when the audio is unclear; prefer the closest heard wording.",
+        "If the speech sounds South Indian and ambiguous, prefer Tamil or Tanglish over Malayalam.",
+        "Never rewrite spoken Tamil words into Malayalam script.",
     ]
     if current_section:
         prompt_parts.append(f"Current module is {current_section}.")
+    if preferred_input_language in {"ta", "ta-in", "tamil"}:
+        prompt_parts.append("Preferred spoken language is Tamil. Transcribe the speech in Tamil or natural Tanglish only.")
     if speech_context:
         prompt_parts.append(speech_context[:500])
     prompt_text = " ".join(prompt_parts)[:900]
@@ -7133,10 +7599,12 @@ def org_openai_chat(request):
         return JsonResponse({"detail": "message_required"}, status=400)
     recent_messages = _ba_normalize_recent_messages(payload.get("recent_messages"))
     current_section = str(payload.get("current_section") or "").strip().lower()
+    local_context = payload.get("local_context") if isinstance(payload.get("local_context"), dict) else {}
 
     agent_name = str(settings_obj.business_autopilot_ai_agent_name or DEFAULT_BA_OPENAI_AGENT_NAME).strip() or DEFAULT_BA_OPENAI_AGENT_NAME
     model = str(settings_obj.business_autopilot_openai_model or "gpt-4o-mini").strip() or "gpt-4o-mini"
     context = _build_ba_assistant_scope_context(request.user, org, scope)
+    context = _ba_merge_local_assistant_context(context, local_context)
     direct_answer = _ba_assistant_direct_answer(message, {
         **context,
         "scope": {
@@ -7144,11 +7612,14 @@ def org_openai_chat(request):
             "can_access_hr": scope["can_access_hr"],
             "can_access_accounts": scope["can_access_accounts"],
             "can_access_billing": scope["can_access_billing"],
+            "can_access_ticketing": "ticketing" in (scope.get("allowed_sections") or []),
         },
     })
-    if direct_answer:
+    normalized_direct_answer = _ba_normalize_direct_response_payload(direct_answer)
+    if normalized_direct_answer:
         return JsonResponse({
-            "reply": direct_answer,
+            "reply": normalized_direct_answer["reply"],
+            "tts_text": normalized_direct_answer["tts_text"],
             "agent_name": agent_name,
             "model": "tool-direct",
             "scope": {
@@ -7217,6 +7688,7 @@ def org_openai_chat(request):
     answer_text = str(answer or "").strip() or "No response received."
     return JsonResponse({
         "reply": answer_text,
+        "tts_text": answer_text,
         "agent_name": agent_name,
         "model": model,
         "scope": {

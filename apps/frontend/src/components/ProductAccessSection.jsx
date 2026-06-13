@@ -211,14 +211,16 @@ export default function ProductAccessSection({
         return map;
       }, new Map())
         .values()
-    ).sort((a, b) => {
+    )
+      .filter((item) => item.key !== "monitor")
+      .sort((a, b) => {
       const orderA = Number(a.sortOrder || Infinity);
       const orderB = Number(b.sortOrder || Infinity);
       if (orderA !== orderB) {
         return orderA - orderB;
       }
       return String(a.name || "").localeCompare(String(b.name || ""));
-    });
+      });
   }, [products, monitorLabel, activeProductKeys, normalizedCurrentProductKey]);
 
   if (isReadOnly) {
