@@ -143,10 +143,10 @@ VERIFY (AFTER DEPLOY)
 - `pgrep -af "core_platform.wsgi:application"`
 
 ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
-- Published at (UTC): `2026-06-13T03:27:05Z`
-- Local SHA: `adf59cd49a04c7339d154406ca12120e8ddb2a29`
-- GitHub main SHA: `adf59cd49a04c7339d154406ca12120e8ddb2a29`
-- Server SHA: `adf59cd49a04c7339d154406ca12120e8ddb2a29`
+- Published at (UTC): `2026-06-13T13:02:24Z`
+- Local SHA: `85d45ef9fc293d71cf0432dd28116103946bf0a8`
+- GitHub main SHA: `85d45ef9fc293d71cf0432dd28116103946bf0a8`
+- Server SHA: `85d45ef9fc293d71cf0432dd28116103946bf0a8`
 - Deploy method: `git-pull`
 - Gunicorn: listening on `:8000` (`yes`)
 - Verified URLs:
