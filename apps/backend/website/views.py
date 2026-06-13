@@ -384,14 +384,12 @@ def _redirect_to_latest_static_download(request, *candidates, fallback_path=None
 
 def download_managed_file(request, filename):
     item = application_downloads.serve_local_application_download(filename)
-    file_handle = open(item["storage_key"], "rb")
-    return FileResponse(
-        file_handle,
-        content_type="application/octet-stream",
-        headers={
-            "Content-Disposition": f'attachment; filename="{item["filename"]}"',
-        },
-    )
+    storage_path = Path(item["storage_key"]).resolve()
+    static_download_root = (Path(settings.BASE_DIR) / "static" / "downloads").resolve()
+    if storage_path.is_relative_to(static_download_root):
+        return redirect(f"/static/downloads/{quote(item['filename'])}")
+    file_handle = open(storage_path, "rb")
+    return FileResponse(file_handle, content_type="application/octet-stream", as_attachment=True, filename=item["filename"])
 
 
 def application_downloads_page(request):
