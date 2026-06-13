@@ -143,17 +143,17 @@ VERIFY (AFTER DEPLOY)
 - `pgrep -af "core_platform.wsgi:application"`
 
 ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
-- Published at (UTC): `2026-06-13T03:19:21Z`
-- Local SHA: `PENDING`
-- GitHub main SHA: `PENDING`
-- Server SHA: `PENDING`
+- Published at (UTC): `2026-06-13T03:27:05Z`
+- Local SHA: `adf59cd49a04c7339d154406ca12120e8ddb2a29`
+- GitHub main SHA: `adf59cd49a04c7339d154406ca12120e8ddb2a29`
+- Server SHA: `adf59cd49a04c7339d154406ca12120e8ddb2a29`
 - Deploy method: `git-pull`
-- Gunicorn: listening on `:8000` (`PENDING`)
+- Gunicorn: listening on `:8000` (`yes`)
 - Verified URLs:
-  - `/` -> `PENDING`
-  - `/downloads/bootstrap-products.json` -> `PENDING`
-  - `/downloads/windows-agent/` -> `PENDING`
-  - `/downloads/mac-agent/` -> `PENDING`
+  - `/` -> `200`
+  - `/downloads/bootstrap-products.json` -> `200`
+  - `/downloads/windows-agent/` -> `404`
+  - `/downloads/mac-agent/` -> `404`
 
 LATEST WORK LOG (2026-06-13)
 - Business Autopilot assistant refinements deployed:
