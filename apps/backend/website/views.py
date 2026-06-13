@@ -396,6 +396,11 @@ def download_managed_file(request, filename):
 
 def application_downloads_page(request):
     items = application_downloads.list_application_downloads()
+    show_legacy_routes = bool(
+        getattr(request.user, "is_staff", False)
+        or getattr(request.user, "is_superuser", False)
+        or str(request.GET.get("show_legacy", "")).strip().lower() in {"1", "true", "yes"}
+    )
     route_groups = {
         "desktop": [],
         "mobile": [],
@@ -444,6 +449,7 @@ def application_downloads_page(request):
             "desktop_routes": route_groups["desktop"],
             "mobile_routes": route_groups["mobile"],
             "legacy_routes": route_groups["legacy"],
+            "show_legacy_routes": show_legacy_routes,
             "download_location_label": "Backblaze Application Downloads",
         },
     )
