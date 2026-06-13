@@ -1,4 +1,4 @@
-const version = "0.1.0";
+const version = "0.1.1";
 
 function intEnv(name, fallback) {
   const value = Number.parseInt(process.env[name] || "", 10);
@@ -17,6 +17,7 @@ module.exports = {
     orientation: "portrait",
     userInterfaceStyle: "light",
     assetBundlePatterns: ["**/*"],
+    newArchEnabled: false,
     runtimeVersion: {
       policy: "appVersion"
     },
@@ -40,7 +41,7 @@ module.exports = {
     },
     android: {
       package: "com.workzilla.mobile",
-      versionCode: intEnv("ANDROID_VERSION_CODE", 1)
+      versionCode: intEnv("ANDROID_VERSION_CODE", 2)
     },
     extra: {
       eas: {
