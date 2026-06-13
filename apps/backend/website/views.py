@@ -361,10 +361,10 @@ def _build_latest_static_download_url(request, *candidates, fallback_path=None):
         resolved_url, filename = application_downloads.resolve_latest_download_url(*candidates)
         if resolved_url.startswith(("http://", "https://")):
             return resolved_url
-        return request.build_absolute_uri(f"/downloads/files/{quote(filename)}")
+        return f"/downloads/files/{quote(filename)}"
     except Http404:
         if fallback_path:
-            return request.build_absolute_uri(fallback_path)
+            return fallback_path
         raise
 
 
@@ -426,7 +426,7 @@ def application_downloads_page(request):
     for item in items:
         download_href = item["download_url"]
         if not download_href:
-            download_href = request.build_absolute_uri(f"/downloads/files/{quote(item['filename'])}")
+            download_href = f"/downloads/files/{quote(item['filename'])}"
         table_rows.append({
             "filename": item["filename"],
             "product": item["product"],
