@@ -9,7 +9,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import render, redirect
 from types import SimpleNamespace
-from django.http import JsonResponse, HttpResponse, Http404
+from django.http import FileResponse, JsonResponse, HttpResponse, Http404
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 from django.views.decorators.http import require_http_methods
