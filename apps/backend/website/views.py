@@ -703,8 +703,79 @@ def bootstrap_products_config(request):
         fallback_path="/downloads/mac-imposition-product-agent/",
     )
 
+    products = [
+        {
+            "key": "monitor",
+            "title": "Work Suite",
+            "aliases": ["monitor", "worksuite", "work-suite"],
+            "desktop": {
+                "requires_native_agent": True,
+                "downloads": {
+                    "windows": monitor_windows_url,
+                    "mac": monitor_mac_url,
+                },
+                "native_capabilities": [
+                    "screenshot_capture",
+                    "app_tracking",
+                    "active_window_tracking",
+                    "system_monitoring",
+                ],
+            },
+            "mobile": {"supported": True, "mode": "online_ui"},
+            "web": {"supported": True},
+        },
+        {
+            "key": "storage",
+            "title": "Online Storage",
+            "aliases": ["storage", "online-storage"],
+            "desktop": {
+                "requires_native_agent": True,
+                "downloads": {
+                    "windows": storage_windows_url,
+                    "mac": storage_mac_url,
+                },
+                "native_capabilities": [
+                    "folder_watcher_sync",
+                    "device_folder_mapping",
+                    "local_upload_download",
+                ],
+            },
+            "mobile": {"supported": True, "mode": "online_ui"},
+            "web": {"supported": True},
+        },
+        {
+            "key": "imposition",
+            "title": "Print Marks",
+            "aliases": ["imposition", "imposition-software"],
+            "desktop": {
+                "requires_native_agent": True,
+                "downloads": {
+                    "windows": imposition_windows_url,
+                    "mac": imposition_mac_url,
+                },
+                "native_capabilities": [
+                    "printer_integration",
+                    "filesystem_jobs",
+                    "local_output_processing",
+                ],
+            },
+            "mobile": {"supported": True, "mode": "online_ui"},
+            "web": {"supported": True},
+        },
+    ]
+
     return JsonResponse(
         {
+            "version": 2,
+            "generated_at": timezone.now().isoformat(),
+            "shell": {
+                "desktop_core_agent": {
+                    "shared_install": True,
+                    "auto_update_ready": True,
+                    "products": [item["key"] for item in products],
+                }
+            },
+            "products": products,
             "monitor": {
                 "windows": monitor_windows_url,
                 "mac": monitor_mac_url,

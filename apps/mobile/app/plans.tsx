@@ -6,6 +6,7 @@ import { apiGet, apiPost } from "@/core/api/http";
 import { useAuth } from "@/core/auth/AuthContext";
 import { API_BASE_URL } from "@/core/config/env";
 import { DEFAULT_PRODUCT_KEY, getMobileProduct } from "@/core/products/catalog";
+import { fetchProductShellManifest } from "@/core/products/manifest";
 import { useThemeTokens } from "@/core/theme/useThemeTokens";
 import { AppTopHeader } from "@/modules/common/components/AppTopHeader";
 
@@ -59,6 +60,7 @@ export default function PlansScreen() {
     error: "",
     message: ""
   });
+  const [nativeAgentNote, setNativeAgentNote] = useState("");
 
   useEffect(() => {
     if (!session?.authenticated) {
@@ -96,6 +98,32 @@ export default function PlansScreen() {
       active = false;
     };
   }, [params.fromSignup, session?.authenticated]);
+
+  useEffect(() => {
+    let active = true;
+    const loadManifest = async () => {
+      const manifest = await fetchProductShellManifest();
+      if (!active || !manifest?.products) {
+        return;
+      }
+      const productMeta = getMobileProduct(state.selectedProduct);
+      const manifestMeta = manifest.products.find((item) => item.aliases?.includes(productMeta?.slug || state.selectedProduct));
+      if (!manifestMeta?.desktop?.requires_native_agent) {
+        setNativeAgentNote("");
+        return;
+      }
+      const capabilities = (manifestMeta.desktop.native_capabilities || []).slice(0, 2).join(", ");
+      setNativeAgentNote(
+        capabilities
+          ? `Full desktop features still need the Desktop Core Agent for ${capabilities}.`
+          : "Full desktop features still need the Desktop Core Agent."
+      );
+    };
+    void loadManifest();
+    return () => {
+      active = false;
+    };
+  }, [state.selectedProduct]);
 
   const loadProductPlans = async (slug: string) => {
     try {
@@ -168,6 +196,7 @@ export default function PlansScreen() {
         <Text style={styles.eyebrow}>Pricing</Text>
         <Text style={styles.title}>Choose Your Plan</Text>
         <Text style={styles.copy}>{getMobileProduct(state.selectedProduct)?.planHint || "Choose a product and continue with its plan."}</Text>
+        {nativeAgentNote ? <Text style={styles.supportingCopy}>{nativeAgentNote}</Text> : null}
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.productTabs}>
@@ -237,6 +266,7 @@ const createStyles = (theme: ReturnType<typeof useThemeTokens>) =>
     eyebrow: { color: theme.colors.primary, fontSize: 12, fontWeight: "700", letterSpacing: 1 },
     title: { color: theme.colors.text, fontSize: 24, fontWeight: "800" },
     copy: { color: theme.colors.muted, fontSize: 14, lineHeight: 20 },
+    supportingCopy: { color: theme.colors.primary, fontSize: 13, lineHeight: 18, marginTop: 8 },
     productTabs: { gap: 10 },
     productTab: {
       borderColor: theme.colors.border,

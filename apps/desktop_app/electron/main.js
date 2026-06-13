@@ -8,7 +8,7 @@ import { spawn, spawnSync } from "child_process";
 import { Readable } from "stream";
 import { pipeline } from "stream/promises";
 import { fileURLToPath } from "url";
-import { getDesktopProductKeys, isKnownDesktopProduct } from "./productCatalog.js";
+import { getDesktopProductKeys, getDesktopProducts, isKnownDesktopProduct } from "./productCatalog.js";
 import SyncService from "./sync/SyncService.js";
 import { login, logout, checkAuth } from "./sync/auth.js";
 import { loadSettings, saveSettings, addFolder, removeFolder as removeLocalFolder, MAX_SYNC_FOLDERS_PER_DEVICE } from "./sync/settings.js";
@@ -294,6 +294,77 @@ async function resolveUpdateInfo() {
     downloadUrl: "",
     error: "update_info_unavailable"
   };
+}
+
+function buildLocalProductShellManifest() {
+  const origin = normalizeBaseDownloadOrigin();
+  const downloadsByKey = {
+    monitor: {
+      windows: new URL("/downloads/windows-monitor-product-agent/", origin).toString(),
+      mac: new URL("/downloads/mac-monitor-product-agent/", origin).toString()
+    },
+    storage: {
+      windows: new URL("/downloads/windows-storage-product-agent/", origin).toString(),
+      mac: new URL("/downloads/mac-storage-product-agent/", origin).toString()
+    },
+    imposition: {
+      windows: new URL("/downloads/windows-imposition-product-agent/", origin).toString(),
+      mac: new URL("/downloads/mac-imposition-product-agent/", origin).toString()
+    }
+  };
+  const products = getDesktopProducts().map((product) => ({
+    key: product.key,
+    title: product.title,
+    aliases: product.enabledSlugs,
+    desktop: {
+      requires_native_agent: true,
+      downloads: downloadsByKey[product.key] || {},
+      native_capabilities: product.nativeCapabilities || []
+    },
+    mobile: {
+      supported: true,
+      mode: "online_ui"
+    },
+    web: {
+      supported: true
+    }
+  }));
+  return {
+    version: 2,
+    generated_at: new Date().toISOString(),
+    shell: {
+      desktop_core_agent: {
+        shared_install: true,
+        auto_update_ready: true,
+        products: products.map((item) => item.key)
+      }
+    },
+    products,
+    monitor: downloadsByKey.monitor,
+    storage: downloadsByKey.storage,
+    imposition: downloadsByKey.imposition,
+    "imposition-software": downloadsByKey.imposition
+  };
+}
+
+async function getProductShellManifest() {
+  const origin = normalizeBaseDownloadOrigin();
+  const sourceUrl = new URL("/downloads/bootstrap-products.json", origin).toString();
+  try {
+    const response = await fetch(sourceUrl, {
+      method: "GET",
+      cache: "no-store",
+      headers: {
+        Accept: "application/json"
+      }
+    });
+    if (!response.ok) {
+      throw new Error(`manifest_http_${response.status}`);
+    }
+    return await response.json();
+  } catch {
+    return buildLocalProductShellManifest();
+  }
 }
 
 async function downloadFileToPath(url, filePath) {
@@ -1496,6 +1567,11 @@ ipcMain.handle("monitor:status", () => ({
 ipcMain.handle("app:local-installed-products", () => ({
   ok: true,
   products: getSharedInstalledProducts()
+}));
+
+ipcMain.handle("app:product-shell-manifest", async () => ({
+  ok: true,
+  manifest: await getProductShellManifest()
 }));
 
 ipcMain.handle("monitor:plan-status", async (_event, payload = {}) => {

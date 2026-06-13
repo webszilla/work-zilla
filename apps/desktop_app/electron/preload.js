@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld("storageApi", {
   saveFileBytes: (payload) => ipcRenderer.invoke("file:save-bytes", payload),
   getLaunchPreference: () => ipcRenderer.invoke("app:launch-preference"),
   getLocalInstalledProducts: () => ipcRenderer.invoke("app:local-installed-products"),
+  getProductShellManifest: () => ipcRenderer.invoke("app:product-shell-manifest"),
   uninstallApp: () => ipcRenderer.invoke("app:uninstall"),
   checkForAppUpdate: () => ipcRenderer.invoke("app:update-check"),
   installAppUpdate: () => ipcRenderer.invoke("app:update-install"),

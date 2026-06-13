@@ -1,9 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { router, useLocalSearchParams } from "expo-router";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { performAttendancePunch } from "@/modules/businessAutopilot/utils/attendance";
+import { fetchProductShellManifest } from "@/core/products/manifest";
 import { useThemeTokens } from "@/core/theme/useThemeTokens";
 import { BusinessAutopilotAccountsPanel } from "@/modules/businessAutopilot/components/BusinessAutopilotAccountsPanel";
 import { BusinessAutopilotCrmPanel } from "@/modules/businessAutopilot/components/BusinessAutopilotCrmPanel";
@@ -45,8 +46,34 @@ export default function ProductWorkspaceScreen() {
   const [attendanceNotice, setAttendanceNotice] = useState("");
   const [attendanceError, setAttendanceError] = useState("");
   const [attendanceSubmitting, setAttendanceSubmitting] = useState<"in" | "out" | "">("");
+  const [nativeAgentNote, setNativeAgentNote] = useState("");
   const isWorksuite = productSlug === "worksuite";
   const isBusinessAutopilot = productSlug === "business-autopilot-erp";
+
+  useEffect(() => {
+    let active = true;
+    const loadManifest = async () => {
+      const manifest = await fetchProductShellManifest();
+      if (!active || !manifest?.products) {
+        return;
+      }
+      const manifestMeta = manifest.products.find((item) => item.aliases?.includes(productSlug));
+      if (!manifestMeta?.desktop?.requires_native_agent) {
+        setNativeAgentNote("");
+        return;
+      }
+      const capabilities = (manifestMeta.desktop.native_capabilities || []).slice(0, 3).join(", ");
+      setNativeAgentNote(
+        capabilities
+          ? `Advanced desktop operations use the Desktop Core Agent for ${capabilities}.`
+          : "Advanced desktop operations use the Desktop Core Agent."
+      );
+    };
+    void loadManifest();
+    return () => {
+      active = false;
+    };
+  }, [productSlug]);
 
   const handleBusinessTabPress = (nextTab: string) => {
     setActiveTab(nextTab);
@@ -144,6 +171,7 @@ export default function ProductWorkspaceScreen() {
             </View>
             {attendanceNotice ? <Text style={styles.attendanceNotice}>{attendanceNotice}</Text> : null}
             {attendanceError ? <Text style={styles.attendanceError}>{attendanceError}</Text> : null}
+            {nativeAgentNote ? <Text style={styles.desktopAgentNote}>{nativeAgentNote}</Text> : null}
           </View>
         </View>
       ) : null}
@@ -304,6 +332,12 @@ const createStyles = (theme: ReturnType<typeof useThemeTokens>) =>
       color: "#dc2626",
       fontSize: 12,
       fontWeight: "600",
+      textAlign: "center"
+    },
+    desktopAgentNote: {
+      color: theme.colors.primary,
+      fontSize: 12,
+      lineHeight: 18,
       textAlign: "center"
     },
     tabBar: {

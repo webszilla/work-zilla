@@ -13,6 +13,7 @@ export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
     () => new Set(auth?.local_installed_products || [])
   );
   const [agentVersion, setAgentVersion] = useState("");
+  const [productManifest, setProductManifest] = useState(null);
   const [uninstalling, setUninstalling] = useState(false);
   const [uninstallMessage, setUninstallMessage] = useState("");
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -57,6 +58,29 @@ export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
 
   useEffect(() => {
     let active = true;
+    async function loadManifest() {
+      if (!window.storageApi.getProductShellManifest) {
+        return;
+      }
+      try {
+        const response = await window.storageApi.getProductShellManifest();
+        if (active && response?.ok) {
+          setProductManifest(response.manifest || null);
+        }
+      } catch {
+        if (active) {
+          setProductManifest(null);
+        }
+      }
+    }
+    loadManifest();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
     async function loadVersion() {
       try {
         const versionResp = await window.storageApi.getWindowsAgentVersion?.();
@@ -88,6 +112,7 @@ export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
     )
     .map((product) => ({
       ...product,
+      manifestMeta: (productManifest?.products || []).find((entry) => entry?.key === product.key) || null,
       canUse:
         hasDesktopProductAccess(product.key, auth?.enabled_products) ||
         hasDesktopLocalInstall(product.key, Array.from(localInstalledProducts))
@@ -310,6 +335,11 @@ export default function LaunchScreen({ auth, connection, onSelect, onLogout }) {
             >
               <div className="tile-title">{product.title}</div>
               <div className="tile-desc">{product.description}</div>
+              {product.manifestMeta?.desktop?.requires_native_agent ? (
+                <div className="tile-note">
+                  Core agent: {(product.manifestMeta.desktop.native_capabilities || []).slice(0, 2).join(", ")}
+                </div>
+              ) : null}
               {product.key === "monitor" && workSuiteExpiryAlert ? (
                 <div className="tile-note tile-note-alert">{workSuiteExpiryAlert}</div>
               ) : null}

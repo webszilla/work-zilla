@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld("storageApi", {
   getWindowsAgentVersion: () => ipcRenderer.invoke("app:windows-agent-version"),
   getLaunchPreference: () => ipcRenderer.invoke("app:launch-preference"),
   getLocalInstalledProducts: () => ipcRenderer.invoke("app:local-installed-products"),
+  getProductShellManifest: () => ipcRenderer.invoke("app:product-shell-manifest"),
   minimizeWindow: () => ipcRenderer.invoke("window:minimize"),
   toggleMaximizeWindow: () => ipcRenderer.invoke("window:toggle-maximize"),
   closeWindow: () => ipcRenderer.invoke("window:close"),
