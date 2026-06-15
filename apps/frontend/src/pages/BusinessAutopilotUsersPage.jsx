@@ -1476,6 +1476,7 @@ export default function BusinessAutopilotUsersPage() {
   const [sharedVendors, setSharedVendors] = useState(() => readSharedAccountsVendors());
   const [viewUserModal, setViewUserModal] = useState({ open: false, user: null, employee: null });
   const [viewClientModal, setViewClientModal] = useState({ open: false, client: null });
+  const [viewUserTypeModal, setViewUserTypeModal] = useState({ open: false, userType: null });
   const [userActivityModal, setUserActivityModal] = useState({
     open: false,
     loading: false,
@@ -1518,6 +1519,20 @@ export default function BusinessAutopilotUsersPage() {
   const pageSize = 5;
   const [importingUsers, setImportingUsers] = useState(false);
   const isEditingUser = Boolean(editForm.membership_id);
+
+  function openUserTypeDetails(item) {
+    const key = String(item?.key || "").trim();
+    const sourceItem = (Array.isArray(userMeta.user_types) ? userMeta.user_types : []).find((row) => String(row?.key || "").trim() === key) || {};
+    setViewUserTypeModal({
+      open: true,
+      userType: {
+        ...item,
+        ...sourceItem,
+        key,
+        label: item?.label || sourceItem?.label || BA_USER_TYPE_LABELS[key] || "User Type",
+      },
+    });
+  }
 
   function closeActionDialog(result) {
     const resolver = actionDialogResolveRef.current;
@@ -3807,7 +3822,6 @@ export default function BusinessAutopilotUsersPage() {
     if (editingClientId ? !canEditClientsTab : !canCreateClientsTab) {
       return;
     }
-    const companyName = String(clientForm.companyName || "").trim();
     const clientName = String(clientForm.clientName || "").trim();
     if (!clientName) {
       setNotice("Client name is required.");
@@ -3818,11 +3832,8 @@ export default function BusinessAutopilotUsersPage() {
       setNotice("Phone number is required.");
       return;
     }
+    const companyName = String(clientForm.companyName || "").trim();
     const primaryEmail = String(clientForm.email || "").trim();
-    if (!primaryEmail) {
-      setNotice("Email ID is required.");
-      return;
-    }
     const additionalPhones = (clientForm.additionalPhones || [])
       .map((row) => ({ countryCode: String(row.countryCode || "+91").trim() || "+91", number: String(row.number || "").trim() }))
       .filter((row) => row.number);
@@ -3830,25 +3841,9 @@ export default function BusinessAutopilotUsersPage() {
       .map((value) => String(value || "").trim())
       .filter(Boolean);
     const billingAddress = String(clientForm.billingAddress || "").trim();
-    if (!billingAddress) {
-      setNotice("Billing address is required.");
-      return;
-    }
     const billingCountry = String(clientForm.billingCountry || "").trim() || "India";
-    if (!billingCountry) {
-      setNotice("Billing country is required.");
-      return;
-    }
     const billingState = String(clientForm.billingState || "").trim();
-    if (!billingState) {
-      setNotice("Billing state is required.");
-      return;
-    }
     const billingPincode = String(clientForm.billingPincode || "").trim();
-    if (!billingPincode) {
-      setNotice("Billing pincode is required.");
-      return;
-    }
     const useSameShipping = Boolean(clientForm.billingShippingSame);
     const shippingAddress = useSameShipping
       ? String(clientForm.billingAddress || "").trim()
@@ -3862,25 +3857,6 @@ export default function BusinessAutopilotUsersPage() {
     const shippingPincode = useSameShipping
       ? billingPincode
       : String(clientForm.shippingPincode || "").trim();
-    const missingClientFields = [];
-    if (!companyName) missingClientFields.push("Company Name");
-    if (!clientName) missingClientFields.push("Client Name");
-    if (!primaryPhone) missingClientFields.push("Phone Number");
-    if (!primaryEmail) missingClientFields.push("Email ID");
-    if (!billingAddress) missingClientFields.push("Billing Address");
-    if (!billingCountry) missingClientFields.push("Billing Country");
-    if (!billingState) missingClientFields.push("Billing State");
-    if (!billingPincode) missingClientFields.push("Billing Pincode");
-    if (!shippingAddress) missingClientFields.push("Shipping Address");
-    if (!shippingCountry) missingClientFields.push("Shipping Country");
-    if (!shippingState) missingClientFields.push("Shipping State");
-    if (!shippingPincode) missingClientFields.push("Shipping Pincode");
-    if (missingClientFields.length) {
-      const message = `${missingClientFields.join(", ")} ${missingClientFields.length === 1 ? "is" : "are"} required. GSTIN is optional.`;
-      setNotice(message);
-      await openAlertDialog(message, { title: "Required Fields Missing" });
-      return;
-    }
     const primaryPhoneCountryCode = String(clientForm.phoneCountryCode || "+91").trim() || "+91";
     const duplicateClientMatch = findDuplicateSharedCustomerRow(
       activeClients,
@@ -5175,11 +5151,24 @@ export default function BusinessAutopilotUsersPage() {
                       <div className="wz-user-type-summary__list">
                         {createUserTypeSummaryRows.map((item) => (
                           <div key={item.key} className="wz-user-type-summary__item">
-                            <div className="wz-user-type-summary__line">
-                              <span className="wz-user-type-summary__name">{item.label}</span>
-                              <span className="wz-user-type-summary__count">{item.activeCount}/{item.seatCount}</span>
+                            <div className="d-flex align-items-start justify-content-between gap-2">
+                              <div>
+                                <div className="wz-user-type-summary__name">{item.label}</div>
+                                <div className="wz-user-type-summary__meta">
+                                  {item.activeCount}/{item.seatCount} active
+                                  <span className="mx-1">•</span>
+                                  Remaining {item.remainingCount}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-success"
+                                onClick={() => openUserTypeDetails(item)}
+                                aria-label={`View ${item.label} details`}
+                              >
+                                View
+                              </button>
                             </div>
-                            <div className="wz-user-type-summary__meta">Remaining {item.remainingCount}</div>
                           </div>
                         ))}
                       </div>
@@ -6086,11 +6075,10 @@ export default function BusinessAutopilotUsersPage() {
               <form className="d-flex flex-column gap-3" onSubmit={saveClient}>
               <div className="row g-3">
                 <div className="col-12 col-xl-4">
-                  <label className="form-label small text-secondary mb-1">Company Name *</label>
+                  <label className="form-label small text-secondary mb-1">Company Name</label>
                   <div className="crm-inline-suggestions-wrap">
                     <input
                       className="form-control"
-                      required
                       maxLength={getBusinessAutopilotMaxLength("companyName")}
                       value={clientForm.companyName || ""}
                       onFocus={() => setClientCompanySearchOpen(true)}
@@ -6195,10 +6183,10 @@ export default function BusinessAutopilotUsersPage() {
                   </div>
                 </div>
                 <div className="col-12 col-xl-6">
-                  <label className="form-label small text-secondary mb-1">Email ID *</label>
+                  <label className="form-label small text-secondary mb-1">Email ID</label>
                   <div className="d-flex flex-column gap-2">
                     <div className="d-flex gap-2">
-                      <input className="form-control" required maxLength={getBusinessAutopilotMaxLength("email")} value={clientForm.email || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, email: limitedInput("email", event.target.value) }))} placeholder="Primary email" />
+                      <input className="form-control" maxLength={getBusinessAutopilotMaxLength("email")} value={clientForm.email || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, email: limitedInput("email", event.target.value) }))} placeholder="Primary email" />
                       <button
                         type="button"
                         className="btn btn-outline-light btn-sm"
@@ -6235,7 +6223,7 @@ export default function BusinessAutopilotUsersPage() {
                 </div>
                 <div className="col-12 col-xl-6">
                   <div className="d-flex align-items-center justify-content-between mb-1">
-                    <label className="form-label small text-secondary mb-0">Billing Address *</label>
+                    <label className="form-label small text-secondary mb-0">Billing Address</label>
                     <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0">
                       <input
                         type="checkbox"
@@ -6246,56 +6234,56 @@ export default function BusinessAutopilotUsersPage() {
                       Billing And Shipping Same
                     </label>
                   </div>
-                  <textarea className="form-control mb-2" required rows="2" maxLength={getBusinessAutopilotMaxLength("billingAddress", { isTextarea: true })} value={clientForm.billingAddress || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingAddress: limitedTextarea("billingAddress", event.target.value) }))} placeholder="Billing address" />
+                  <textarea className="form-control mb-2" rows="2" maxLength={getBusinessAutopilotMaxLength("billingAddress", { isTextarea: true })} value={clientForm.billingAddress || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingAddress: limitedTextarea("billingAddress", event.target.value) }))} placeholder="Billing address" />
                   <div className="d-flex flex-column gap-2">
                     <div>
-                      <label className="form-label small text-secondary mb-1">Country *</label>
-                      <select className="form-select" required value={clientForm.billingCountry || "India"} onChange={(event) => setClientForm((prev) => ({ ...prev, billingCountry: event.target.value, billingState: "" }))}>
+                      <label className="form-label small text-secondary mb-1">Country</label>
+                      <select className="form-select" value={clientForm.billingCountry || "India"} onChange={(event) => setClientForm((prev) => ({ ...prev, billingCountry: event.target.value, billingState: "" }))}>
                         {COUNTRY_OPTIONS.map((country) => <option key={`users-client-country-${country}`} value={country}>{country}</option>)}
                       </select>
                     </div>
                     <div>
-                      <label className="form-label small text-secondary mb-1">State *</label>
+                      <label className="form-label small text-secondary mb-1">State</label>
                       {billingStateOptions.length ? (
-                        <select className="form-select" required value={clientForm.billingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingState: event.target.value }))}>
+                        <select className="form-select" value={clientForm.billingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingState: event.target.value }))}>
                           <option value="">Select State</option>
                           {billingStateOptions.map((state) => <option key={`users-client-state-${state}`} value={state}>{state}</option>)}
                         </select>
                       ) : (
-                        <input className="form-control" required maxLength={getBusinessAutopilotMaxLength("billingState")} value={clientForm.billingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingState: limitedInput("billingState", event.target.value) }))} placeholder="State / Province / Region" />
+                        <input className="form-control" maxLength={getBusinessAutopilotMaxLength("billingState")} value={clientForm.billingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingState: limitedInput("billingState", event.target.value) }))} placeholder="State / Province / Region" />
                       )}
                     </div>
                     <div>
-                      <label className="form-label small text-secondary mb-1">Pincode *</label>
-                      <input className="form-control" required maxLength={getBusinessAutopilotMaxLength("billingPincode")} value={clientForm.billingPincode || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingPincode: limitedInput("billingPincode", event.target.value) }))} placeholder="Pincode" />
+                      <label className="form-label small text-secondary mb-1">Pincode</label>
+                      <input className="form-control" maxLength={getBusinessAutopilotMaxLength("billingPincode")} value={clientForm.billingPincode || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, billingPincode: limitedInput("billingPincode", event.target.value) }))} placeholder="Pincode" />
                     </div>
                   </div>
                 </div>
                 {!clientForm.billingShippingSame ? (
                   <div className="col-12 col-xl-6">
-                    <label className="form-label small text-secondary mb-1">Shipping Address *</label>
-                    <textarea className="form-control mb-2" required rows="2" maxLength={getBusinessAutopilotMaxLength("shippingAddress", { isTextarea: true })} value={clientForm.shippingAddress || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingAddress: limitedTextarea("shippingAddress", event.target.value) }))} placeholder="Shipping address" />
+                    <label className="form-label small text-secondary mb-1">Shipping Address</label>
+                    <textarea className="form-control mb-2" rows="2" maxLength={getBusinessAutopilotMaxLength("shippingAddress", { isTextarea: true })} value={clientForm.shippingAddress || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingAddress: limitedTextarea("shippingAddress", event.target.value) }))} placeholder="Shipping address" />
                     <div className="d-flex flex-column gap-2">
                       <div>
-                        <label className="form-label small text-secondary mb-1">Country *</label>
-                        <select className="form-select" required value={clientForm.shippingCountry || "India"} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingCountry: event.target.value, shippingState: "" }))}>
+                        <label className="form-label small text-secondary mb-1">Country</label>
+                        <select className="form-select" value={clientForm.shippingCountry || "India"} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingCountry: event.target.value, shippingState: "" }))}>
                           {COUNTRY_OPTIONS.map((country) => <option key={`users-client-shipping-country-${country}`} value={country}>{country}</option>)}
                         </select>
                       </div>
                       <div>
-                        <label className="form-label small text-secondary mb-1">State *</label>
+                        <label className="form-label small text-secondary mb-1">State</label>
                         {shippingStateOptions.length ? (
-                          <select className="form-select" required value={clientForm.shippingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingState: event.target.value }))}>
+                          <select className="form-select" value={clientForm.shippingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingState: event.target.value }))}>
                             <option value="">Select State</option>
                             {shippingStateOptions.map((state) => <option key={`users-client-shipping-state-${state}`} value={state}>{state}</option>)}
                           </select>
-                        ) : (
-                          <input className="form-control" required maxLength={getBusinessAutopilotMaxLength("shippingState")} value={clientForm.shippingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingState: limitedInput("shippingState", event.target.value) }))} placeholder="State / Province / Region" />
+                      ) : (
+                          <input className="form-control" maxLength={getBusinessAutopilotMaxLength("shippingState")} value={clientForm.shippingState || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingState: limitedInput("shippingState", event.target.value) }))} placeholder="State / Province / Region" />
                         )}
                       </div>
                       <div>
-                        <label className="form-label small text-secondary mb-1">Pincode *</label>
-                        <input className="form-control" required maxLength={getBusinessAutopilotMaxLength("shippingPincode")} value={clientForm.shippingPincode || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingPincode: limitedInput("shippingPincode", event.target.value) }))} placeholder="Pincode" />
+                        <label className="form-label small text-secondary mb-1">Pincode</label>
+                        <input className="form-control" maxLength={getBusinessAutopilotMaxLength("shippingPincode")} value={clientForm.shippingPincode || ""} onChange={(event) => setClientForm((prev) => ({ ...prev, shippingPincode: limitedInput("shippingPincode", event.target.value) }))} placeholder="Pincode" />
                       </div>
                     </div>
                   </div>
@@ -6375,30 +6363,6 @@ export default function BusinessAutopilotUsersPage() {
                 </div>
               </div>
             </div>
-            {userMeta.user_types?.length ? (
-              <div className="row g-2 mb-3">
-                {userMeta.user_types.map((item) => (
-                  <div key={`user-type-summary-${item.key}`} className="col-12 col-md-6 col-xl-4">
-                    <div className="card h-100 border-0 shadow-sm" style={{ background: "linear-gradient(135deg, rgba(240, 253, 244, 0.92), rgba(255, 255, 255, 0.98))", borderRadius: "16px" }}>
-                      <div className="card-body py-3">
-                        <div className="d-flex align-items-start justify-content-between gap-3">
-                          <div>
-                            <div className="fw-semibold">{item.label}</div>
-                            <div className="text-secondary small">{item.description || "Business Autopilot seat pack"}</div>
-                          </div>
-                          <span className="badge bg-success-subtle text-success border">{item.key.replace(/_/g, " ").toUpperCase()}</span>
-                        </div>
-                        <div className="d-flex flex-wrap gap-3 mt-3 small">
-                          <span><strong>{item.seat_count || 0}</strong> purchased</span>
-                          <span><strong>{item.active_count || 0}</strong> active</span>
-                          <span><strong>{item.remaining_count || 0}</strong> remaining</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : null}
             <div className="table-responsive">
               <table className="table table-dark table-hover align-middle mb-0">
                 <thead>
@@ -6804,6 +6768,52 @@ export default function BusinessAutopilotUsersPage() {
                   },
                 ].map((field) => (
                   <div className="col-12 col-md-6 col-xl-4" key={`client-detail-${field.key}`}>
+                    <div className="small text-secondary mb-1">{field.label}</div>
+                    <div>{String(field.value || "").trim() || "-"}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {viewUserTypeModal.open ? (
+        <div className="modal-overlay" onClick={() => setViewUserTypeModal({ open: false, userType: null })}>
+          <div className="modal-panel" style={{ width: "min(760px, 94vw)", maxHeight: "88vh", overflowY: "auto" }} onClick={(event) => event.stopPropagation()}>
+            <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+              <div>
+                <h5 className="mb-1">User Type Details</h5>
+                <div className="text-secondary">{viewUserTypeModal.userType?.label || "User Type"}</div>
+              </div>
+              <button type="button" className="btn btn-outline-light btn-sm" onClick={() => setViewUserTypeModal({ open: false, userType: null })}>
+                Close
+              </button>
+            </div>
+
+            <div className="card p-3">
+              <div className="row g-3">
+                {[
+                  { key: "key", label: "User Type Key", value: viewUserTypeModal.userType?.key },
+                  { key: "label", label: "Label", value: viewUserTypeModal.userType?.label },
+                  { key: "seatCount", label: "Purchased Seats", value: viewUserTypeModal.userType?.seatCount },
+                  { key: "activeCount", label: "Active Users", value: viewUserTypeModal.userType?.activeCount },
+                  { key: "remainingCount", label: "Remaining Seats", value: viewUserTypeModal.userType?.remainingCount },
+                  {
+                    key: "description",
+                    label: "Description",
+                    value: viewUserTypeModal.userType?.description || "No description available.",
+                  },
+                  {
+                    key: "allowedModules",
+                    label: "Allowed Modules",
+                    value: Array.isArray(viewUserTypeModal.userType?.allowed_modules)
+                      ? viewUserTypeModal.userType.allowed_modules.join(", ")
+                      : Array.isArray(viewUserTypeModal.userType?.allowedModules)
+                        ? viewUserTypeModal.userType.allowedModules.join(", ")
+                        : "",
+                  },
+                ].map((field) => (
+                  <div className="col-12 col-md-6 col-xl-4" key={`user-type-detail-${field.key}`}>
                     <div className="small text-secondary mb-1">{field.label}</div>
                     <div>{String(field.value || "").trim() || "-"}</div>
                   </div>
