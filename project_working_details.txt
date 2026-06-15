@@ -143,10 +143,10 @@ VERIFY (AFTER DEPLOY)
 - `pgrep -af "core_platform.wsgi:application"`
 
 ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
-- Published at (UTC): `2026-06-13T13:02:24Z`
-- Local SHA: `85d45ef9fc293d71cf0432dd28116103946bf0a8`
-- GitHub main SHA: `85d45ef9fc293d71cf0432dd28116103946bf0a8`
-- Server SHA: `85d45ef9fc293d71cf0432dd28116103946bf0a8`
+- Published at (UTC): `2026-06-15T16:20:48Z`
+- Local SHA: `5547ac010a61c603ef5ff2e8d4d1299f89e280bd`
+- GitHub main SHA: `5547ac010a61c603ef5ff2e8d4d1299f89e280bd`
+- Server SHA: `5547ac010a61c603ef5ff2e8d4d1299f89e280bd`
 - Deploy method: `git-pull`
 - Gunicorn: listening on `:8000` (`yes`)
 - Verified URLs:
@@ -155,7 +155,16 @@ ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
   - `/downloads/windows-agent/` -> `404`
   - `/downloads/mac-agent/` -> `404`
 
-LATEST WORK LOG (2026-06-13)
+LATEST WORK LOG (2026-06-15)
+- Business Autopilot Site Admin quick estimate workflow deployed:
+  - separate Site Admin full-page route and header tab switching
+  - externalized Site Admin AI instruction registry for Business Autopilot
+  - Quick Estimate creation/edit/delete/share/print flow in Site Admin
+  - 2-column Site Admin layout with chat on left and estimate list on right
+  - estimate filters, search, pagination, and action icons added
+  - edit flow now updates mobile number, client name, and same customer row sync
+  - QE Setting popup added for thermal header text with 200-character limit
+  - migration `business_autopilot.0036_quickestimate_quickestimatesequence_and_more` applied on server
 - Business Autopilot assistant refinements deployed:
   - wake-word flow tightened for manual Maya-prefixed recording
   - fullscreen assistant layout cleanup and dashboard return behavior
