@@ -34771,11 +34771,11 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
         { key: "overview", label: "Overview" },
         { key: "invoices", label: "Invoices" },
         { key: "estimates", label: "Estimates" },
+        { key: "purchases", label: "Purchases" },
         { key: "gst", label: taxUi.templatesLabel },
         { key: "templates", label: "Billing Templates" },
         { key: "items", label: "Items" },
         { key: "customers", label: "Clients" },
-        { key: "purchases", label: "Purchases" },
       ];
 
   const openAccountsDocumentViewPopup = useCallback((kind, row) => {
