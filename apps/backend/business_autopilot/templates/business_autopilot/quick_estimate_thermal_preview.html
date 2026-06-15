@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ estimate.estimate_number }}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #111827;
+      --muted: #4b5563;
+      --line: #d1d5db;
+      --accent: #16a34a;
+      --paper: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 16px;
+      background: #f3f4f6;
+      color: var(--ink);
+      font-family: "Courier New", Courier, monospace;
+    }
+    .thermal {
+      width: 100%;
+      max-width: 384px;
+      margin: 0 auto;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px 14px 18px;
+      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+    }
+    .center { text-align: center; }
+    .brand {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      margin-bottom: 4px;
+    }
+    .subtle {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .header-copy {
+      margin-top: 6px;
+      white-space: pre-line;
+    }
+    .title {
+      margin: 16px 0 10px;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: var(--accent);
+      text-transform: uppercase;
+    }
+    .meta {
+      margin: 12px 0;
+      padding: 10px 0;
+      border-top: 1px dashed var(--line);
+      border-bottom: 1px dashed var(--line);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .meta-label {
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 13px;
+    }
+    th, td {
+      padding: 7px 0;
+      vertical-align: top;
+      border-bottom: 1px dashed var(--line);
+    }
+    th {
+      text-align: left;
+      color: var(--muted);
+      font-weight: 700;
+    }
+    th:last-child, td:last-child {
+      text-align: right;
+      white-space: nowrap;
+    }
+    .item-name {
+      font-weight: 700;
+      margin-bottom: 2px;
+    }
+    .item-desc {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .qty {
+      color: var(--muted);
+      margin-top: 3px;
+      font-size: 12px;
+    }
+    .total-box {
+      margin-top: 14px;
+      border-top: 2px solid var(--ink);
+      padding-top: 10px;
+    }
+    .total-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      font-size: 16px;
+      font-weight: 700;
+    }
+    .thank-you {
+      margin-top: 16px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--line);
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    @media print {
+      body { background: #fff; padding: 0; }
+      .thermal {
+        max-width: none;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="thermal">
+    <div class="center">
+      <div class="brand">{{ company_name }}</div>
+      {% if organization_name %}<div class="subtle">{{ organization_name }}</div>{% endif %}
+      {% if header_lines %}
+        <div class="subtle header-copy">
+          {% for line in header_lines %}{{ line }}{% if not forloop.last %}<br>{% endif %}{% endfor %}
+        </div>
+      {% endif %}
+      <div class="title">Quick Estimate</div>
+    </div>
+
+    <div class="meta">
+      <div class="meta-row"><span class="meta-label">Estimate No</span><strong>{{ estimate.estimate_number }}</strong></div>
+      <div class="meta-row"><span class="meta-label">Date</span><strong>{{ created_at_label }}</strong></div>
+      <div class="meta-row"><span class="meta-label">Client</span><strong>{{ estimate.client_name }}</strong></div>
+      <div class="meta-row"><span class="meta-label">Mobile</span><strong>{{ estimate.mobile }}</strong></div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Items</th>
+          <th>Amt</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+          <tr>
+            <td>
+              {% if item.service_name %}<div class="item-name">{{ item.service_name }}</div>{% endif %}
+              <div class="item-desc">{{ item.description }}</div>
+              {% if item.quantity %}<div class="qty">Qty: {{ item.quantity }}{% if item.unit %} {{ item.unit }}{% endif %}</div>{% endif %}
+            </td>
+            <td>Rs {{ item.amount }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="total-box">
+      <div class="total-row">
+        <span>Total</span>
+        <span>Rs {{ formatted_total }}</span>
+      </div>
+    </div>
+
+    <div class="thank-you">
+      Thank you.<br>
+      Printable 4-inch thermal estimate preview.
+    </div>
+  </div>
+</body>
+</html>

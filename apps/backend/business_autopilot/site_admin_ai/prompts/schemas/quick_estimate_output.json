@@ -1,0 +1,28 @@
+{
+  "module": "quick_estimate",
+  "intent": "",
+  "language": "ta-IN | en-IN | hi-IN | mixed",
+  "estimate_number": null,
+  "mobile": null,
+  "client_name": null,
+  "email": null,
+  "address": null,
+  "gst_number": null,
+  "items": [
+    {
+      "service_name": null,
+      "description": null,
+      "quantity": null,
+      "unit": null,
+      "rate": null,
+      "amount": null
+    }
+  ],
+  "payment_status": null,
+  "delivery_status": null,
+  "assigned_to_name": null,
+  "notes": null,
+  "missing_fields": [],
+  "confirmation_required": false,
+  "reply": ""
+}

@@ -74,6 +74,7 @@ import AiChatbotDashboardPage from "./pages/AiChatbotDashboardPage.jsx";
 import AiChatbotHistoryPage from "./pages/AiChatbotHistoryPage.jsx";
 import AiChatbotChatSettingsPage from "./pages/AiChatbotChatSettingsPage.jsx";
 import BusinessAutopilotAssistantPage from "./pages/BusinessAutopilotAssistantPage.jsx";
+import BusinessAutopilotSiteAdminPage from "./pages/BusinessAutopilotSiteAdminPage.jsx";
 import WhatsappAutomationCompanyProfilePage from "./pages/WhatsappAutomationCompanyProfilePage.jsx";
 import WhatsappAutomationDashboardPage from "./pages/WhatsappAutomationDashboardPage.jsx";
 import WhatsappAutomationOverviewPage from "./pages/WhatsappAutomationOverviewPage.jsx";
@@ -460,6 +461,8 @@ const reactPages = [
   { label: "Subscriptions", path: "/subscriptions", icon: "bi-arrow-repeat", productOnly: "business-autopilot-erp", moduleKey: "subscriptions" },
   { label: "Ticketing", path: "/ticketing", icon: "bi-life-preserver", productOnly: "business-autopilot-erp", moduleKey: "ticketing" },
   { label: "Inventory", path: "/stocks", icon: "bi-box-seam", productOnly: "business-autopilot-erp", moduleKey: "stocks" },
+  { label: "AI Assistant", path: "/assistant", icon: "bi-stars", productOnly: "business-autopilot-erp" },
+  { label: "Site Admin", path: "/site-admin", icon: "bi-briefcase", productOnly: "business-autopilot-erp" },
   { label: "Billing", path: "/billing", icon: "bi-credit-card", adminOnly: true },
   { label: "Plans", path: "/plans", icon: "bi-clipboard-check", adminOnly: true },
   { label: "Profile", path: "/profile", icon: "bi-person", adminOnly: true }
@@ -673,7 +676,11 @@ function AppShell({ state, productPrefix, productSlug }) {
       }
     : location;
   const normalizedPathname = normalizedLocation.pathname || "/";
-  const isBusinessAutopilotAssistantRoute = normalizedPathname === "/assistant" || normalizedPathname.startsWith("/assistant/");
+  const isBusinessAutopilotAssistantRoute =
+    normalizedPathname === "/assistant"
+    || normalizedPathname.startsWith("/assistant/")
+    || normalizedPathname === "/site-admin"
+    || normalizedPathname.startsWith("/site-admin/");
   const [autopilotAccessRecord, setAutopilotAccessRecord] = useState(null);
   const [autopilotAccessResolved, setAutopilotAccessResolved] = useState(false);
 
@@ -1610,6 +1617,25 @@ function AppShell({ state, productPrefix, productSlug }) {
             )}
           />
           <Route
+            path="/site-admin"
+            element={renderRouteElement(
+              <BusinessAutopilotSiteAdminPage />,
+              {
+                pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
+                allowed:
+                  isBusinessAutopilot &&
+                  businessAutopilotHasActiveSubscription &&
+                  (
+                    hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "dashboard", businessAutopilotIsAdmin)
+                    || hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "crm", businessAutopilotIsAdmin)
+                    || hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "hr", businessAutopilotIsAdmin)
+                    || hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "accounts", businessAutopilotIsAdmin)
+                    || hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "billing", businessAutopilotIsAdmin)
+                  ),
+              }
+            )}
+          />
+          <Route
             path="/crm"
             element={renderRouteElement(
               <Suspense fallback={<div className="card p-3">Loading module...</div>}>
@@ -2471,6 +2497,11 @@ export default function App() {
 
     const inferLimit = (el, fallback) => {
       const text = semanticText(el);
+      if (hasAny(text, ["openai", "open ai"])) {
+        if (hasAny(text, ["email"])) return 60;
+        if (hasAny(text, ["api key", "apikey", "api_key"])) return 200;
+        if (hasAny(text, ["model"])) return 120;
+      }
       if (hasAny(text, ["otp", "pin"])) return 8;
       if (hasAny(text, ["gstin"])) return 15;
       if (hasPanField(text)) return 10;
@@ -2496,6 +2527,9 @@ export default function App() {
     const sanitizeValue = (el, value) => {
       const text = semanticText(el);
       let next = String(value ?? "");
+      if (el instanceof HTMLTextAreaElement) {
+        return next;
+      }
       const isPhoneField = hasAny(text, ["phone", "mobile", "whatsapp"]);
       const isOtpOrPinField = (
         hasWord(text, "otp")

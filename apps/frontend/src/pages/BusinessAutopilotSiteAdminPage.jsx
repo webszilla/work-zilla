@@ -1,7 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
-import BusinessAutopilotAssistantWidget from "../components/BusinessAutopilotAssistantWidget.jsx";
+import BusinessAutopilotSiteAdminChat from "../components/BusinessAutopilotSiteAdminChat.jsx";
 
-function AssistantHeaderTabs() {
+function SiteAdminHeaderTabs() {
   const location = useLocation();
   const pathname = String(location.pathname || "");
   const isAssistantActive = pathname === "/assistant" || pathname.endsWith("/business-autopilot/assistant");
@@ -19,13 +19,6 @@ function AssistantHeaderTabs() {
   );
 }
 
-export default function BusinessAutopilotAssistantPage() {
-  return (
-    <BusinessAutopilotAssistantWidget
-      enabled
-      currentSectionKey="dashboard"
-      pageMode
-      headerTabs={<AssistantHeaderTabs />}
-    />
-  );
+export default function BusinessAutopilotSiteAdminPage() {
+  return <BusinessAutopilotSiteAdminChat headerTabs={<SiteAdminHeaderTabs />} />;
 }

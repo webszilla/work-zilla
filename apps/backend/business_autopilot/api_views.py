@@ -7,6 +7,7 @@ import math
 import re
 import secrets
 import string
+from urllib.parse import quote
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
@@ -21,6 +22,7 @@ from django.views.decorators.http import require_http_methods
 from django.db import DatabaseError, IntegrityError, OperationalError, transaction
 from django.db.models import Q, Min, Max
 from django.shortcuts import render
+from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_time
 from reportlab.lib.pagesizes import A4
@@ -34,7 +36,7 @@ from apps.backend.common_auth.models import User
 from apps.backend.brand.models import SiteBrandSettings
 from apps.backend.core_platform.assistant_registry import build_assistant_training_context, get_assistant_product_profile
 from apps.backend.products.models import Product
-from core.models import BillingProfile, Organization, OrganizationSettings, UserProductAccess, UserProfile, Subscription as OrgSubscription, BusinessAutopilotChatHistory, log_admin_activity
+from core.models import BillingProfile, InvoiceSellerProfile, Organization, OrganizationSettings, UserProductAccess, UserProfile, Subscription as OrgSubscription, BusinessAutopilotChatHistory, log_admin_activity
 from core.email_utils import send_templated_email
 from core.notification_emails import mark_email_verified
 from apps.backend.hrm.services.face_recognition_service import (
@@ -44,6 +46,11 @@ from apps.backend.hrm.services.face_recognition_service import (
     encrypt_embeddings,
     generate_embedding,
     verify_employee_face,
+)
+from .site_admin_ai import (
+    build_site_admin_instruction_context,
+    get_site_admin_enabled_modules,
+    get_site_admin_module_hints,
 )
 
 from .models import (
@@ -74,6 +81,10 @@ from .models import (
     SubscriptionCategory,
     SubscriptionSubCategory,
     BusinessAutopilotUserCrmReassignmentSnapshot,
+    QuickEstimate,
+    QuickEstimateItem,
+    QuickEstimateSequence,
+    SiteAdminChatState,
 )
 
 
@@ -130,6 +141,7 @@ BUSINESS_AUTOPILOT_USER_TYPE_MAP = {
 ERP_EMPLOYEE_ROLES = {"company_admin", "org_user", "hr_view"}
 DELETE_PROTECTED_PROFILE_ROLES = {"org_admin", "owner", "superadmin", "super_admin"}
 ACCOUNTS_ALLOWED_ROOT_KEYS = {"customers", "vendors", "itemMasters", "gstTemplates", "billingTemplates", "estimates", "invoices"}
+QUICK_ESTIMATE_HEADER_TEXT_MAX_LENGTH = 200
 ERP_MODULE_SLUG_SET = set(MODULE_PATHS.keys())
 BUSINESS_AUTOPILOT_PRODUCT_SLUG = "business-autopilot-erp"
 BUSINESS_AUTOPILOT_PRODUCT_SLUG_ALIASES = {"business-autopilot-erp", "business-autopilot"}
@@ -179,6 +191,8 @@ MAX_GPS_ACCURACY_METERS = 200
 TEMP_PASSWORD_ALPHABET = string.ascii_letters + string.digits
 TEMP_PASSWORD_LENGTH = 10
 _BA_UNICODE_PDF_FONT = None
+SITE_ADMIN_RESET_COMMANDS = {"cancel", "reset", "stop"}
+SITE_ADMIN_QUICK_ESTIMATE_HINTS = frozenset(get_site_admin_module_hints("quick_estimate"))
 
 
 def _ba_hex_to_rgb(value, default="#22c55e"):
@@ -4221,6 +4235,9 @@ def _default_accounts_workspace():
         "billingTemplates": [],
         "estimates": [],
         "invoices": [],
+        "quickEstimateSettings": {
+            "headerText": "",
+        },
     }
 
 
@@ -4347,6 +4364,11 @@ def _normalize_accounts_workspace(payload):
     for key in ACCOUNTS_ALLOWED_ROOT_KEYS:
         value = payload.get(key)
         base[key] = value if isinstance(value, list) else []
+    quick_estimate_settings = payload.get("quickEstimateSettings")
+    if isinstance(quick_estimate_settings, dict):
+        base["quickEstimateSettings"] = {
+            "headerText": str(quick_estimate_settings.get("headerText") or "").strip()[:QUICK_ESTIMATE_HEADER_TEXT_MAX_LENGTH],
+        }
     return base
 
 
@@ -4361,6 +4383,10 @@ def _merge_accounts_workspace(existing_payload, incoming_payload):
         value = incoming_payload.get(key)
         if isinstance(value, list):
             merged[key] = value
+    if "quickEstimateSettings" in incoming_payload and isinstance(incoming_payload.get("quickEstimateSettings"), dict):
+        merged["quickEstimateSettings"] = {
+            "headerText": str(incoming_payload.get("quickEstimateSettings", {}).get("headerText") or "").strip()[:QUICK_ESTIMATE_HEADER_TEXT_MAX_LENGTH],
+        }
     return _normalize_accounts_workspace(merged)
 
 
@@ -4503,6 +4529,539 @@ def _get_accounts_workspace(org):
     if created or original_data != seeded_data:
         workspace.save(update_fields=["data", "updated_at"])
     return workspace
+
+
+def _normalize_site_admin_mobile(value):
+    digits = re.sub(r"\D+", "", str(value or ""))
+    if len(digits) >= 10:
+        return digits[-10:]
+    return digits
+
+
+def _normalize_site_admin_email(value):
+    return str(value or "").strip().lower()
+
+
+def _site_admin_is_reset_command(message):
+    normalized = " ".join(str(message or "").strip().lower().split())
+    return normalized in SITE_ADMIN_RESET_COMMANDS
+
+
+def _site_admin_supported_module_labels():
+    return ", ".join(module.module_name for module in get_site_admin_enabled_modules())
+
+
+def _site_admin_instruction_text(module_key="quick_estimate"):
+    return build_site_admin_instruction_context(module_key)
+
+
+def _site_admin_detect_quick_estimate_intent(message):
+    normalized = " ".join(str(message or "").strip().lower().split())
+    if normalized in SITE_ADMIN_QUICK_ESTIMATE_HINTS:
+        return True
+    if "quick estimate" in normalized:
+        return True
+    if normalized.startswith("qe "):
+        return True
+    return False
+
+
+def _site_admin_find_mobile(text):
+    candidates = re.findall(r"(?:\+?91[\s-]*)?[6-9]\d[\d\s-]{8,12}", str(text or ""))
+    for candidate in candidates:
+        normalized = _normalize_site_admin_mobile(candidate)
+        if len(normalized) == 10:
+            return normalized
+    return ""
+
+
+def _site_admin_find_amount(text):
+    content = str(text or "")
+    preferred = re.findall(r"(?:rs\.?|inr|rupees|₹)\s*([0-9][0-9,]*(?:\.\d{1,2})?)", content, flags=re.IGNORECASE)
+    fallback = re.findall(r"(?<!\d)([0-9]{2,}[0-9,]*(?:\.\d{1,2})?)(?!\d)", content)
+    candidates = preferred or fallback
+    for candidate in reversed(candidates):
+        try:
+            cleaned = candidate.replace(",", "").strip()
+            amount = Decimal(cleaned)
+        except (InvalidOperation, AttributeError):
+            continue
+        if amount > 0:
+            return amount.quantize(Decimal("0.01"))
+    return None
+
+
+def _site_admin_find_email(text):
+    match = re.search(r"([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})", str(text or ""), flags=re.IGNORECASE)
+    return _normalize_site_admin_email(match.group(1)) if match else ""
+
+
+def _site_admin_find_gst_number(text):
+    match = re.search(r"\b\d{2}[A-Z]{5}\d{4}[A-Z]\d[Z][A-Z0-9]\b", str(text or "").upper())
+    return match.group(0) if match else ""
+
+
+def _site_admin_find_quantity_unit(text):
+    matches = re.findall(r"(\d+(?:\.\d+)?)\s*(nos?|pcs?|pieces?|qty|units?|kg|gms?|grams?|boxes?|packs?|sets?|hours?|days?)\b", str(text or ""), flags=re.IGNORECASE)
+    if not matches:
+        return None, ""
+    quantity_raw, unit = matches[-1]
+    try:
+        quantity = Decimal(str(quantity_raw)).quantize(Decimal("0.01"))
+    except (InvalidOperation, TypeError, ValueError):
+        return None, ""
+    return quantity, str(unit or "").strip()
+
+
+def _site_admin_parse_name_candidate(text):
+    cleaned = " ".join(str(text or "").strip().split())
+    if not cleaned:
+        return ""
+    lowered = cleaned.lower()
+    if lowered in {"hi", "hello", "hey", "hai", "hii", "helo", "vanakkam", "start", "qe", "quick estimate"}:
+        return ""
+    if _site_admin_find_mobile(cleaned) or _site_admin_find_amount(cleaned) is not None:
+        return ""
+    if _site_admin_find_quantity_unit(cleaned)[0] is not None:
+        return ""
+    if any(token in lowered for token in ["rs.", " rs", "₹", "nos", "pcs", "pieces", "qty", "quantity", "gsm", "sheet", "printing"]):
+        return ""
+    if len(cleaned) > 80:
+        return ""
+    if sum(1 for ch in cleaned if ch.isalpha()) < 2:
+        return ""
+    return cleaned[:180]
+
+
+def _site_admin_parse_item_text(text):
+    content = " ".join(str(text or "").strip().split())
+    if not content:
+        return {
+            "service_name": "",
+            "description": "",
+            "quantity": None,
+            "unit": "",
+        }
+    amount = _site_admin_find_amount(content)
+    if amount is not None:
+        amount_pattern = re.compile(r"(?:rs\.?|inr|rupees|₹)\s*[0-9][0-9,]*(?:\.\d{1,2})?|[0-9][0-9,]*(?:\.\d{1,2})?$", flags=re.IGNORECASE)
+        content = amount_pattern.sub("", content).strip(" -,:")
+    quantity, unit = _site_admin_find_quantity_unit(content)
+    service_name = content
+    description = content
+    split_match = re.search(r"\b\d+(?:\.\d+)?\s*(?:nos?|pcs?|pieces?|qty|units?|kg|gms?|grams?|boxes?|packs?|sets?|hours?|days?)\b", content, flags=re.IGNORECASE)
+    if split_match:
+        before_qty = content[:split_match.start()].strip(" -,")
+        if before_qty:
+            chunks = before_qty.split()
+            service_name = " ".join(chunks[: min(4, len(chunks))]).strip(" -,")
+            description = before_qty
+    return {
+        "service_name": service_name[:180],
+        "description": description[:500],
+        "quantity": quantity,
+        "unit": unit[:40],
+    }
+
+
+def _site_admin_split_item_blocks(text):
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
+    numbered_matches = list(re.finditer(r"(?<!\w)(\d+)[\.\)]\s+", normalized))
+    if len(numbered_matches) >= 2:
+        blocks = []
+        for index, match in enumerate(numbered_matches):
+            start = match.end()
+            end = numbered_matches[index + 1].start() if index + 1 < len(numbered_matches) else len(normalized)
+            block = normalized[start:end].strip(" \n\t-")
+            if block:
+                blocks.append(block)
+        if blocks:
+            return blocks
+    line_blocks = []
+    for line in normalized.split("\n"):
+        if re.match(r"^\s*(?:[-*]|\d+[\.\)])\s+", line):
+            block = re.sub(r"^\s*(?:[-*]|\d+[\.\)])\s+", "", line).strip()
+            if block:
+                line_blocks.append(block)
+    if len(line_blocks) >= 2:
+        return line_blocks
+    return [normalized]
+
+
+def _site_admin_build_item_entry(text, fallback_amount=None):
+    item_meta = _site_admin_parse_item_text(text)
+    amount = _site_admin_find_amount(text)
+    if amount is None and fallback_amount is not None:
+        amount = _to_decimal(fallback_amount).quantize(Decimal("0.01"))
+    quantity = item_meta.get("quantity")
+    rate = amount
+    if amount is not None and quantity is not None and quantity > 0:
+        try:
+            rate = (amount / quantity).quantize(Decimal("0.01"))
+        except (InvalidOperation, ZeroDivisionError):
+            rate = amount
+    return {
+        "service_name": str(item_meta.get("service_name") or "").strip()[:180],
+        "description": str(item_meta.get("description") or text or "").strip()[:2000],
+        "quantity": quantity,
+        "unit": str(item_meta.get("unit") or "").strip()[:40],
+        "rate": rate if rate is not None else None,
+        "amount": amount if amount is not None else None,
+    }
+
+
+def _site_admin_parse_item_entries(text, fallback_total=None):
+    blocks = _site_admin_split_item_blocks(text)
+    if not blocks:
+        return [], None
+    fallback_total_decimal = None
+    if fallback_total not in (None, ""):
+        fallback_total_decimal = _to_decimal(fallback_total).quantize(Decimal("0.01"))
+    entries = [_site_admin_build_item_entry(block) for block in blocks]
+    missing_amount_entries = [entry for entry in entries if entry.get("amount") is None]
+    known_total = sum((entry.get("amount") or Decimal("0.00")) for entry in entries)
+    if len(entries) == 1 and missing_amount_entries and fallback_total_decimal is not None and fallback_total_decimal > 0:
+        entries[0] = _site_admin_build_item_entry(blocks[0], fallback_total_decimal)
+    elif (
+        len(entries) > 1
+        and len(missing_amount_entries) == 1
+        and fallback_total_decimal is not None
+        and fallback_total_decimal > known_total
+    ):
+        missing_entry = missing_amount_entries[0]
+        missing_entry["amount"] = (fallback_total_decimal - known_total).quantize(Decimal("0.01"))
+        if missing_entry.get("quantity") is not None and missing_entry["quantity"] > 0:
+            try:
+                missing_entry["rate"] = (missing_entry["amount"] / missing_entry["quantity"]).quantize(Decimal("0.01"))
+            except (InvalidOperation, ZeroDivisionError):
+                missing_entry["rate"] = missing_entry["amount"]
+        else:
+            missing_entry["rate"] = missing_entry["amount"]
+    total = sum((entry.get("amount") or Decimal("0.00")) for entry in entries).quantize(Decimal("0.01"))
+    return entries, total if total > 0 else None
+
+
+def _site_admin_parse_message_fields(message):
+    lines = [line.strip() for line in str(message or "").splitlines() if str(line or "").strip()]
+    combined = " ".join(lines)
+    parsed = {
+        "mobile": _site_admin_find_mobile(combined),
+        "client_name": "",
+        "email": _site_admin_find_email(combined),
+        "address": "",
+        "gst_number": _site_admin_find_gst_number(combined),
+        "item_text": "",
+        "amount": _site_admin_find_amount(combined),
+    }
+    remaining_lines = list(lines)
+    if parsed["mobile"]:
+        remaining_lines = [line for line in remaining_lines if _normalize_site_admin_mobile(line) != parsed["mobile"]]
+    for index, line in enumerate(remaining_lines):
+        candidate = _site_admin_parse_name_candidate(line)
+        if candidate:
+            parsed["client_name"] = candidate
+            remaining_lines.pop(index)
+            break
+    if remaining_lines:
+        parsed["item_text"] = " ".join(remaining_lines).strip()
+    elif not parsed["client_name"] and len(lines) == 1:
+        parsed["item_text"] = ""
+    return parsed
+
+
+def _site_admin_customer_phone_matches(row, mobile):
+    target = _normalize_site_admin_mobile(mobile)
+    if not target:
+        return False
+    candidates = [
+        row.get("phone"),
+        *(item.get("number") for item in (row.get("phoneList") or []) if isinstance(item, dict)),
+        *(item.get("number") for item in (row.get("additionalPhones") or []) if isinstance(item, dict)),
+    ]
+    return any(_normalize_site_admin_mobile(value) == target for value in candidates)
+
+
+def _site_admin_get_or_create_customer(org, user, *, mobile, client_name="", email="", address="", gst_number=""):
+    workspace = _get_accounts_workspace(org)
+    data = _normalize_accounts_workspace(workspace.data)
+    customers = data.get("customers") if isinstance(data.get("customers"), list) else []
+    normalized_mobile = _normalize_site_admin_mobile(mobile)
+    normalized_email = _normalize_site_admin_email(email)
+    existing_row = next(
+        (
+            row for row in customers
+            if isinstance(row, dict) and _site_admin_customer_phone_matches(row, normalized_mobile)
+        ),
+        None,
+    )
+    changed = False
+    if existing_row is None:
+        customer_id = f"cust_{secrets.token_hex(6)}"
+        existing_row = {
+            "id": customer_id,
+            "companyName": client_name[:180],
+            "clientName": client_name[:180],
+            "name": client_name[:180],
+            "gstin": gst_number[:32],
+            "phoneCountryCode": "+91",
+            "phone": normalized_mobile,
+            "additionalPhones": [],
+            "phoneList": [{"countryCode": "+91", "number": normalized_mobile}],
+            "email": normalized_email,
+            "additionalEmails": [],
+            "emailList": [normalized_email] if normalized_email else [],
+            "billingAddress": address[:500],
+            "shippingAddress": address[:500],
+            "billingCountry": str(org.country or "India").strip() or "India",
+            "shippingCountry": str(org.country or "India").strip() or "India",
+            "billingState": "",
+            "shippingState": "",
+            "billingPincode": "",
+            "shippingPincode": "",
+            "createdAt": timezone.now().isoformat(),
+            "updatedAt": timezone.now().isoformat(),
+        }
+        customers.append(existing_row)
+        changed = True
+    else:
+        if client_name and not str(existing_row.get("clientName") or "").strip():
+            existing_row["clientName"] = client_name[:180]
+            changed = True
+        if client_name and not str(existing_row.get("companyName") or existing_row.get("name") or "").strip():
+            existing_row["companyName"] = client_name[:180]
+            existing_row["name"] = client_name[:180]
+            changed = True
+        if normalized_email and not str(existing_row.get("email") or "").strip():
+            existing_row["email"] = normalized_email
+            changed = True
+        if normalized_email:
+            email_list = existing_row.get("emailList") if isinstance(existing_row.get("emailList"), list) else []
+            if normalized_email not in {_normalize_site_admin_email(item) for item in email_list}:
+                email_list.append(normalized_email)
+                existing_row["emailList"] = [item for item in email_list if str(item or "").strip()]
+                changed = True
+        if address and not str(existing_row.get("billingAddress") or "").strip():
+            existing_row["billingAddress"] = address[:500]
+            existing_row["shippingAddress"] = address[:500]
+            changed = True
+        if gst_number and not str(existing_row.get("gstin") or "").strip():
+            existing_row["gstin"] = gst_number[:32]
+            changed = True
+        if not _site_admin_customer_phone_matches(existing_row, normalized_mobile):
+            phone_list = existing_row.get("phoneList") if isinstance(existing_row.get("phoneList"), list) else []
+            phone_list.append({"countryCode": "+91", "number": normalized_mobile})
+            existing_row["phoneList"] = phone_list
+            changed = True
+        existing_row["updatedAt"] = timezone.now().isoformat()
+    if changed:
+        data["customers"] = customers
+        workspace.data = data
+        workspace.updated_by = user
+        workspace.save(update_fields=["data", "updated_by", "updated_at"])
+    customer_name = _get_accounts_customer_display_name(existing_row) or client_name or normalized_mobile
+    return existing_row, customer_name
+
+
+def _site_admin_update_customer_for_estimate(org, user, estimate, *, mobile="", client_name=""):
+    workspace = _get_accounts_workspace(org)
+    data = _normalize_accounts_workspace(workspace.data)
+    customers = data.get("customers") if isinstance(data.get("customers"), list) else []
+    target_mobile = _normalize_site_admin_mobile(mobile or estimate.mobile)
+    target_client_name = str(client_name or estimate.client_name or "").strip()[:180]
+    estimate_customer_id = str(getattr(estimate, "customer_id", "") or "").strip()
+
+    existing_row = None
+    if estimate_customer_id:
+        existing_row = next(
+            (
+                row for row in customers
+                if isinstance(row, dict) and str(row.get("id") or "").strip() == estimate_customer_id
+            ),
+            None,
+        )
+    if existing_row is None:
+        existing_row = next(
+            (
+                row for row in customers
+                if isinstance(row, dict) and _site_admin_customer_phone_matches(row, estimate.mobile)
+            ),
+            None,
+        )
+
+    if existing_row is None:
+        existing_row, _ = _site_admin_get_or_create_customer(
+            org,
+            user,
+            mobile=target_mobile,
+            client_name=target_client_name,
+            email=estimate.email or "",
+            address=estimate.address or "",
+            gst_number=estimate.gst_number or "",
+        )
+        return existing_row
+
+    conflicting_row = next(
+        (
+            row for row in customers
+            if isinstance(row, dict)
+            and row is not existing_row
+            and _site_admin_customer_phone_matches(row, target_mobile)
+        ),
+        None,
+    )
+    if conflicting_row is not None:
+        conflict_name = _get_accounts_customer_display_name(conflicting_row) or target_mobile
+        raise ValueError(f"Mobile number {target_mobile} already exists for {conflict_name}.")
+
+    changed = False
+    if target_client_name:
+        if str(existing_row.get("clientName") or "").strip() != target_client_name:
+            existing_row["clientName"] = target_client_name
+            changed = True
+        if str(existing_row.get("companyName") or "").strip() != target_client_name:
+            existing_row["companyName"] = target_client_name
+            changed = True
+        if str(existing_row.get("name") or "").strip() != target_client_name:
+            existing_row["name"] = target_client_name
+            changed = True
+
+    if target_mobile:
+        if _normalize_site_admin_mobile(existing_row.get("phone")) != target_mobile:
+            existing_row["phone"] = target_mobile
+            changed = True
+        if str(existing_row.get("phoneCountryCode") or "").strip() != "+91":
+            existing_row["phoneCountryCode"] = "+91"
+            changed = True
+        phone_list = existing_row.get("phoneList") if isinstance(existing_row.get("phoneList"), list) else []
+        if not any(_normalize_site_admin_mobile(item.get("number")) == target_mobile for item in phone_list if isinstance(item, dict)):
+            phone_list.append({"countryCode": "+91", "number": target_mobile})
+            existing_row["phoneList"] = phone_list
+            changed = True
+
+    existing_row["updatedAt"] = timezone.now().isoformat()
+    if changed:
+        data["customers"] = customers
+        workspace.data = data
+        workspace.updated_by = user
+        workspace.save(update_fields=["data", "updated_by", "updated_at"])
+    return existing_row
+
+
+def _next_quick_estimate_number(org):
+    with transaction.atomic():
+        sequence, _ = QuickEstimateSequence.objects.select_for_update().get_or_create(
+            organization=org,
+            defaults={"next_number": 1},
+        )
+        current_number = max(1, int(sequence.next_number or 1))
+        sequence.next_number = current_number + 1
+        sequence.save(update_fields=["next_number", "updated_at"])
+    return current_number, f"QE-{current_number:04d}"
+
+
+def _format_quick_estimate_amount(value):
+    amount = _to_decimal(value).quantize(Decimal("0.01"))
+    return f"{amount:.2f}".rstrip("0").rstrip(".") if amount % 1 else f"{int(amount)}"
+
+
+def _serialize_quick_estimate_item(row):
+    return {
+        "id": row.id,
+        "service_name": row.service_name or "",
+        "description": row.description or "",
+        "quantity": _decimal_to_string(row.quantity) if row.quantity is not None else "",
+        "unit": row.unit or "",
+        "rate": _decimal_to_string(row.rate) if row.rate is not None else "",
+        "amount": _decimal_to_string(row.amount),
+    }
+
+
+def _build_quick_estimate_whatsapp_url(row):
+    items = list(row.items.all().order_by("id"))
+    item_lines = []
+    for index, item in enumerate(items, start=1):
+        left = " ".join(part for part in [item.service_name, item.description] if str(part or "").strip()).strip()
+        qty_text = ""
+        if item.quantity is not None:
+            qty_value = _decimal_to_string(item.quantity)
+            qty_text = f" {qty_value}{(' ' + item.unit) if item.unit else ''}".strip()
+        item_lines.append(
+            f"{index}. {left}{(' ' + qty_text) if qty_text else ''} - Rs.{_format_quick_estimate_amount(item.amount)}".strip()
+        )
+    message = "\n".join([
+        "Ultra HD Prints / Work Zilla",
+        f"Quick Estimate: {row.estimate_number}",
+        "",
+        f"Client: {row.client_name}",
+        f"Mobile: {row.mobile}",
+        "",
+        "Items:",
+        *item_lines,
+        "",
+        f"Total: Rs.{_format_quick_estimate_amount(row.total_amount)}",
+        "",
+        "Thank you.",
+    ])
+    return f"https://wa.me/91{row.mobile}?text={quote(message)}"
+
+
+def _get_quick_estimate_settings(org):
+    workspace = _get_accounts_workspace(org)
+    data = _normalize_accounts_workspace(workspace.data)
+    settings_data = data.get("quickEstimateSettings") if isinstance(data.get("quickEstimateSettings"), dict) else {}
+    header_text = str(settings_data.get("headerText") or "").strip()[:QUICK_ESTIMATE_HEADER_TEXT_MAX_LENGTH]
+    return {
+        "headerText": header_text,
+    }
+
+
+def _render_quick_estimate_thermal_preview(row, org):
+    seller = InvoiceSellerProfile.objects.order_by("-updated_at").first()
+    company_name = str(getattr(seller, "company_name", "") or getattr(org, "name", "") or "Work Zilla").strip() or "Work Zilla"
+    settings_data = _get_quick_estimate_settings(org)
+    header_text = str(settings_data.get("headerText") or "").strip()
+    return render_to_string(
+        "business_autopilot/quick_estimate_thermal_preview.html",
+        {
+            "company_name": company_name,
+            "organization_name": str(org.name or "").strip(),
+            "header_text": header_text,
+            "header_lines": [line.strip() for line in header_text.splitlines() if line.strip()],
+            "estimate": row,
+            "items": list(row.items.all().order_by("id")),
+            "formatted_total": _format_quick_estimate_amount(row.total_amount),
+            "formatted_subtotal": _format_quick_estimate_amount(row.subtotal),
+            "created_at_label": timezone.localtime(row.created_at).strftime("%d/%m/%Y, %I:%M %p") if row.created_at else "",
+        },
+    )
+
+
+def _serialize_quick_estimate(row, include_preview=False):
+    payload = {
+        "id": row.id,
+        "estimate_number": row.estimate_number,
+        "mobile": row.mobile,
+        "client_name": row.client_name,
+        "email": row.email or "",
+        "address": row.address or "",
+        "gst_number": row.gst_number or "",
+        "subtotal": _decimal_to_string(row.subtotal),
+        "tax_amount": _decimal_to_string(row.tax_amount),
+        "total_amount": _decimal_to_string(row.total_amount),
+        "status": row.status,
+        "customer_id": row.customer_id or "",
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+        "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+        "whatsapp_url": _build_quick_estimate_whatsapp_url(row),
+        "thermal_preview_url": f"/api/business-autopilot/quick-estimates/{row.id}/thermal-preview/",
+        "items": [_serialize_quick_estimate_item(item) for item in row.items.all().order_by("id")],
+    }
+    if include_preview:
+        payload["thermal_preview_html"] = _render_quick_estimate_thermal_preview(row, row.organization)
+    return payload
 
 
 def _to_decimal(value):
@@ -7151,6 +7710,9 @@ def accounts_workspace(request):
                 return JsonResponse({"detail": "invalid_json"}, status=400)
         data = _merge_accounts_workspace(workspace.data, payload.get("data"))
         data = _seed_accounts_workspace_defaults_for_org(data, org)
+        duplicate_error = _validate_accounts_workspace_customer_uniqueness(data)
+        if duplicate_error:
+            return JsonResponse(duplicate_error, status=409)
         workspace.data = data
         workspace.updated_by = request.user
         workspace.save(update_fields=["data", "updated_by", "updated_at"])
@@ -7690,10 +8252,10 @@ def org_openai_settings(request):
         wake_phrase = str(payload.get("wake_phrase") or "").strip()
         update_fields = []
         if "api_key" in payload and api_key:
-            settings_obj.business_autopilot_openai_api_key = api_key
+            settings_obj.business_autopilot_openai_api_key = api_key[:200]
             update_fields.append("business_autopilot_openai_api_key")
         settings_obj.business_autopilot_ai_agent_name = agent_name[:120]
-        settings_obj.business_autopilot_openai_account_email = account_email[:254]
+        settings_obj.business_autopilot_openai_account_email = account_email[:60]
         settings_obj.business_autopilot_openai_model = model[:120]
         settings_obj.business_autopilot_openai_enabled = enabled
         settings_obj.business_autopilot_ai_voice_gender = voice_gender
@@ -7974,6 +8536,574 @@ def org_openai_chat_history(request):
         "messages": messages,
         "updated_at": history_row.updated_at.isoformat() if history_row.updated_at else "",
     })
+
+
+def _site_admin_get_state(org, user):
+    state, _ = SiteAdminChatState.objects.get_or_create(
+        organization=org,
+        user=user,
+        defaults={"collected_data": {}},
+    )
+    return state
+
+
+def _site_admin_clear_state(state):
+    state.intent = ""
+    state.current_step = ""
+    state.collected_data = {}
+    state.awaiting_whatsapp_share = False
+    state.last_quick_estimate = None
+    state.save(update_fields=["intent", "current_step", "collected_data", "awaiting_whatsapp_share", "last_quick_estimate", "updated_at"])
+
+
+def _site_admin_existing_customer_by_mobile(org, mobile):
+    workspace = _get_accounts_workspace(org)
+    data = _normalize_accounts_workspace(workspace.data)
+    customers = data.get("customers") if isinstance(data.get("customers"), list) else []
+    normalized_mobile = _normalize_site_admin_mobile(mobile)
+    return next(
+        (
+            row for row in customers
+            if isinstance(row, dict) and _site_admin_customer_phone_matches(row, normalized_mobile)
+        ),
+        None,
+    )
+
+
+def _site_admin_next_quick_estimate_step(collected):
+    if not str(collected.get("mobile") or "").strip():
+        return "mobile", "Please share the mobile number."
+    if not bool(collected.get("existing_client")) and not str(collected.get("client_name") or "").strip():
+        return "client_name", "Please share the client name."
+    if not str(collected.get("item_text") or "").strip():
+        return "item_text", "Please share the estimate item details."
+    if not str(collected.get("amount") or "").strip():
+        return "amount", "Please share the estimate amount."
+    return "", ""
+
+
+def _site_admin_merge_quick_estimate_fields(state, message):
+    collected = dict(state.collected_data or {})
+    parsed = _site_admin_parse_message_fields(message)
+    current_step = str(state.current_step or "").strip()
+    raw_message = " ".join(str(message or "").strip().split())
+
+    if parsed.get("mobile"):
+        collected["mobile"] = parsed["mobile"]
+    elif current_step == "mobile":
+        explicit_mobile = _normalize_site_admin_mobile(raw_message)
+        if len(explicit_mobile) == 10:
+            collected["mobile"] = explicit_mobile
+
+    if collected.get("mobile"):
+        existing_customer = _site_admin_existing_customer_by_mobile(state.organization, collected["mobile"])
+        if existing_customer:
+            existing_name = str(existing_customer.get("clientName") or existing_customer.get("companyName") or existing_customer.get("name") or "").strip()
+            collected["existing_client"] = True
+            collected["customer_id"] = str(existing_customer.get("id") or "").strip()
+            if existing_name:
+                collected["client_name"] = existing_name[:180]
+            if not collected.get("email"):
+                collected["email"] = _normalize_site_admin_email(existing_customer.get("email"))
+            if not collected.get("address"):
+                collected["address"] = str(existing_customer.get("billingAddress") or existing_customer.get("shippingAddress") or "").strip()[:500]
+            if not collected.get("gst_number"):
+                collected["gst_number"] = str(existing_customer.get("gstin") or "").strip()[:32]
+        else:
+            collected["existing_client"] = False
+
+    if parsed.get("email"):
+        collected["email"] = parsed["email"]
+    if parsed.get("gst_number"):
+        collected["gst_number"] = parsed["gst_number"]
+
+    if parsed.get("client_name"):
+        collected["client_name"] = parsed["client_name"]
+    elif current_step == "client_name":
+        name_candidate = _site_admin_parse_name_candidate(raw_message)
+        if name_candidate:
+            collected["client_name"] = name_candidate
+
+    item_text_candidate = str(parsed.get("item_text") or "").strip()
+    if current_step == "item_text" and raw_message and not item_text_candidate:
+        item_text_candidate = raw_message
+    client_name_ready = bool(collected.get("existing_client")) or bool(str(collected.get("client_name") or "").strip())
+    if (
+        item_text_candidate
+        and client_name_ready
+        and not _site_admin_detect_quick_estimate_intent(item_text_candidate)
+    ):
+        collected["item_text"] = item_text_candidate[:500]
+
+    amount_value = parsed.get("amount")
+    if amount_value is not None:
+        collected["amount"] = _decimal_to_string(amount_value)
+    elif current_step == "amount":
+        explicit_amount = _site_admin_find_amount(raw_message)
+        if explicit_amount is not None:
+            collected["amount"] = _decimal_to_string(explicit_amount)
+
+    if current_step == "item_text" and str(collected.get("item_text") or "").strip() and not str(collected.get("amount") or "").strip():
+        _, amount_from_item = _site_admin_parse_item_entries(
+            str(collected.get("item_text") or ""),
+            fallback_total=parsed.get("amount"),
+        )
+        if amount_from_item is not None:
+            collected["amount"] = _decimal_to_string(amount_from_item)
+
+    if str(collected.get("item_text") or "").strip():
+        _, computed_total = _site_admin_parse_item_entries(
+            str(collected.get("item_text") or ""),
+            fallback_total=collected.get("amount") or parsed.get("amount"),
+        )
+        if computed_total is not None:
+            collected["amount"] = _decimal_to_string(computed_total)
+
+    return collected
+
+
+def _site_admin_create_quick_estimate(org, user, collected):
+    mobile = _normalize_site_admin_mobile(collected.get("mobile"))
+    customer_row, customer_name = _site_admin_get_or_create_customer(
+        org,
+        user,
+        mobile=mobile,
+        client_name=str(collected.get("client_name") or "").strip(),
+        email=str(collected.get("email") or "").strip(),
+        address=str(collected.get("address") or "").strip(),
+        gst_number=str(collected.get("gst_number") or "").strip(),
+    )
+    estimate_sequence, estimate_number = _next_quick_estimate_number(org)
+    item_entries, parsed_total = _site_admin_parse_item_entries(
+        collected.get("item_text"),
+        fallback_total=collected.get("amount"),
+    )
+    amount = (parsed_total or _to_decimal(collected.get("amount"))).quantize(Decimal("0.01"))
+    with transaction.atomic():
+        estimate = QuickEstimate.objects.create(
+            organization=org,
+            customer_id=str(customer_row.get("id") or "").strip(),
+            estimate_sequence=estimate_sequence,
+            estimate_number=estimate_number,
+            mobile=mobile,
+            client_name=str(collected.get("client_name") or customer_name or mobile).strip()[:180],
+            email=str(collected.get("email") or "").strip()[:254],
+            address=str(collected.get("address") or "").strip()[:1000],
+            gst_number=str(collected.get("gst_number") or "").strip()[:32],
+            subtotal=amount,
+            tax_amount=Decimal("0.00"),
+            total_amount=amount,
+            status=QuickEstimate.STATUS_CREATED,
+            created_by=user,
+        )
+        if not item_entries:
+            item_entries = [_site_admin_build_item_entry(collected.get("item_text"), amount)]
+        for entry in item_entries:
+            QuickEstimateItem.objects.create(
+                quick_estimate=estimate,
+                service_name=str(entry.get("service_name") or "").strip()[:180],
+                description=str(entry.get("description") or collected.get("item_text") or "").strip()[:2000],
+                quantity=entry.get("quantity"),
+                unit=str(entry.get("unit") or "").strip()[:40],
+                rate=entry.get("rate"),
+                amount=(entry.get("amount") or Decimal("0.00")).quantize(Decimal("0.01")),
+            )
+    return estimate
+
+
+def _site_admin_quick_estimate_response(
+    estimate,
+    reply,
+    *,
+    action="quick_estimate_created",
+    whatsapp_share_pending=True,
+    whatsapp_url=None,
+):
+    return {
+        "reply": reply,
+        "action": action,
+        "quick_estimate_id": estimate.id,
+        "estimate_number": estimate.estimate_number,
+        "whatsapp_share_pending": bool(whatsapp_share_pending),
+        "whatsapp_url": whatsapp_url,
+        "thermal_preview_html": _render_quick_estimate_thermal_preview(estimate, estimate.organization),
+    }
+
+
+def _site_admin_update_quick_estimate_items(estimate, item_text, *, mobile="", client_name="", user=None):
+    item_entries, parsed_total = _site_admin_parse_item_entries(item_text)
+    if not item_entries:
+        return None
+    amount = (parsed_total or Decimal("0.00")).quantize(Decimal("0.01"))
+    with transaction.atomic():
+        estimate.items.all().delete()
+        for entry in item_entries:
+            QuickEstimateItem.objects.create(
+                quick_estimate=estimate,
+                service_name=str(entry.get("service_name") or "").strip()[:180],
+                description=str(entry.get("description") or item_text or "").strip()[:2000],
+                quantity=entry.get("quantity"),
+                unit=str(entry.get("unit") or "").strip()[:40],
+                rate=entry.get("rate"),
+                amount=(entry.get("amount") or Decimal("0.00")).quantize(Decimal("0.01")),
+            )
+        next_mobile = _normalize_site_admin_mobile(mobile or estimate.mobile)
+        next_client_name = str(client_name or estimate.client_name or "").strip()[:180]
+        if user is not None:
+            customer_row = _site_admin_update_customer_for_estimate(
+                estimate.organization,
+                user,
+                estimate,
+                mobile=next_mobile,
+                client_name=next_client_name,
+            )
+            customer_id = str(customer_row.get("id") or estimate.customer_id or "").strip()
+        else:
+            customer_id = str(estimate.customer_id or "").strip()
+        estimate.customer_id = customer_id
+        estimate.mobile = next_mobile
+        estimate.client_name = next_client_name or estimate.client_name
+        estimate.subtotal = amount
+        estimate.tax_amount = Decimal("0.00")
+        estimate.total_amount = amount
+        estimate.status = QuickEstimate.STATUS_CREATED
+        estimate.save(update_fields=["customer_id", "mobile", "client_name", "subtotal", "tax_amount", "total_amount", "status", "updated_at"])
+    return estimate
+
+
+def _extract_accounts_customer_phone_keys(row):
+    if not isinstance(row, dict):
+        return set()
+    keys = set()
+    primary_phone = _normalize_site_admin_mobile(row.get("phone"))
+    if primary_phone:
+        keys.add(primary_phone)
+    for item in (row.get("phoneList") or []):
+        if isinstance(item, dict):
+            number = _normalize_site_admin_mobile(item.get("number"))
+            if number:
+                keys.add(number)
+    for item in (row.get("additionalPhones") or []):
+        if isinstance(item, dict):
+            number = _normalize_site_admin_mobile(item.get("number"))
+            if number:
+                keys.add(number)
+    return keys
+
+
+def _extract_accounts_customer_email_keys(row):
+    if not isinstance(row, dict):
+        return set()
+    keys = set()
+    primary_email = _normalize_site_admin_email(row.get("email"))
+    if primary_email:
+        keys.add(primary_email)
+    for item in (row.get("emailList") or []):
+        normalized = _normalize_site_admin_email(item)
+        if normalized:
+            keys.add(normalized)
+    for item in (row.get("additionalEmails") or []):
+        normalized = _normalize_site_admin_email(item)
+        if normalized:
+            keys.add(normalized)
+    return keys
+
+
+def _validate_accounts_workspace_customer_uniqueness(data):
+    rows = data.get("customers") if isinstance(data.get("customers"), list) else []
+    phone_index = {}
+    email_index = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        customer_id = str(row.get("id") or "").strip() or f"customer_{len(phone_index) + len(email_index)}"
+        for phone in _extract_accounts_customer_phone_keys(row):
+            if phone in phone_index and phone_index[phone] != customer_id:
+                return {
+                    "detail": "duplicate_customer",
+                    "message": "A client with the same mobile number already exists.",
+                    "duplicate_fields": ["phone"],
+                }
+            phone_index[phone] = customer_id
+        for email in _extract_accounts_customer_email_keys(row):
+            if email in email_index and email_index[email] != customer_id:
+                return {
+                    "detail": "duplicate_customer",
+                    "message": "A client with the same email ID already exists.",
+                    "duplicate_fields": ["email"],
+                }
+            email_index[email] = customer_id
+    return None
+
+
+@require_http_methods(["POST"])
+def site_admin_chat(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_json"}, status=400)
+    message = str(payload.get("message") or "").strip()
+    if not message:
+        return JsonResponse({"detail": "message_required"}, status=400)
+
+    state = _site_admin_get_state(org, request.user)
+    normalized_message = " ".join(message.lower().split())
+
+    if _site_admin_is_reset_command(normalized_message):
+        _site_admin_clear_state(state)
+        return JsonResponse({
+            "reply": "Quick Estimate draft cleared.",
+            "action": "state_cleared",
+            "quick_estimate_id": None,
+            "estimate_number": "",
+            "whatsapp_share_pending": False,
+            "whatsapp_url": None,
+            "thermal_preview_html": "",
+        })
+
+    if state.awaiting_whatsapp_share and state.last_quick_estimate_id:
+        estimate = QuickEstimate.objects.filter(organization=org, id=state.last_quick_estimate_id).prefetch_related("items").first()
+        if estimate:
+            if normalized_message in {"yes", "y", "share", "ok"}:
+                estimate.status = QuickEstimate.STATUS_SHARED
+                estimate.save(update_fields=["status", "updated_at"])
+                state.intent = ""
+                state.current_step = ""
+                state.collected_data = {}
+                state.awaiting_whatsapp_share = False
+                state.save(update_fields=["intent", "current_step", "collected_data", "awaiting_whatsapp_share", "updated_at"])
+                return JsonResponse({
+                    "reply": "Opening WhatsApp Web.",
+                    "action": "open_whatsapp",
+                    "quick_estimate_id": estimate.id,
+                    "estimate_number": estimate.estimate_number,
+                    "whatsapp_share_pending": False,
+                    "whatsapp_url": _build_quick_estimate_whatsapp_url(estimate),
+                    "thermal_preview_html": _render_quick_estimate_thermal_preview(estimate, org),
+                })
+            if normalized_message in {"no", "n", "skip"}:
+                state.intent = ""
+                state.current_step = ""
+                state.collected_data = {}
+                state.awaiting_whatsapp_share = False
+                state.save(update_fields=["intent", "current_step", "collected_data", "awaiting_whatsapp_share", "updated_at"])
+                return JsonResponse({
+                    "reply": "Okay, WhatsApp sharing was skipped.",
+                    "action": "share_skipped",
+                    "quick_estimate_id": estimate.id,
+                    "estimate_number": estimate.estimate_number,
+                    "whatsapp_share_pending": False,
+                    "whatsapp_url": None,
+                    "thermal_preview_html": _render_quick_estimate_thermal_preview(estimate, org),
+                })
+
+    should_start_qe = (
+        state.intent == SiteAdminChatState.INTENT_QUICK_ESTIMATE
+        or _site_admin_detect_quick_estimate_intent(message)
+    )
+
+    if not should_start_qe:
+        lowered = normalized_message
+        if lowered in {"find client", "today estimates"}:
+            return JsonResponse({
+                "reply": "This operation is coming soon. Please use QE Create for now.",
+                "action": "coming_soon",
+                "quick_estimate_id": None,
+                "estimate_number": "",
+                "whatsapp_share_pending": False,
+                "whatsapp_url": None,
+                "thermal_preview_html": "",
+            })
+        return JsonResponse({
+            "reply": f"Site Admin currently supports {_site_admin_supported_module_labels() or 'Quick Estimate'}. Click QE Create to open Quick Estimate.",
+            "action": "unsupported",
+            "quick_estimate_id": None,
+            "estimate_number": "",
+            "whatsapp_share_pending": False,
+            "whatsapp_url": None,
+            "thermal_preview_html": "",
+        })
+
+    if state.intent != SiteAdminChatState.INTENT_QUICK_ESTIMATE:
+        state.intent = SiteAdminChatState.INTENT_QUICK_ESTIMATE
+        state.collected_data = {}
+
+    collected = _site_admin_merge_quick_estimate_fields(state, message)
+    step, reply = _site_admin_next_quick_estimate_step(collected)
+    if step:
+        state.current_step = step
+        state.collected_data = collected
+        state.awaiting_whatsapp_share = False
+        state.save(update_fields=["intent", "current_step", "collected_data", "awaiting_whatsapp_share", "updated_at"])
+        return JsonResponse({
+            "reply": reply,
+            "action": "collecting_quick_estimate",
+            "quick_estimate_id": None,
+            "estimate_number": "",
+            "whatsapp_share_pending": False,
+            "whatsapp_url": None,
+            "thermal_preview_html": "",
+        })
+
+    estimate = _site_admin_create_quick_estimate(org, request.user, collected)
+    state.intent = SiteAdminChatState.INTENT_QUICK_ESTIMATE
+    state.current_step = "share_whatsapp"
+    state.collected_data = {}
+    state.awaiting_whatsapp_share = True
+    state.last_quick_estimate = estimate
+    state.save(update_fields=["intent", "current_step", "collected_data", "awaiting_whatsapp_share", "last_quick_estimate", "updated_at"])
+    reply = f"Quick Estimate {estimate.estimate_number} created for {estimate.client_name} - ₹{_format_quick_estimate_amount(estimate.total_amount)}.\n\nWould you like to share it on WhatsApp? Yes / No"
+    return JsonResponse(_site_admin_quick_estimate_response(estimate, reply))
+
+
+@require_http_methods(["GET", "POST", "PATCH", "DELETE"])
+def quick_estimates(request, estimate_id: int = None):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+
+    resolved_method = request.method
+    payload = None
+    if request.method == "POST":
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+        override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
+        body_action = str(payload.get("action") or payload.get("__action") or "").strip().upper()
+        if body_action in {"PATCH", "DELETE"}:
+            resolved_method = body_action
+        elif override_method in {"PATCH", "DELETE"}:
+            resolved_method = override_method
+
+    qs = QuickEstimate.objects.filter(organization=org).prefetch_related("items").order_by("-created_at", "-id")
+    if resolved_method == "GET" and estimate_id is None:
+        return JsonResponse({"quick_estimates": [_serialize_quick_estimate(row) for row in qs[:100]]})
+
+    if resolved_method in {"PATCH", "DELETE"} and not estimate_id:
+        if payload is None:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
+        estimate_id = _to_int(payload.get("quick_estimate_id") or payload.get("estimate_id") or payload.get("id"))
+
+    row = qs.filter(id=estimate_id).first()
+    if not row:
+        return JsonResponse({"detail": "quick_estimate_not_found"}, status=404)
+
+    if resolved_method == "GET":
+        return JsonResponse({"quick_estimate": _serialize_quick_estimate(row, include_preview=True)})
+
+    if payload is None:
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+
+    if resolved_method == "DELETE":
+        estimate_number = row.estimate_number
+        SiteAdminChatState.objects.filter(organization=org, last_quick_estimate=row).update(
+            last_quick_estimate=None,
+            awaiting_whatsapp_share=False,
+            current_step="",
+            collected_data={},
+            updated_at=timezone.now(),
+        )
+        row.delete()
+        return JsonResponse({
+            "reply": f"Quick Estimate {estimate_number} deleted.",
+            "action": "quick_estimate_deleted",
+            "quick_estimate_id": estimate_id,
+            "estimate_number": estimate_number,
+            "whatsapp_share_pending": False,
+            "whatsapp_url": None,
+            "thermal_preview_html": "",
+        })
+
+    raw_item_text = str(payload.get("item_text") or payload.get("message") or "").strip()
+    item_text = "\n".join(line.rstrip() for line in raw_item_text.splitlines() if line.strip())
+    if not item_text:
+        return JsonResponse({"detail": "item_text_required", "message": "Please share the estimate item details."}, status=400)
+    next_mobile = _normalize_site_admin_mobile(payload.get("mobile") or row.mobile)
+    next_client_name = str(payload.get("client_name") or payload.get("clientName") or row.client_name or "").strip()[:180]
+    if len(next_mobile) != 10:
+        return JsonResponse({"detail": "invalid_mobile", "message": "Please share a valid 10-digit mobile number."}, status=400)
+    if not next_client_name:
+        return JsonResponse({"detail": "client_name_required", "message": "Please share the client name."}, status=400)
+    try:
+        updated = _site_admin_update_quick_estimate_items(
+            row,
+            item_text,
+            mobile=next_mobile,
+            client_name=next_client_name,
+            user=request.user,
+        )
+    except ValueError as exc:
+        return JsonResponse({"detail": "duplicate_customer_mobile", "message": str(exc)}, status=409)
+    if not updated:
+        return JsonResponse({"detail": "invalid_item_text", "message": "Please share valid estimate item details."}, status=400)
+    updated.refresh_from_db()
+    updated = QuickEstimate.objects.filter(organization=org, id=updated.id).prefetch_related("items").first() or updated
+    return JsonResponse(
+        _site_admin_quick_estimate_response(
+            updated,
+            f"Quick Estimate {updated.estimate_number} updated.",
+            action="quick_estimate_updated",
+            whatsapp_share_pending=False,
+        )
+    )
+
+
+@require_http_methods(["GET", "PATCH"])
+def quick_estimate_settings(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+
+    workspace = _get_accounts_workspace(org)
+    data = _normalize_accounts_workspace(workspace.data)
+    if request.method == "GET":
+        return JsonResponse({"settings": _get_quick_estimate_settings(org)})
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_json"}, status=400)
+
+    header_text = str(payload.get("headerText") or payload.get("header_text") or "").strip()[:QUICK_ESTIMATE_HEADER_TEXT_MAX_LENGTH]
+    data["quickEstimateSettings"] = {
+        "headerText": header_text,
+    }
+    workspace.data = data
+    workspace.updated_by = request.user
+    workspace.save(update_fields=["data", "updated_by", "updated_at"])
+    return JsonResponse({
+        "message": "Quick Estimate settings saved.",
+        "settings": _get_quick_estimate_settings(org),
+    })
+
+
+@require_http_methods(["GET"])
+def quick_estimate_thermal_preview(request, estimate_id: int):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    row = QuickEstimate.objects.filter(organization=org, id=estimate_id).prefetch_related("items").first()
+    if not row:
+        return JsonResponse({"detail": "quick_estimate_not_found"}, status=404)
+    return HttpResponse(_render_quick_estimate_thermal_preview(row, org), content_type="text/html; charset=utf-8")
 
 
 @require_http_methods(["POST"])

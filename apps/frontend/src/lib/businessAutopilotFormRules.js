@@ -12,6 +12,7 @@ export function getBusinessAutopilotMaxLength(fieldKey, { isTextarea = false } =
   if (!key) {
     return isTextarea ? DEFAULT_TEXTAREA_MAX_LENGTH : DEFAULT_INPUT_MAX_LENGTH;
   }
+  if (key === "siteadminmessage" || key === "site_admin_message") return 120;
   if (key === "first_name" || key === "last_name") return 20;
   if (key === "employee_role" || key === "employee_role_id") return 30;
   if (key === "department" || key === "department_id") return 30;

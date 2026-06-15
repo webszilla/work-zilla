@@ -159,6 +159,140 @@ class AccountsWorkspace(models.Model):
         return f"AccountsWorkspace(org={self.organization_id})"
 
 
+class QuickEstimateSequence(models.Model):
+    organization = models.OneToOneField(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_quick_estimate_sequence",
+    )
+    next_number = models.PositiveIntegerField(default=1)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("organization_id",)
+
+    def __str__(self):
+        return f"QuickEstimateSequence(org={self.organization_id}, next={self.next_number})"
+
+
+class QuickEstimate(models.Model):
+    STATUS_DRAFT = "draft"
+    STATUS_CREATED = "created"
+    STATUS_SHARED = "shared"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = (
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_CREATED, "Created"),
+        (STATUS_SHARED, "Shared"),
+        (STATUS_CANCELLED, "Cancelled"),
+    )
+
+    organization = models.ForeignKey(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_quick_estimates",
+    )
+    customer_id = models.CharField(max_length=64, blank=True, default="")
+    estimate_sequence = models.PositiveIntegerField()
+    estimate_number = models.CharField(max_length=32)
+    mobile = models.CharField(max_length=30, db_index=True)
+    client_name = models.CharField(max_length=180)
+    email = models.EmailField(blank=True, default="")
+    address = models.TextField(blank=True, default="")
+    gst_number = models.CharField(max_length=32, blank=True, default="")
+    subtotal = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    tax_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_CREATED)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_quick_estimates_created",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "estimate_sequence"], name="uniq_ba_quick_estimate_org_sequence"),
+            models.UniqueConstraint(fields=["organization", "estimate_number"], name="uniq_ba_quick_estimate_org_number"),
+        ]
+        indexes = [
+            models.Index(fields=["organization", "mobile"]),
+            models.Index(fields=["organization", "status", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.organization_id}:{self.estimate_number}"
+
+
+class QuickEstimateItem(models.Model):
+    quick_estimate = models.ForeignKey(
+        QuickEstimate,
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+    service_name = models.CharField(max_length=180, blank=True, default="")
+    description = models.TextField(blank=True, default="")
+    quantity = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    unit = models.CharField(max_length=40, blank=True, default="")
+    rate = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("id",)
+
+    def __str__(self):
+        return f"{self.quick_estimate_id}:{self.service_name or 'item'}"
+
+
+class SiteAdminChatState(models.Model):
+    INTENT_QUICK_ESTIMATE = "quick_estimate"
+    INTENT_CHOICES = (
+        (INTENT_QUICK_ESTIMATE, "Quick Estimate"),
+    )
+
+    organization = models.ForeignKey(
+        "core.Organization",
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_site_admin_states",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="business_autopilot_site_admin_states",
+    )
+    intent = models.CharField(max_length=40, choices=INTENT_CHOICES, blank=True, default="")
+    current_step = models.CharField(max_length=40, blank=True, default="")
+    collected_data = models.JSONField(default=dict, blank=True)
+    awaiting_whatsapp_share = models.BooleanField(default=False)
+    last_quick_estimate = models.ForeignKey(
+        QuickEstimate,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="site_admin_chat_states",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at",)
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "user"], name="uniq_ba_site_admin_state_org_user"),
+        ]
+        indexes = [
+            models.Index(fields=["organization", "user", "updated_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.organization_id}:{self.user_id}:{self.intent or 'idle'}"
+
+
 class SubscriptionCategory(models.Model):
     organization = models.ForeignKey(
         "core.Organization",

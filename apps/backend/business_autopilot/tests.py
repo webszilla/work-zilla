@@ -11,10 +11,13 @@ from apps.backend.business_autopilot.models import (
     OrganizationEmployeeRole,
     PayrollEntry,
     Payslip,
+    QuickEstimate,
     CrmSalesOrder,
     OrganizationDepartment,
     OrganizationUser,
+    SiteAdminChatState,
 )
+from apps.backend.business_autopilot.site_admin_ai import build_site_admin_instruction_context, get_site_admin_module
 from apps.backend.products.models import Product
 from core.models import Organization, OrganizationProduct, OrganizationSettings, Plan, Subscription, UserProductAccess, UserProfile
 
@@ -2205,3 +2208,457 @@ class BusinessAutopilotUserAccessTests(TestCase):
         membership.refresh_from_db()
         self.assertEqual(department.name, "Creative Team")
         self.assertEqual(membership.department, "Creative Team")
+
+
+class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="siteadmin@workzilla.test",
+            email="siteadmin@workzilla.test",
+            password="pw123456",
+        )
+        self.org = Organization.objects.create(
+            name="Alpha Prints",
+            company_key="ALPHAPRINTS",
+            owner=self.admin,
+        )
+        UserProfile.objects.create(
+            user=self.admin,
+            organization=self.org,
+            role="company_admin",
+        )
+        self.product, _ = Product.objects.get_or_create(
+            slug="business-autopilot-erp",
+            defaults={"name": "Business Autopilot"},
+        )
+        self.plan = Plan.objects.create(name="Pro ERP", product=self.product)
+        Subscription.objects.create(
+            user=self.admin,
+            organization=self.org,
+            plan=self.plan,
+            status="active",
+        )
+        OrganizationProduct.objects.create(
+            organization=self.org,
+            product=self.product,
+            subscription_status="active",
+        )
+        self.client.force_login(self.admin)
+
+    def test_site_admin_qe_new_mobile_creates_client_and_estimate(self):
+        response = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={
+                "message": "9092833701\nGuru\nBusiness Card Printing 300Gsm Single Side Digital Printing 500Nos Rs.1050",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["action"], "quick_estimate_created")
+        self.assertEqual(payload["estimate_number"], "QE-0001")
+        self.assertTrue(payload["whatsapp_share_pending"])
+        estimate = QuickEstimate.objects.get(organization=self.org, estimate_number="QE-0001")
+        self.assertEqual(estimate.mobile, "9092833701")
+        self.assertEqual(estimate.client_name, "Guru")
+        self.assertEqual(str(estimate.total_amount), "1050.00")
+        workspace = AccountsWorkspace.objects.get(organization=self.org)
+        customers = workspace.data.get("customers") or []
+        self.assertEqual(len(customers), 1)
+        self.assertEqual(str(customers[0].get("phone") or ""), "9092833701")
+        self.assertEqual(str(customers[0].get("clientName") or ""), "Guru")
+        self.assertIn("Quick Estimate", payload["reply"])
+        self.assertIn("QE-0001", payload["thermal_preview_html"])
+
+    def test_site_admin_qe_same_mobile_reuses_existing_client_name(self):
+        AccountsWorkspace.objects.create(
+            organization=self.org,
+            data={
+                "customers": [
+                    {
+                        "id": "cust_existing_1",
+                        "companyName": "Guru Prints",
+                        "clientName": "Guru",
+                        "name": "Guru Prints",
+                        "phoneCountryCode": "+91",
+                        "phone": "9092833701",
+                        "phoneList": [{"countryCode": "+91", "number": "9092833701"}],
+                        "email": "",
+                        "additionalEmails": [],
+                        "emailList": [],
+                        "billingAddress": "",
+                        "shippingAddress": "",
+                        "gstin": "",
+                    }
+                ],
+                "vendors": [],
+                "itemMasters": [],
+                "gstTemplates": [],
+                "billingTemplates": [],
+                "estimates": [],
+                "invoices": [],
+            },
+        )
+
+        response = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={
+                "message": "9092833701\nBusiness Card Printing Rs.1050",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["action"], "quick_estimate_created")
+        estimate = QuickEstimate.objects.get(organization=self.org, estimate_number="QE-0001")
+        self.assertEqual(estimate.client_name, "Guru")
+        workspace = AccountsWorkspace.objects.get(organization=self.org)
+        self.assertEqual(len(workspace.data.get("customers") or []), 1)
+
+    def test_site_admin_qe_numbered_item_list_creates_multiple_items_in_order(self):
+        response = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={
+                "message": "9092833701\nGuru\n1. Business Card 500 nos Rs.1050\n2. Letterhead 100 nos Rs.950",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        estimate = QuickEstimate.objects.get(organization=self.org, estimate_number="QE-0001")
+        items = list(estimate.items.order_by("id"))
+        self.assertEqual(len(items), 2)
+        self.assertIn("Business Card", items[0].description)
+        self.assertIn("Letterhead", items[1].description)
+        self.assertEqual(str(items[0].amount), "1050.00")
+        self.assertEqual(str(items[1].amount), "950.00")
+        self.assertEqual(str(estimate.total_amount), "2000.00")
+
+    def test_site_admin_qe_missing_mobile_asks_for_mobile_then_continues(self):
+        first = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "QE"},
+            content_type="application/json",
+        )
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.json()["reply"], "Please share the mobile number.")
+
+        second = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "9092833701"},
+            content_type="application/json",
+        )
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.json()["reply"], "Please share the client name.")
+
+        state = SiteAdminChatState.objects.get(organization=self.org, user=self.admin)
+        self.assertEqual(state.intent, "quick_estimate")
+        self.assertEqual(state.current_step, "client_name")
+
+    def test_site_admin_qe_does_not_use_greeting_as_client_name(self):
+        self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "QE"},
+            content_type="application/json",
+        )
+        self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "Hi"},
+            content_type="application/json",
+        )
+        self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "8412456789"},
+            content_type="application/json",
+        )
+        response = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "Letterhead Printing 100Gsm Bond Sheet 100nos Rs.950"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["action"], "collecting_quick_estimate")
+        self.assertEqual(response.json()["reply"], "Please share the client name.")
+        self.assertFalse(QuickEstimate.objects.filter(organization=self.org, mobile="8412456789").exists())
+
+    def test_site_admin_qe_whatsapp_yes_returns_wa_me_link(self):
+        self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={
+                "message": "9092833701\nGuru\nBusiness Card Printing 500Nos Rs.1050",
+            },
+            content_type="application/json",
+        )
+
+        response = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "yes"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["action"], "open_whatsapp")
+        self.assertIn("https://wa.me/919092833701?text=", payload["whatsapp_url"])
+        estimate = QuickEstimate.objects.get(organization=self.org, estimate_number="QE-0001")
+        self.assertEqual(estimate.status, QuickEstimate.STATUS_SHARED)
+
+    def test_quick_estimate_numbers_restart_per_organization(self):
+        other_user = User.objects.create_user(
+            username="other@workzilla.test",
+            email="other@workzilla.test",
+            password="pw123456",
+        )
+        other_org = Organization.objects.create(
+            name="Beta Prints",
+            company_key="BETAPRINTS",
+            owner=other_user,
+        )
+        UserProfile.objects.create(
+            user=other_user,
+            organization=other_org,
+            role="company_admin",
+        )
+        Subscription.objects.create(
+            user=other_user,
+            organization=other_org,
+            plan=self.plan,
+            status="active",
+        )
+        OrganizationProduct.objects.create(
+            organization=other_org,
+            product=self.product,
+            subscription_status="active",
+        )
+
+        self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "9092833701\nGuru\nBusiness Card Rs.1050"},
+            content_type="application/json",
+        )
+
+        self.client.logout()
+        self.client.force_login(other_user)
+        other_response = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "9876543210\nArun\nLetter Pad Rs.500"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(other_response.status_code, 200)
+        self.assertEqual(other_response.json()["estimate_number"], "QE-0001")
+        self.assertEqual(QuickEstimate.objects.filter(organization=self.org, estimate_number="QE-0001").count(), 1)
+        self.assertEqual(QuickEstimate.objects.filter(organization=other_org, estimate_number="QE-0001").count(), 1)
+
+    def test_quick_estimate_detail_patch_updates_item_list(self):
+        created = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={
+                "message": "9092833701\nGuru\nBusiness Card 500 nos Rs.1050",
+            },
+            content_type="application/json",
+        )
+        estimate_id = created.json()["quick_estimate_id"]
+
+        response = self.client.patch(
+            f"/api/business-autopilot/quick-estimates/{estimate_id}/",
+            data=json.dumps({
+                "item_text": "1. Business Card 500 nos Rs.1050\n2. Letterhead 100 nos Rs.950",
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["action"], "quick_estimate_updated")
+        estimate = QuickEstimate.objects.get(organization=self.org, id=estimate_id)
+        items = list(estimate.items.order_by("id"))
+        self.assertEqual(len(items), 2)
+        self.assertEqual(str(estimate.total_amount), "2000.00")
+        self.assertIn("QE-0001", payload["thermal_preview_html"])
+
+    def test_quick_estimate_detail_patch_updates_mobile_and_client_in_same_customer_row(self):
+        created = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={
+                "message": "9092833701\nGuru\nBusiness Card 500 nos Rs.1050",
+            },
+            content_type="application/json",
+        )
+        estimate_id = created.json()["quick_estimate_id"]
+        estimate = QuickEstimate.objects.get(organization=self.org, id=estimate_id)
+        customer_id = estimate.customer_id
+
+        response = self.client.patch(
+            f"/api/business-autopilot/quick-estimates/{estimate_id}/",
+            data=json.dumps({
+                "mobile": "9876543210",
+                "client_name": "Guru Prakash",
+                "item_text": "1. Business Card 500 nos Rs.1050\n2. Letterhead 100 nos Rs.950",
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        estimate.refresh_from_db()
+        self.assertEqual(estimate.mobile, "9876543210")
+        self.assertEqual(estimate.client_name, "Guru Prakash")
+        self.assertEqual(estimate.customer_id, customer_id)
+        workspace = AccountsWorkspace.objects.get(organization=self.org)
+        customers = workspace.data.get("customers") or []
+        self.assertEqual(len(customers), 1)
+        self.assertEqual(str(customers[0].get("id") or ""), customer_id)
+        self.assertEqual(str(customers[0].get("phone") or ""), "9876543210")
+        self.assertEqual(str(customers[0].get("clientName") or ""), "Guru Prakash")
+
+    def test_quick_estimate_detail_delete_removes_row(self):
+        created = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={
+                "message": "9092833701\nGuru\nBusiness Card 500 nos Rs.1050",
+            },
+            content_type="application/json",
+        )
+        estimate_id = created.json()["quick_estimate_id"]
+        estimate = QuickEstimate.objects.get(id=estimate_id)
+        SiteAdminChatState.objects.filter(organization=self.org, user=self.admin).update(
+            last_quick_estimate=estimate,
+            awaiting_whatsapp_share=True,
+        )
+
+        response = self.client.delete(
+            f"/api/business-autopilot/quick-estimates/{estimate_id}/",
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["action"], "quick_estimate_deleted")
+        self.assertFalse(QuickEstimate.objects.filter(organization=self.org, id=estimate_id).exists())
+        state = SiteAdminChatState.objects.get(organization=self.org, user=self.admin)
+        self.assertIsNone(state.last_quick_estimate)
+        self.assertFalse(state.awaiting_whatsapp_share)
+
+    def test_site_admin_reset_clears_pending_state(self):
+        self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "QE"},
+            content_type="application/json",
+        )
+        response = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "reset"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["action"], "state_cleared")
+        state = SiteAdminChatState.objects.get(organization=self.org, user=self.admin)
+        self.assertEqual(state.intent, "")
+        self.assertEqual(state.current_step, "")
+
+    def test_site_admin_instruction_registry_loads_quick_estimate_prompt(self):
+        module = get_site_admin_module("quick_estimate")
+        self.assertIsNotNone(module)
+        self.assertTrue(module.enabled)
+        self.assertIn("quick_estimate_create", module.supported_intents)
+        self.assertIn("mobile", module.required_fields)
+        self.assertEqual(module.output_schema.get("module"), "quick_estimate")
+
+        prompt_text = build_site_admin_instruction_context("quick_estimate")
+        self.assertIn("Business Autopilot", prompt_text)
+        self.assertIn("Quick Estimate Module Instruction", prompt_text)
+        self.assertIn("\"module\": \"quick_estimate\"", prompt_text)
+
+    def test_site_admin_requires_explicit_qe_module_entry(self):
+        response = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "8412456789 Letterhead Printing 100Gsm Bond Sheet 100nos Rs.950"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["action"], "unsupported")
+        self.assertIn("Click QE Create to open Quick Estimate", response.json()["reply"])
+        self.assertFalse(QuickEstimate.objects.filter(organization=self.org, mobile="8412456789").exists())
+
+    def test_accounts_workspace_put_blocks_duplicate_customer_phone(self):
+        response = self.client.put(
+            "/api/business-autopilot/accounts/workspace",
+            data=json.dumps(
+                {
+                    "data": {
+                        "customers": [
+                            {
+                                "id": "cust_1",
+                                "companyName": "Alpha",
+                                "clientName": "Guru",
+                                "phoneCountryCode": "+91",
+                                "phone": "9092833701",
+                                "phoneList": [{"countryCode": "+91", "number": "9092833701"}],
+                                "email": "guru1@example.com",
+                                "emailList": ["guru1@example.com"],
+                            },
+                            {
+                                "id": "cust_2",
+                                "companyName": "Beta",
+                                "clientName": "Arun",
+                                "phoneCountryCode": "+91",
+                                "phone": "9092833701",
+                                "phoneList": [{"countryCode": "+91", "number": "9092833701"}],
+                                "email": "arun@example.com",
+                                "emailList": ["arun@example.com"],
+                            },
+                        ]
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        payload = response.json()
+        self.assertEqual(payload["detail"], "duplicate_customer")
+        self.assertEqual(payload["duplicate_fields"], ["phone"])
+
+    def test_accounts_workspace_put_blocks_duplicate_customer_email(self):
+        response = self.client.put(
+            "/api/business-autopilot/accounts/workspace",
+            data=json.dumps(
+                {
+                    "data": {
+                        "customers": [
+                            {
+                                "id": "cust_1",
+                                "companyName": "Alpha",
+                                "clientName": "Guru",
+                                "phoneCountryCode": "+91",
+                                "phone": "9092833701",
+                                "phoneList": [{"countryCode": "+91", "number": "9092833701"}],
+                                "email": "same@example.com",
+                                "emailList": ["same@example.com"],
+                            },
+                            {
+                                "id": "cust_2",
+                                "companyName": "Beta",
+                                "clientName": "Arun",
+                                "phoneCountryCode": "+91",
+                                "phone": "9876543210",
+                                "phoneList": [{"countryCode": "+91", "number": "9876543210"}],
+                                "email": "same@example.com",
+                                "emailList": ["same@example.com"],
+                            },
+                        ]
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        payload = response.json()
+        self.assertEqual(payload["detail"], "duplicate_customer")
+        self.assertEqual(payload["duplicate_fields"], ["email"])

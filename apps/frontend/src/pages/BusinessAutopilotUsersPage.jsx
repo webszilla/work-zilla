@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, getCsrfToken } from "../lib/api.js";
 import TablePagination from "../components/TablePagination.jsx";
 import PhoneCountryCodePicker from "../components/PhoneCountryCodePicker.jsx";
 import { DIAL_CODE_LABEL_OPTIONS, COUNTRY_OPTIONS, getStateOptionsForCountry } from "../lib/locationData.js";
@@ -662,21 +662,31 @@ function readSharedAccountsVendors(storageKey = "") {
   return (readSharedAccountsData(storageKey).vendors || []).map((row) => normalizeSharedCustomerRecord(row));
 }
 
-async function persistSharedAccountsCustomers(nextCustomers) {
+async function persistSharedAccountsCustomers(nextCustomers, { suppressErrors = true } = {}) {
   const accountsStorageKey = resolveScopedAccountsStorageKey();
   const currentData = readSharedAccountsData(accountsStorageKey);
   const nextData = {
     ...currentData,
     customers: nextCustomers.map((row) => normalizeSharedCustomerRecord(row)),
   };
-  window.localStorage.setItem(accountsStorageKey, JSON.stringify(nextData));
   try {
-    await apiFetch("/api/business-autopilot/accounts/workspace", {
+    const response = await apiFetch("/api/business-autopilot/accounts/workspace", {
       method: "PUT",
       body: JSON.stringify({ data: nextData }),
     });
-  } catch {
-    // Keep local cache updated even if server sync fails.
+    const persistedData = sanitizeAccountsWorkspaceData(response?.data || nextData);
+    window.localStorage.setItem(accountsStorageKey, JSON.stringify({
+      ...persistedData,
+      customers: (Array.isArray(persistedData.customers) ? persistedData.customers : []).map((row) => normalizeSharedCustomerRecord(row)),
+      vendors: (Array.isArray(persistedData.vendors) ? persistedData.vendors : []).map((row) => normalizeSharedCustomerRecord(row)),
+    }));
+    return persistedData;
+  } catch (error) {
+    if (suppressErrors) {
+      window.localStorage.setItem(accountsStorageKey, JSON.stringify(nextData));
+      return nextData;
+    }
+    throw error;
   }
 }
 
@@ -819,6 +829,22 @@ function findDuplicateSharedCustomerRow(rows = [], candidate = {}, options = {})
   }
 
   return null;
+}
+
+function findDuplicateSharedCustomerIdentityRow(rows = [], candidate = {}, options = {}) {
+  const duplicateMatch = findDuplicateSharedCustomerRow(rows, candidate, options);
+  if (!duplicateMatch) {
+    return null;
+  }
+  const matchedFields = Array.isArray(duplicateMatch.matchedFields) ? duplicateMatch.matchedFields : [];
+  const identityFields = matchedFields.filter((field) => field === "phone" || field === "email");
+  if (!identityFields.length) {
+    return null;
+  }
+  return {
+    ...duplicateMatch,
+    matchedFields: identityFields,
+  };
 }
 
 function formatSharedPartyDuplicateFieldLabelList(fields = []) {
@@ -1477,6 +1503,12 @@ export default function BusinessAutopilotUsersPage() {
   const [viewUserModal, setViewUserModal] = useState({ open: false, user: null, employee: null });
   const [viewClientModal, setViewClientModal] = useState({ open: false, client: null });
   const [viewUserTypeModal, setViewUserTypeModal] = useState({ open: false, userType: null });
+  const [activateUserModal, setActivateUserModal] = useState({
+    open: false,
+    user: null,
+    options: [],
+  });
+  const [checkoutPlanId, setCheckoutPlanId] = useState("");
   const [userActivityModal, setUserActivityModal] = useState({
     open: false,
     loading: false,
@@ -1532,6 +1564,136 @@ export default function BusinessAutopilotUsersPage() {
         label: item?.label || sourceItem?.label || BA_USER_TYPE_LABELS[key] || "User Type",
       },
     });
+  }
+
+  function closeActivateUserModal() {
+    setActivateUserModal({ open: false, user: null, options: [] });
+  }
+
+  function getUserTypeSummaryByKey(key) {
+    return (createUserTypeSummaryRows || []).find((item) => String(item?.key || "").trim() === String(key || "").trim()) || null;
+  }
+
+  function getActivationTransferOptions() {
+    const options = [];
+    const hrmRow = getUserTypeSummaryByKey("hrm_user");
+    const crmRow = getUserTypeSummaryByKey("crm_user");
+    if (hrmRow && Number(hrmRow.remainingCount || 0) > 0) {
+      options.push({ key: "hrm_user", label: "HRM User" });
+    }
+    if (crmRow && Number(crmRow.remainingCount || 0) > 0) {
+      options.push({ key: "crm_user", label: "CRM User" });
+    }
+    return options;
+  }
+
+  async function submitActivateUser(user, userTypeKey = "") {
+    const membershipId = String(user?.membership_id || "").trim();
+    if (!membershipId || togglingMembershipId) {
+      return;
+    }
+    if (isOrgAdminAccountUser(user)) {
+      const message = "ORG admin account cannot be deactivated.";
+      setNotice(message);
+      await openAlertDialog(message, { title: "Action Not Allowed" });
+      return;
+    }
+    setTogglingMembershipId(membershipId);
+    setNotice("");
+    try {
+      if (userTypeKey) {
+        const data = await apiFetch(`/api/business-autopilot/users/${membershipId}`, {
+          method: "POST",
+          body: JSON.stringify({
+            action: "update",
+            first_name: user.first_name || "",
+            last_name: user.last_name || "",
+            email: user.email || "",
+            password: "",
+            phone_number: user.phone_number || "",
+            role: user.role || "org_user",
+            user_type: userTypeKey,
+            department_id: user.department_id || null,
+            employee_role_id: user.employee_role_id || null,
+            is_active: true,
+          }),
+        });
+        applyUsersResponse(data, { preserveDeletedUsers: true });
+        setNotice(`User activated as ${userTypeKey === "hrm_user" ? "HRM User" : "CRM User"}.`);
+        await openAlertDialog(
+          `User activated as ${userTypeKey === "hrm_user" ? "HRM User" : "CRM User"}.`,
+          { title: "Updated" }
+        );
+      } else {
+        const data = await apiFetch(`/api/business-autopilot/users/${membershipId}/toggle-status`, {
+          method: "POST",
+          body: JSON.stringify({ enabled: true }),
+        });
+        applyUsersResponse(data, { preserveDeletedUsers: true });
+        setNotice(String(data?.message || "User activated."));
+      }
+    } catch (error) {
+      if (error?.status === 403 && String(error?.data?.detail || "").trim().toLowerCase() === "employee_limit_reached") {
+        await showAddonRequiredPopup(error?.data?.message);
+      } else {
+        const message = error?.message || "Unable to update user status.";
+        setNotice(message);
+        await openAlertDialog(message, { title: "Update Failed" });
+      }
+    } finally {
+      setTogglingMembershipId("");
+      closeActivateUserModal();
+    }
+  }
+
+  async function goToAddonCheckout(preferredUserType = "full_access_user") {
+    const planId = String(checkoutPlanId || "").trim();
+    if (!planId) {
+      setNotice("Unable to resolve the active plan for checkout.");
+      return;
+    }
+    const seatCountMap = userMeta.user_type_seat_counts && typeof userMeta.user_type_seat_counts === "object"
+      ? userMeta.user_type_seat_counts
+      : {};
+    const targetType = normalizeBusinessAutopilotUserType(preferredUserType);
+    const targetCounts = Object.keys(BA_USER_TYPE_LABELS).reduce((acc, key) => {
+      acc[key] = Math.max(0, Number(seatCountMap[key]) || 0);
+      return acc;
+    }, {});
+    targetCounts[targetType] = Math.max(0, Number(targetCounts[targetType]) || 0) + 1;
+    const payload = new URLSearchParams({
+      plan_id: planId,
+      product_slug: "business-autopilot-erp",
+      billing: "monthly",
+      currency: "inr",
+      checkout_mode: "addon",
+      addon_count: String(Object.values(targetCounts).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0)),
+    });
+    Object.entries(targetCounts).forEach(([key, value]) => {
+      payload.set(`user_type_count_${key}`, String(value));
+    });
+    try {
+      const response = await fetch("/checkout/select/", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "X-CSRFToken": getCsrfToken(),
+        },
+        body: payload.toString(),
+      });
+      if (response.redirected) {
+        window.location.href = response.url;
+        return;
+      }
+      if (response.ok) {
+        window.location.href = "/checkout/";
+        return;
+      }
+      setNotice("Unable to open checkout.");
+    } catch (error) {
+      setNotice(error?.message || "Unable to open checkout.");
+    }
   }
 
   function closeActionDialog(result) {
@@ -1672,6 +1834,32 @@ export default function BusinessAutopilotUsersPage() {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    let active = true;
+    async function loadActiveCheckoutPlan() {
+      try {
+        const data = await apiFetch("/api/dashboard/billing?product=business-autopilot-erp");
+        if (!active) {
+          return;
+        }
+        const activeHistoryEntry = Array.isArray(data?.history_entries)
+          ? data.history_entries.find((entry) => String(entry?.status || "").trim().toLowerCase() === "active" && Number(entry?.plan_id || 0) > 0)
+          : null;
+        const selectedPlanId = Number(activeHistoryEntry?.plan_id || data?.subscription?.plan_id || 0);
+        setCheckoutPlanId(Number.isFinite(selectedPlanId) && selectedPlanId > 0 ? String(selectedPlanId) : "");
+      } catch {
+        if (active) {
+          setCheckoutPlanId("");
+        }
+      }
+    }
+
+    loadActiveCheckoutPlan();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function loadRoleAccess() {
     try {
@@ -2151,6 +2339,21 @@ export default function BusinessAutopilotUsersPage() {
     if (user?.is_locked) {
       await showAddonRequiredPopup();
       return;
+    }
+    if (nextEnabled) {
+      const fullAccessRow = getUserTypeSummaryByKey("full_access_user");
+      const fullAccessHasSeat = Number(fullAccessRow?.remainingCount || 0) > 0;
+      if (!fullAccessHasSeat) {
+        const transferOptions = getActivationTransferOptions();
+        if (transferOptions.length) {
+          setActivateUserModal({
+            open: true,
+            user,
+            options: transferOptions,
+          });
+          return;
+        }
+      }
     }
     const confirmMessage = nextEnabled
       ? "Do you want to activate this user?"
@@ -3858,7 +4061,7 @@ export default function BusinessAutopilotUsersPage() {
       ? billingPincode
       : String(clientForm.shippingPincode || "").trim();
     const primaryPhoneCountryCode = String(clientForm.phoneCountryCode || "+91").trim() || "+91";
-    const duplicateClientMatch = findDuplicateSharedCustomerRow(
+    const duplicateClientMatch = findDuplicateSharedCustomerIdentityRow(
       activeClients,
       {
         companyName,
@@ -3875,11 +4078,11 @@ export default function BusinessAutopilotUsersPage() {
     if (duplicateClientMatch) {
       const matchedFieldLabels = formatSharedPartyDuplicateFieldLabelList(duplicateClientMatch.matchedFields);
       const duplicateMessage = [
-        `A client with same ${matchedFieldLabels.join(", ")} already exists.`,
+        `A client with the same ${matchedFieldLabels.join(" and ")} already exists.`,
         "",
         buildClientDuplicateSummaryText(duplicateClientMatch.row),
         "",
-        "Do you want to edit this existing client?",
+        "Open the existing client instead of creating a duplicate?",
       ].join("\n");
       const shouldOpenEdit = await openConfirmDialog(duplicateMessage, {
         title: "Duplicate Client Found",
@@ -3929,8 +4132,22 @@ export default function BusinessAutopilotUsersPage() {
     const nextCustomers = editingClientId
       ? sharedCustomers.map((row) => (row.id === editingClientId ? { ...row, ...payload } : row))
       : [payload, ...sharedCustomers];
-    setSharedCustomers(nextCustomers);
-    await persistSharedAccountsCustomers(nextCustomers);
+    try {
+      await persistSharedAccountsCustomers(nextCustomers, { suppressErrors: false });
+      setSharedCustomers(nextCustomers);
+    } catch (error) {
+      const payload = error?.data && typeof error.data === "object" ? error.data : {};
+      const duplicateFields = Array.isArray(payload.duplicate_fields) ? payload.duplicate_fields : [];
+      if (payload.detail === "duplicate_customer" && duplicateFields.length) {
+        await openAlertDialog(
+          `A client with the same ${formatSharedPartyDuplicateFieldLabelList(duplicateFields).join(" and ")} already exists.`,
+          { title: "Duplicate Client Found" }
+        );
+        return;
+      }
+      await openAlertDialog(error?.message || "Unable to save client right now.", { title: "Save Failed" });
+      return;
+    }
     let successMessage = editingClientId ? "Client updated successfully." : "Client Created Successfully";
     if (conversionDraftForThisSave) {
       const conversionResult = await removeConvertedCrmContact(conversionDraftForThisSave);
@@ -5151,23 +5368,19 @@ export default function BusinessAutopilotUsersPage() {
                       <div className="wz-user-type-summary__list">
                         {createUserTypeSummaryRows.map((item) => (
                           <div key={item.key} className="wz-user-type-summary__item">
-                            <div className="d-flex align-items-start justify-content-between gap-2">
-                              <div>
-                                <div className="wz-user-type-summary__name">{item.label}</div>
-                                <div className="wz-user-type-summary__meta">
-                                  {item.activeCount}/{item.seatCount} active
-                                  <span className="mx-1">•</span>
-                                  Remaining {item.remainingCount}
-                                </div>
-                              </div>
+                            <div>
                               <button
                                 type="button"
-                                className="btn btn-sm btn-outline-success"
+                                className="wz-user-type-summary__link"
                                 onClick={() => openUserTypeDetails(item)}
                                 aria-label={`View ${item.label} details`}
                               >
-                                View
+                                {item.label}
                               </button>
+                              <div className="wz-user-type-summary__meta">
+                                <div>{item.activeCount}/{item.seatCount} active</div>
+                                <div>Remaining {item.remainingCount}</div>
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -5264,9 +5477,7 @@ export default function BusinessAutopilotUsersPage() {
                 <button
                   type="button"
                   className="btn btn-sm btn-primary"
-                  onClick={() => {
-                    window.location.href = "/app/business-autopilot/billing";
-                  }}
+                  onClick={() => goToAddonCheckout("full_access_user")}
                 >
                   Increase User Limit
                 </button>
@@ -6779,46 +6990,108 @@ export default function BusinessAutopilotUsersPage() {
       ) : null}
       {viewUserTypeModal.open ? (
         <div className="modal-overlay" onClick={() => setViewUserTypeModal({ open: false, userType: null })}>
-          <div className="modal-panel" style={{ width: "min(760px, 94vw)", maxHeight: "88vh", overflowY: "auto" }} onClick={(event) => event.stopPropagation()}>
-            <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+          <div className="modal-panel wz-user-type-modal" onClick={(event) => event.stopPropagation()}>
+            {(() => {
+              const userType = viewUserTypeModal.userType || {};
+              const modules = Array.isArray(userType.allowed_modules)
+                ? userType.allowed_modules
+                : Array.isArray(userType.allowedModules)
+                  ? userType.allowedModules
+                  : [];
+              const stats = [
+                { key: "seatCount", label: "Purchased", value: userType.seatCount },
+                { key: "activeCount", label: "Active", value: userType.activeCount },
+                { key: "remainingCount", label: "Remaining", value: userType.remainingCount },
+              ];
+              return (
+                <>
+                  <div className="wz-user-type-modal__header">
+                    <div>
+                      <div className="wz-user-type-modal__eyebrow">User Type Details</div>
+                      <h5 className="wz-user-type-modal__title">{userType.label || "User Type"}</h5>
+                      <div className="wz-user-type-modal__key">{userType.key || "-"}</div>
+                    </div>
+                    <button type="button" className="btn btn-outline-light btn-sm" onClick={() => setViewUserTypeModal({ open: false, userType: null })}>
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="wz-user-type-modal__stats">
+                    {stats.map((stat) => (
+                      <div className="wz-user-type-modal__stat" key={`user-type-stat-${stat.key}`}>
+                        <div className="wz-user-type-modal__stat-label">{stat.label}</div>
+                        <div className="wz-user-type-modal__stat-value">{String(stat.value ?? 0)}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="wz-user-type-modal__section">
+                    <div className="wz-user-type-modal__section-title">Description</div>
+                    <div className="wz-user-type-modal__description">
+                      {String(userType.description || "").trim() || "No description available."}
+                    </div>
+                  </div>
+
+                  <div className="wz-user-type-modal__section">
+                    <div className="wz-user-type-modal__section-title">Allowed Modules</div>
+                    {modules.length ? (
+                      <div className="wz-user-type-modal__chips">
+                        {modules.map((moduleKey) => (
+                          <span className="wz-user-type-modal__chip" key={`user-type-module-${moduleKey}`}>
+                            {String(moduleKey || "").replace(/_/g, " ")}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="wz-user-type-modal__description">No modules configured.</div>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      ) : null}
+      {activateUserModal.open ? (
+        <div className="modal-overlay" onClick={closeActivateUserModal}>
+          <div className="modal-panel wz-user-type-modal wz-activate-user-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="wz-user-type-modal__header">
               <div>
-                <h5 className="mb-1">User Type Details</h5>
-                <div className="text-secondary">{viewUserTypeModal.userType?.label || "User Type"}</div>
+                <div className="wz-user-type-modal__eyebrow">Activate User</div>
+                <h5 className="wz-user-type-modal__title">
+                  {buildDisplayName(activateUserModal.user?.first_name, activateUserModal.user?.last_name) || activateUserModal.user?.name || "User"}
+                </h5>
+                <div className="wz-user-type-modal__key">
+                  Full Access seats are full. Choose a lower pack if you want to use an available limit.
+                </div>
               </div>
-              <button type="button" className="btn btn-outline-light btn-sm" onClick={() => setViewUserTypeModal({ open: false, userType: null })}>
+              <button type="button" className="btn btn-outline-light btn-sm" onClick={closeActivateUserModal}>
                 Close
               </button>
             </div>
 
-            <div className="card p-3">
-              <div className="row g-3">
-                {[
-                  { key: "key", label: "User Type Key", value: viewUserTypeModal.userType?.key },
-                  { key: "label", label: "Label", value: viewUserTypeModal.userType?.label },
-                  { key: "seatCount", label: "Purchased Seats", value: viewUserTypeModal.userType?.seatCount },
-                  { key: "activeCount", label: "Active Users", value: viewUserTypeModal.userType?.activeCount },
-                  { key: "remainingCount", label: "Remaining Seats", value: viewUserTypeModal.userType?.remainingCount },
-                  {
-                    key: "description",
-                    label: "Description",
-                    value: viewUserTypeModal.userType?.description || "No description available.",
-                  },
-                  {
-                    key: "allowedModules",
-                    label: "Allowed Modules",
-                    value: Array.isArray(viewUserTypeModal.userType?.allowed_modules)
-                      ? viewUserTypeModal.userType.allowed_modules.join(", ")
-                      : Array.isArray(viewUserTypeModal.userType?.allowedModules)
-                        ? viewUserTypeModal.userType.allowedModules.join(", ")
-                        : "",
-                  },
-                ].map((field) => (
-                  <div className="col-12 col-md-6 col-xl-4" key={`user-type-detail-${field.key}`}>
-                    <div className="small text-secondary mb-1">{field.label}</div>
-                    <div>{String(field.value || "").trim() || "-"}</div>
-                  </div>
-                ))}
-              </div>
+            <div className="wz-activate-user-modal__choices">
+              {activateUserModal.options.map((option) => (
+                <button
+                  type="button"
+                  className="wz-activate-user-modal__choice"
+                  key={`activate-option-${option.key}`}
+                  onClick={() => submitActivateUser(activateUserModal.user, option.key)}
+                >
+                  <span className="wz-activate-user-modal__choice-title">{option.label}</span>
+                  <span className="wz-activate-user-modal__choice-subtitle">
+                    Move this user to the available {option.label} limit and activate immediately.
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="d-flex justify-content-end mt-3">
+              <button type="button" className="btn btn-success btn-sm me-2" onClick={() => goToAddonCheckout(activateUserModal.user?.user_type || "full_access_user")}>
+                Increase Limit
+              </button>
+              <button type="button" className="btn btn-outline-light btn-sm" onClick={closeActivateUserModal}>
+                Cancel
+              </button>
             </div>
           </div>
         </div>

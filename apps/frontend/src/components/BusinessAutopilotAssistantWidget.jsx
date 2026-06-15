@@ -394,6 +394,7 @@ export default function BusinessAutopilotAssistantWidget({
   enabled = false,
   currentSectionKey = "dashboard",
   pageMode = false,
+  headerTabs = null,
 }) {
   const navigate = useNavigate();
   const [settings, setSettings] = useState({
@@ -1209,21 +1210,24 @@ export default function BusinessAutopilotAssistantWidget({
             <div className="ba-assistant__header-actions">
               {!pageMode ? (
                 <Link
-                  className="ba-assistant__icon-link saas-org-icon-btn wz-table-action-btn d-inline-flex align-items-center justify-content-center"
+                  className="ba-assistant__icon-link ba-assistant__icon-link--no-tooltip saas-org-icon-btn d-inline-flex align-items-center justify-content-center"
                   to={fullPagePath}
                   aria-label="Open full page chat"
+                  title={undefined}
+                  data-wz-tooltip={undefined}
                   onClick={() => setOpen(false)}
                 >
                   <i className="bi bi-arrows-fullscreen" aria-hidden="true" />
                 </Link>
               ) : null}
+              {headerTabs}
               <button
                 type="button"
                 className="ba-assistant__close d-inline-flex align-items-center justify-content-center"
                 aria-label={pageMode ? "Close full page chat" : "Close assistant"}
                 onClick={() => {
                   if (pageMode) {
-                    navigate("/");
+                    navigate("/app/business-autopilot/");
                     return;
                   }
                   setOpen(false);

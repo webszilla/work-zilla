@@ -27,6 +27,12 @@ const PROFILE_OPENAI_DEFAULT_FORM = {
   wake_word_enabled: false,
   wake_phrase: "",
 };
+const BUSINESS_AUTOPILOT_OPENAI_MODEL_OPTIONS = [
+  { value: "gpt-4o-mini", label: "gpt-4o-mini" },
+  { value: "gpt-5-nano", label: "gpt-5-nano" },
+  { value: "gpt-5-mini", label: "gpt-5-mini" },
+  { value: "gpt-5.4-mini", label: "gpt-5.4-mini" },
+];
 const WHATSAPP_DEPARTMENTS = ["HR", "Sales", "Accounts", "Support", "Projects", "Operations", "Client"];
 const WHATSAPP_COMPANY_EVENT_OPTIONS = [
   "New Lead Assigned",
@@ -2339,42 +2345,55 @@ export default function ProfilePage() {
               </div>
               <div className="col-12 col-md-6">
                 <label className="form-label">Model</label>
-                <input
-                  className="form-control"
+                <select
+                  className="form-select"
                   value={openAiState.form.model}
                   onChange={(event) => setOpenAiState((prev) => ({
                     ...prev,
                     form: { ...prev.form, model: event.target.value },
                   }))}
-                  placeholder="gpt-4o-mini"
                   required
-                />
+                >
+                  {BUSINESS_AUTOPILOT_OPENAI_MODEL_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="col-12 col-md-6">
                 <label className="form-label">OpenAI Account Email</label>
                 <input
                   type="email"
                   className="form-control"
+                  name="business_autopilot_openai_account_email"
+                  data-no-global-limit="true"
                   value={openAiState.form.account_email}
                   onChange={(event) => setOpenAiState((prev) => ({
                     ...prev,
                     form: { ...prev.form, account_email: event.target.value },
                   }))}
                   placeholder="name@example.com"
+                  maxLength={60}
                 />
+                <div className="form-text">{String(openAiState.form.account_email || "").length}/60 characters</div>
               </div>
               <div className="col-12 col-md-6">
                 <label className="form-label">OpenAI API Key</label>
                 <input
                   type="password"
                   className="form-control"
+                  name="business_autopilot_openai_api_key"
+                  data-no-global-limit="true"
                   value={openAiState.form.api_key}
                   onChange={(event) => setOpenAiState((prev) => ({
                     ...prev,
                     form: { ...prev.form, api_key: event.target.value },
                   }))}
                   placeholder={openAiState.data?.has_api_key ? "Leave blank to keep existing key" : "sk-..."}
+                  maxLength={200}
                 />
+                <div className="form-text">{String(openAiState.form.api_key || "").length}/200 characters</div>
               </div>
               <div className="col-12">
                 <div className="form-check">
