@@ -23,7 +23,7 @@
     }
     .thermal {
       width: 100%;
-      max-width: 384px;
+      max-width: {{ thermal_width_px|default:384 }}px;
       margin: 0 auto;
       background: var(--paper);
       border: 1px solid var(--line);
@@ -45,7 +45,19 @@
     }
     .header-copy {
       margin-top: 6px;
-      white-space: pre-line;
+      color: var(--ink);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .header-copy > *:first-child {
+      margin-top: 0;
+    }
+    .header-copy > *:last-child {
+      margin-bottom: 0;
+    }
+    .header-copy strong,
+    .header-copy b {
+      font-weight: 700;
     }
     .title {
       margin: 16px 0 10px;
@@ -131,7 +143,7 @@
     @media print {
       body { background: #fff; padding: 0; }
       .thermal {
-        max-width: none;
+        max-width: {{ thermal_width_px|default:384 }}px;
         border: 0;
         border-radius: 0;
         box-shadow: none;
@@ -142,12 +154,10 @@
 <body>
   <div class="thermal">
     <div class="center">
-      <div class="brand">{{ company_name }}</div>
-      {% if organization_name %}<div class="subtle">{{ organization_name }}</div>{% endif %}
-      {% if header_lines %}
-        <div class="subtle header-copy">
-          {% for line in header_lines %}{{ line }}{% if not forloop.last %}<br>{% endif %}{% endfor %}
-        </div>
+      {% if header_text %}
+        <div class="header-copy">{{ header_text|safe }}</div>
+      {% else %}
+        <div class="brand">{{ company_name }}</div>
       {% endif %}
       <div class="title">Quick Estimate</div>
     </div>
@@ -157,6 +167,7 @@
       <div class="meta-row"><span class="meta-label">Date</span><strong>{{ created_at_label }}</strong></div>
       <div class="meta-row"><span class="meta-label">Client</span><strong>{{ estimate.client_name }}</strong></div>
       <div class="meta-row"><span class="meta-label">Mobile</span><strong>{{ estimate.mobile }}</strong></div>
+      <div class="meta-row"><span class="meta-label">EMP Name</span><strong>{{ assigned_user_name|default:"-" }}</strong></div>
     </div>
 
     <table>
@@ -188,8 +199,7 @@
     </div>
 
     <div class="thank-you">
-      Thank you.<br>
-      Printable 4-inch thermal estimate preview.
+      Thank you.
     </div>
   </div>
 </body>

@@ -418,6 +418,7 @@ export default function BusinessAutopilotAssistantWidget({
   const [sending, setSending] = useState(false);
   const [historyDate, setHistoryDate] = useState(getTodayIso());
   const [showHistoryPicker, setShowHistoryPicker] = useState(false);
+  const [clearHistoryConfirmOpen, setClearHistoryConfirmOpen] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [voiceDraft, setVoiceDraft] = useState("");
   const [voiceBusy, setVoiceBusy] = useState(false);
@@ -1034,12 +1035,10 @@ export default function BusinessAutopilotAssistantWidget({
   }
 
   function clearChatHistory() {
-    if (typeof window !== "undefined") {
-      const confirmed = window.confirm("Are you sure you want to delete this chat history?");
-      if (!confirmed) {
-        return;
-      }
-    }
+    setClearHistoryConfirmOpen(true);
+  }
+
+  function confirmClearChatHistory() {
     apiFetch(`/api/business-autopilot/openai/chat-history?date=${encodeURIComponent(historyDate)}`, {
       method: "DELETE",
     }).catch(() => null);
@@ -1052,6 +1051,7 @@ export default function BusinessAutopilotAssistantWidget({
     historyLoadedRef.current = true;
     messagesRef.current = resetMessages;
     setMessages(resetMessages);
+    setClearHistoryConfirmOpen(false);
   }
 
   function handleHistoryDateChange(event) {
@@ -1498,6 +1498,42 @@ export default function BusinessAutopilotAssistantWidget({
             <AiAvatar emotion={latestAssistantEmotion} size={38} />
             <span>{settings.agent_name || "AI Assistant"}</span>
           </button>
+        </div>
+      ) : null}
+      {clearHistoryConfirmOpen ? (
+        <div className="ba-site-admin-chat__modal-overlay" onClick={() => setClearHistoryConfirmOpen(false)}>
+          <div className="ba-site-admin-chat__modal ba-site-admin-chat__modal--confirm" onClick={(event) => event.stopPropagation()}>
+            <div className="ba-site-admin-chat__modal-head">
+              <div>
+                <div className="ba-site-admin-chat__modal-title">Clear Chat History</div>
+                <div className="ba-site-admin-chat__modal-subtitle">Delete today&apos;s assistant chat history?</div>
+              </div>
+              <button
+                type="button"
+                className="ba-assistant__close d-inline-flex align-items-center justify-content-center"
+                aria-label="Close clear chat popup"
+                onClick={() => setClearHistoryConfirmOpen(false)}
+              >
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="ba-site-admin-chat__modal-actions">
+              <button
+                type="button"
+                className="btn btn-outline-secondary"
+                onClick={() => setClearHistoryConfirmOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={confirmClearChatHistory}
+              >
+                Clear History
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

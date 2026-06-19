@@ -1233,6 +1233,14 @@ html[data-theme="light"] .wz-attendance-alert-text{
   visibility: visible;
   transform: translateX(-50%) rotate(45deg) translateY(0);
 }
+
+.app-shell :is(button, a, [role="button"]).ba-assistant__icon-link--no-tooltip[aria-label]::before,
+.app-shell :is(button, a, [role="button"]).ba-assistant__icon-link--no-tooltip[aria-label]::after,
+.app-shell :is(button, a, [role="button"]).ba-assistant__icon-link--no-tooltip[title]::before,
+.app-shell :is(button, a, [role="button"]).ba-assistant__icon-link--no-tooltip[title]::after{
+  display: none !important;
+  content: none !important;
+}
 .wz-data-table-wrap{
   border:1px solid rgba(148,163,184,0.18);
   border-radius:12px;
@@ -1555,6 +1563,36 @@ html[data-theme="light"] .wz-reset-default-btn:focus{
   background: #cbd5e1 !important;
   border-color: #94a3b8 !important;
   color: #334155 !important;
+}
+
+[data-confirm-dialog="true"].modal-overlay{
+  position: fixed;
+  inset: 0;
+  z-index: 2600 !important;
+}
+
+[data-confirm-dialog="true"].modal-panel{
+  position: relative;
+  z-index: 2601 !important;
+}
+
+html[data-theme="dark"] .wz-selected-chip{
+  background: rgba(22, 163, 74, 0.16) !important;
+  border: 1px solid rgba(74, 222, 128, 0.28) !important;
+  color: #dcfce7 !important;
+}
+
+html[data-theme="dark"] .wz-selected-chip-remove{
+  background: rgba(15, 23, 42, 0.44) !important;
+  border: 1px solid rgba(74, 222, 128, 0.24) !important;
+  color: #dcfce7 !important;
+}
+
+html[data-theme="dark"] .wz-selected-chip-remove:hover,
+html[data-theme="dark"] .wz-selected-chip-remove:focus{
+  background: rgba(22, 163, 74, 0.26) !important;
+  border-color: rgba(74, 222, 128, 0.42) !important;
+  color: #f0fdf4 !important;
 }
 
 /* Global form action sizing: keep all React form buttons content-width. */

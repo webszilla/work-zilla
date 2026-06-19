@@ -12,6 +12,7 @@ from apps.backend.business_autopilot.models import (
     PayrollEntry,
     Payslip,
     QuickEstimate,
+    QuickEstimateHistory,
     CrmSalesOrder,
     OrganizationDepartment,
     OrganizationUser,
@@ -2541,6 +2542,173 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         state = SiteAdminChatState.objects.get(organization=self.org, user=self.admin)
         self.assertIsNone(state.last_quick_estimate)
         self.assertFalse(state.awaiting_whatsapp_share)
+
+    def test_quick_estimate_list_includes_creator_and_assignment_details(self):
+        assignee = User.objects.create_user(
+            username="qe-assign-user@workzilla.test",
+            email="qe-assign-user@workzilla.test",
+            password="pw123456",
+            first_name="Assign",
+            last_name="User",
+        )
+        UserProfile.objects.create(user=assignee, organization=self.org, role="org_user")
+        OrganizationUser.objects.create(organization=self.org, user=assignee, role="org_user", is_active=True)
+        estimate = QuickEstimate.objects.create(
+            organization=self.org,
+            customer_id="cust_001",
+            estimate_sequence=7,
+            estimate_number="QE-0007",
+            mobile="9092833701",
+            client_name="Guru",
+            subtotal="950",
+            total_amount="950",
+            status=QuickEstimate.STATUS_CREATED,
+            created_by=self.admin,
+            assigned_user=assignee,
+            assigned_by=self.admin,
+        )
+
+        response = self.client.get("/api/business-autopilot/quick-estimates/")
+
+        self.assertEqual(response.status_code, 200)
+        rows = response.json()["quick_estimates"]
+        payload = next(row for row in rows if row["id"] == estimate.id)
+        self.assertEqual(payload["created_by_name"], self.admin.first_name or self.admin.username)
+        self.assertEqual(payload["assigned_user_id"], assignee.id)
+        self.assertEqual(payload["assigned_user_name"], "Assign User")
+        self.assertEqual(payload["assigned_by_name"], self.admin.first_name or self.admin.username)
+
+    def test_quick_estimate_detail_patch_assigns_followup_user(self):
+        assignee = User.objects.create_user(
+            username="qe-assign-target@workzilla.test",
+            email="qe-assign-target@workzilla.test",
+            password="pw123456",
+            first_name="Follow",
+            last_name="Up",
+        )
+        UserProfile.objects.create(user=assignee, organization=self.org, role="org_user")
+        OrganizationUser.objects.create(organization=self.org, user=assignee, role="org_user", is_active=True)
+        created = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={
+                "message": "9092833701\nGuru\nBusiness Card 500 nos Rs.1050",
+            },
+            content_type="application/json",
+        )
+        estimate_id = created.json()["quick_estimate_id"]
+
+        response = self.client.patch(
+            f"/api/business-autopilot/quick-estimates/{estimate_id}/",
+            data=json.dumps(
+                {
+                    "action": "assign",
+                    "assigned_user_id": assignee.id,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        estimate = QuickEstimate.objects.get(organization=self.org, id=estimate_id)
+        self.assertEqual(estimate.assigned_user_id, assignee.id)
+        self.assertEqual(estimate.assigned_by_id, self.admin.id)
+        payload = response.json()["quick_estimate"]
+        self.assertEqual(payload["assigned_user_name"], "Follow Up")
+        self.assertTrue(QuickEstimateHistory.objects.filter(quick_estimate=estimate, action="assigned").exists())
+
+    def test_quick_estimate_detail_patch_assign_sets_missing_creator(self):
+        assignee = User.objects.create_user(
+            username="qe-assign-missing-creator@workzilla.test",
+            email="qe-assign-missing-creator@workzilla.test",
+            password="pw123456",
+            first_name="Assign",
+            last_name="Target",
+        )
+        UserProfile.objects.create(user=assignee, organization=self.org, role="org_user")
+        membership = OrganizationUser.objects.create(
+            organization=self.org,
+            user=assignee,
+            role="org_user",
+            is_active=True,
+        )
+        estimate = QuickEstimate.objects.create(
+            organization=self.org,
+            customer_id="cust_missing_creator",
+            estimate_sequence=99,
+            estimate_number="QE-0099",
+            mobile="9092833701",
+            client_name="Legacy",
+            subtotal="1200",
+            total_amount="1200",
+            status=QuickEstimate.STATUS_CREATED,
+            created_by=None,
+        )
+
+        response = self.client.patch(
+            f"/api/business-autopilot/quick-estimates/{estimate.id}/",
+            data=json.dumps(
+                {
+                    "action": "assign",
+                    "assigned_user_id": assignee.id,
+                    "membership_id": membership.id,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        estimate.refresh_from_db()
+        self.assertEqual(estimate.created_by_id, self.admin.id)
+        self.assertEqual(estimate.assigned_user_id, assignee.id)
+        self.assertEqual(response.json()["quick_estimate"]["created_by_name"], self.admin.first_name or self.admin.username)
+
+    def test_quick_estimate_update_creates_history_entry(self):
+        created = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "9092833701\nGuru\nBusiness Card 500 nos Rs.1050"},
+            content_type="application/json",
+        )
+        estimate_id = created.json()["quick_estimate_id"]
+
+        response = self.client.patch(
+            f"/api/business-autopilot/quick-estimates/{estimate_id}/",
+            data=json.dumps({"item_text": "1. Letterhead 100 nos Rs.950"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        estimate = QuickEstimate.objects.get(id=estimate_id)
+        history = QuickEstimateHistory.objects.filter(quick_estimate=estimate, action="updated").first()
+        self.assertIsNotNone(history)
+        self.assertEqual(history.actor_id, self.admin.id)
+
+    def test_quick_estimate_history_endpoint_returns_entries(self):
+        estimate = QuickEstimate.objects.create(
+            organization=self.org,
+            customer_id="cust_001",
+            estimate_sequence=9,
+            estimate_number="QE-0009",
+            mobile="9092833701",
+            client_name="Guru",
+            subtotal="950",
+            total_amount="950",
+            status=QuickEstimate.STATUS_CREATED,
+            created_by=self.admin,
+        )
+        QuickEstimateHistory.objects.create(
+            quick_estimate=estimate,
+            action="updated",
+            note="Estimate updated for Guru.",
+            actor=self.admin,
+            snapshot={"after": {"client_name": "Guru"}},
+        )
+
+        response = self.client.get(f"/api/business-autopilot/quick-estimates/{estimate.id}/history/")
+
+        self.assertEqual(response.status_code, 200)
+        rows = response.json()["history"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["actor_name"], self.admin.username)
 
     def test_site_admin_reset_clears_pending_state(self):
         self.client.post(

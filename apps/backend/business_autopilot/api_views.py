@@ -23,6 +23,7 @@ from django.db import DatabaseError, IntegrityError, OperationalError, transacti
 from django.db.models import Q, Min, Max
 from django.shortcuts import render
 from django.template.loader import render_to_string
+from django.utils.html import strip_tags
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_time
 from reportlab.lib.pagesizes import A4
@@ -82,6 +83,7 @@ from .models import (
     SubscriptionSubCategory,
     BusinessAutopilotUserCrmReassignmentSnapshot,
     QuickEstimate,
+    QuickEstimateHistory,
     QuickEstimateItem,
     QuickEstimateSequence,
     SiteAdminChatState,
@@ -4237,8 +4239,17 @@ def _default_accounts_workspace():
         "invoices": [],
         "quickEstimateSettings": {
             "headerText": "",
+            "templateSize": "4in",
         },
     }
+
+
+def _normalize_quick_estimate_header_html(value):
+    return str(value or "").strip()
+
+
+def _quick_estimate_header_text_length(value):
+    return len(strip_tags(str(value or "")).strip())
 
 
 def _default_india_gst_templates():
@@ -4366,8 +4377,12 @@ def _normalize_accounts_workspace(payload):
         base[key] = value if isinstance(value, list) else []
     quick_estimate_settings = payload.get("quickEstimateSettings")
     if isinstance(quick_estimate_settings, dict):
+        template_size = str(quick_estimate_settings.get("templateSize") or "4in").strip().lower()
+        if template_size not in {"3in", "4in"}:
+            template_size = "4in"
         base["quickEstimateSettings"] = {
-            "headerText": str(quick_estimate_settings.get("headerText") or "").strip()[:QUICK_ESTIMATE_HEADER_TEXT_MAX_LENGTH],
+            "headerText": _normalize_quick_estimate_header_html(quick_estimate_settings.get("headerText")),
+            "templateSize": template_size,
         }
     return base
 
@@ -4384,8 +4399,12 @@ def _merge_accounts_workspace(existing_payload, incoming_payload):
         if isinstance(value, list):
             merged[key] = value
     if "quickEstimateSettings" in incoming_payload and isinstance(incoming_payload.get("quickEstimateSettings"), dict):
+        template_size = str(incoming_payload.get("quickEstimateSettings", {}).get("templateSize") or "4in").strip().lower()
+        if template_size not in {"3in", "4in"}:
+            template_size = "4in"
         merged["quickEstimateSettings"] = {
-            "headerText": str(incoming_payload.get("quickEstimateSettings", {}).get("headerText") or "").strip()[:QUICK_ESTIMATE_HEADER_TEXT_MAX_LENGTH],
+            "headerText": _normalize_quick_estimate_header_html(incoming_payload.get("quickEstimateSettings", {}).get("headerText")),
+            "templateSize": template_size,
         }
     return _normalize_accounts_workspace(merged)
 
@@ -4979,6 +4998,22 @@ def _serialize_quick_estimate_item(row):
     }
 
 
+def _serialize_quick_estimate_item_snapshot(entry):
+    if not isinstance(entry, dict):
+        return {}
+    quantity = entry.get("quantity")
+    rate = entry.get("rate")
+    amount = entry.get("amount")
+    return {
+        "service_name": str(entry.get("service_name") or "").strip(),
+        "description": str(entry.get("description") or "").strip(),
+        "quantity": _decimal_to_string(quantity) if quantity is not None else "",
+        "unit": str(entry.get("unit") or "").strip(),
+        "rate": _decimal_to_string(rate) if rate is not None else "",
+        "amount": _decimal_to_string(amount) if amount is not None else "",
+    }
+
+
 def _build_quick_estimate_whatsapp_url(row):
     items = list(row.items.all().order_by("id"))
     item_lines = []
@@ -5012,9 +5047,13 @@ def _get_quick_estimate_settings(org):
     workspace = _get_accounts_workspace(org)
     data = _normalize_accounts_workspace(workspace.data)
     settings_data = data.get("quickEstimateSettings") if isinstance(data.get("quickEstimateSettings"), dict) else {}
-    header_text = str(settings_data.get("headerText") or "").strip()[:QUICK_ESTIMATE_HEADER_TEXT_MAX_LENGTH]
+    header_text = _normalize_quick_estimate_header_html(settings_data.get("headerText"))
+    template_size = str(settings_data.get("templateSize") or "4in").strip().lower()
+    if template_size not in {"3in", "4in"}:
+        template_size = "4in"
     return {
         "headerText": header_text,
+        "templateSize": template_size,
     }
 
 
@@ -5022,24 +5061,40 @@ def _render_quick_estimate_thermal_preview(row, org):
     seller = InvoiceSellerProfile.objects.order_by("-updated_at").first()
     company_name = str(getattr(seller, "company_name", "") or getattr(org, "name", "") or "Work Zilla").strip() or "Work Zilla"
     settings_data = _get_quick_estimate_settings(org)
-    header_text = str(settings_data.get("headerText") or "").strip()
+    header_text = _normalize_quick_estimate_header_html(settings_data.get("headerText"))
+    template_size = str(settings_data.get("templateSize") or "4in").strip().lower()
+    assigned_user = getattr(row, "assigned_user", None)
+    if template_size not in {"3in", "4in"}:
+        template_size = "4in"
     return render_to_string(
         "business_autopilot/quick_estimate_thermal_preview.html",
         {
             "company_name": company_name,
-            "organization_name": str(org.name or "").strip(),
             "header_text": header_text,
-            "header_lines": [line.strip() for line in header_text.splitlines() if line.strip()],
+            "template_size": template_size,
+            "thermal_width_px": 288 if template_size == "3in" else 384,
             "estimate": row,
             "items": list(row.items.all().order_by("id")),
             "formatted_total": _format_quick_estimate_amount(row.total_amount),
             "formatted_subtotal": _format_quick_estimate_amount(row.subtotal),
             "created_at_label": timezone.localtime(row.created_at).strftime("%d/%m/%Y, %I:%M %p") if row.created_at else "",
+            "assigned_user_name": _get_org_user_display_name(assigned_user),
         },
     )
 
 
+def _safe_render_quick_estimate_thermal_preview(row, org):
+    try:
+        return _render_quick_estimate_thermal_preview(row, org)
+    except Exception:
+        logger.exception("Quick estimate thermal preview render failed for estimate_id=%s", getattr(row, "id", None))
+        return ""
+
+
 def _serialize_quick_estimate(row, include_preview=False):
+    created_by = getattr(row, "created_by", None) or getattr(getattr(row, "organization", None), "owner", None)
+    assigned_user = getattr(row, "assigned_user", None)
+    assigned_by = getattr(row, "assigned_by", None)
     payload = {
         "id": row.id,
         "estimate_number": row.estimate_number,
@@ -5052,7 +5107,26 @@ def _serialize_quick_estimate(row, include_preview=False):
         "tax_amount": _decimal_to_string(row.tax_amount),
         "total_amount": _decimal_to_string(row.total_amount),
         "status": row.status,
+        "payment_status": str(getattr(row, "payment_status", "") or ""),
+        "job_status": str(getattr(row, "job_status", "") or ""),
+        "delivery_status": str(getattr(row, "delivery_status", "") or ""),
         "customer_id": row.customer_id or "",
+        "created_by_id": getattr(row, "created_by_id", None) or getattr(getattr(row, "organization", None), "owner_id", None),
+        "created_by_name": _get_org_user_display_name(created_by),
+        "created_by_username": str(getattr(created_by, "username", "") or "").strip(),
+        "created_by_email": str(getattr(created_by, "email", "") or "").strip(),
+        "assigned_user_id": getattr(row, "assigned_user_id", None),
+        "assigned_membership_id": (
+            OrganizationUser.objects
+            .filter(organization=row.organization, user_id=getattr(row, "assigned_user_id", None), is_deleted=False)
+            .values_list("id", flat=True)
+            .first()
+            if getattr(row, "assigned_user_id", None)
+            else None
+        ),
+        "assigned_user_name": _get_org_user_display_name(assigned_user),
+        "assigned_by_id": getattr(row, "assigned_by_id", None),
+        "assigned_by_name": _get_org_user_display_name(assigned_by),
         "created_at": row.created_at.isoformat() if row.created_at else "",
         "updated_at": row.updated_at.isoformat() if row.updated_at else "",
         "whatsapp_url": _build_quick_estimate_whatsapp_url(row),
@@ -5060,8 +5134,32 @@ def _serialize_quick_estimate(row, include_preview=False):
         "items": [_serialize_quick_estimate_item(item) for item in row.items.all().order_by("id")],
     }
     if include_preview:
-        payload["thermal_preview_html"] = _render_quick_estimate_thermal_preview(row, row.organization)
+        payload["thermal_preview_html"] = _safe_render_quick_estimate_thermal_preview(row, row.organization)
     return payload
+
+
+def _serialize_quick_estimate_history(row):
+    snapshot = row.snapshot if isinstance(row.snapshot, dict) else {}
+    return {
+        "id": row.id,
+        "action": row.action,
+        "details": row.note or "",
+        "edit_by": _get_org_user_display_name(getattr(row, "actor", None)),
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+        "snapshot": snapshot,
+    }
+
+
+def _record_quick_estimate_history(estimate, *, action="updated", actor=None, note="", snapshot=None):
+    if not estimate:
+        return
+    QuickEstimateHistory.objects.create(
+        quick_estimate=estimate,
+        action=str(action or QuickEstimateHistory.ACTION_UPDATED).strip() or QuickEstimateHistory.ACTION_UPDATED,
+        actor=actor,
+        note=str(note or "").strip(),
+        snapshot=snapshot if isinstance(snapshot, dict) else {},
+    )
 
 
 def _to_decimal(value):
@@ -8726,15 +8824,39 @@ def _site_admin_quick_estimate_response(
         "estimate_number": estimate.estimate_number,
         "whatsapp_share_pending": bool(whatsapp_share_pending),
         "whatsapp_url": whatsapp_url,
-        "thermal_preview_html": _render_quick_estimate_thermal_preview(estimate, estimate.organization),
+        "thermal_preview_html": _safe_render_quick_estimate_thermal_preview(estimate, estimate.organization),
     }
 
 
-def _site_admin_update_quick_estimate_items(estimate, item_text, *, mobile="", client_name="", user=None):
+def _normalize_quick_estimate_progress_status(value: str) -> str:
+    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return QuickEstimate.PROGRESS_COMPLETED if normalized == QuickEstimate.PROGRESS_COMPLETED else QuickEstimate.PROGRESS_NON_COMPLETED
+
+
+def _site_admin_update_quick_estimate_items(
+    estimate,
+    item_text,
+    *,
+    mobile="",
+    client_name="",
+    payment_status="",
+    job_status="",
+    delivery_status="",
+    user=None,
+):
     item_entries, parsed_total = _site_admin_parse_item_entries(item_text)
     if not item_entries:
         return None
     amount = (parsed_total or Decimal("0.00")).quantize(Decimal("0.01"))
+    previous_snapshot = {
+        "mobile": estimate.mobile,
+        "client_name": estimate.client_name,
+        "payment_status": str(getattr(estimate, "payment_status", "") or ""),
+        "job_status": str(getattr(estimate, "job_status", "") or ""),
+        "delivery_status": str(getattr(estimate, "delivery_status", "") or ""),
+        "total_amount": _decimal_to_string(estimate.total_amount),
+        "items": [_serialize_quick_estimate_item(item) for item in estimate.items.all().order_by("id")],
+    }
     with transaction.atomic():
         estimate.items.all().delete()
         for entry in item_entries:
@@ -8767,7 +8889,40 @@ def _site_admin_update_quick_estimate_items(estimate, item_text, *, mobile="", c
         estimate.tax_amount = Decimal("0.00")
         estimate.total_amount = amount
         estimate.status = QuickEstimate.STATUS_CREATED
-        estimate.save(update_fields=["customer_id", "mobile", "client_name", "subtotal", "tax_amount", "total_amount", "status", "updated_at"])
+        estimate.payment_status = _normalize_quick_estimate_progress_status(payment_status or getattr(estimate, "payment_status", ""))
+        estimate.job_status = _normalize_quick_estimate_progress_status(job_status or getattr(estimate, "job_status", ""))
+        estimate.delivery_status = _normalize_quick_estimate_progress_status(delivery_status or getattr(estimate, "delivery_status", ""))
+        estimate.save(update_fields=[
+            "customer_id",
+            "mobile",
+            "client_name",
+            "subtotal",
+            "tax_amount",
+            "total_amount",
+            "status",
+            "payment_status",
+            "job_status",
+            "delivery_status",
+            "updated_at",
+        ])
+        _record_quick_estimate_history(
+            estimate,
+            action=QuickEstimateHistory.ACTION_UPDATED,
+            actor=user,
+            note=f"Estimate updated for {estimate.client_name}.",
+            snapshot={
+                "before": previous_snapshot,
+                "after": {
+                    "mobile": estimate.mobile,
+                    "client_name": estimate.client_name,
+                    "payment_status": estimate.payment_status,
+                    "job_status": estimate.job_status,
+                    "delivery_status": estimate.delivery_status,
+                    "total_amount": _decimal_to_string(estimate.total_amount),
+                    "items": [_serialize_quick_estimate_item_snapshot(entry) for entry in item_entries],
+                },
+            },
+        )
     return estimate
 
 
@@ -8951,14 +9106,14 @@ def site_admin_chat(request):
         })
 
     estimate = _site_admin_create_quick_estimate(org, request.user, collected)
-    state.intent = SiteAdminChatState.INTENT_QUICK_ESTIMATE
-    state.current_step = "share_whatsapp"
+    state.intent = ""
+    state.current_step = ""
     state.collected_data = {}
-    state.awaiting_whatsapp_share = True
+    state.awaiting_whatsapp_share = False
     state.last_quick_estimate = estimate
     state.save(update_fields=["intent", "current_step", "collected_data", "awaiting_whatsapp_share", "last_quick_estimate", "updated_at"])
-    reply = f"Quick Estimate {estimate.estimate_number} created for {estimate.client_name} - ₹{_format_quick_estimate_amount(estimate.total_amount)}.\n\nWould you like to share it on WhatsApp? Yes / No"
-    return JsonResponse(_site_admin_quick_estimate_response(estimate, reply))
+    reply = f"Quick Estimate {estimate.estimate_number} created for {estimate.client_name} - ₹{_format_quick_estimate_amount(estimate.total_amount)}."
+    return JsonResponse(_site_admin_quick_estimate_response(estimate, reply, whatsapp_share_pending=False))
 
 
 @require_http_methods(["GET", "POST", "PATCH", "DELETE"])
@@ -8983,7 +9138,13 @@ def quick_estimates(request, estimate_id: int = None):
         elif override_method in {"PATCH", "DELETE"}:
             resolved_method = override_method
 
-    qs = QuickEstimate.objects.filter(organization=org).prefetch_related("items").order_by("-created_at", "-id")
+    qs = (
+        QuickEstimate.objects
+        .filter(organization=org)
+        .select_related("organization__owner", "created_by", "assigned_user", "assigned_by")
+        .prefetch_related("items")
+        .order_by("-created_at", "-id")
+    )
     if resolved_method == "GET" and estimate_id is None:
         return JsonResponse({"quick_estimates": [_serialize_quick_estimate(row) for row in qs[:100]]})
 
@@ -9008,25 +9169,132 @@ def quick_estimates(request, estimate_id: int = None):
         except json.JSONDecodeError:
             return JsonResponse({"detail": "invalid_json"}, status=400)
 
+    patch_action = str(payload.get("action") or payload.get("__action") or "").strip().lower()
     if resolved_method == "DELETE":
-        estimate_number = row.estimate_number
-        SiteAdminChatState.objects.filter(organization=org, last_quick_estimate=row).update(
-            last_quick_estimate=None,
-            awaiting_whatsapp_share=False,
-            current_step="",
-            collected_data={},
-            updated_at=timezone.now(),
+        patch_action = "cancel"
+
+    if patch_action == "cancel":
+        reason = str(payload.get("reason") or payload.get("cancel_reason") or "").strip()
+        if not reason:
+            return JsonResponse({"detail": "cancel_reason_required", "message": "Please enter the cancel reason."}, status=400)
+        row.status = QuickEstimate.STATUS_CANCELLED
+        row.save(update_fields=["status", "updated_at"])
+        _record_quick_estimate_history(
+            row,
+            action=QuickEstimateHistory.ACTION_CANCELLED,
+            actor=request.user,
+            note=f"Estimate cancelled. Reason: {reason}",
+            snapshot={"reason": reason},
         )
-        row.delete()
+        row = (
+            QuickEstimate.objects
+            .filter(id=row.id)
+            .select_related("organization__owner", "created_by", "assigned_user", "assigned_by")
+            .prefetch_related("items")
+            .first()
+        ) or row
         return JsonResponse({
-            "reply": f"Quick Estimate {estimate_number} deleted.",
-            "action": "quick_estimate_deleted",
-            "quick_estimate_id": estimate_id,
-            "estimate_number": estimate_number,
-            "whatsapp_share_pending": False,
-            "whatsapp_url": None,
-            "thermal_preview_html": "",
+            "message": f"{row.estimate_number} cancelled.",
+            "quick_estimate": _serialize_quick_estimate(row, include_preview=True),
         })
+
+    if patch_action == "reopen":
+        row.status = QuickEstimate.STATUS_CREATED
+        row.save(update_fields=["status", "updated_at"])
+        _record_quick_estimate_history(
+            row,
+            action=QuickEstimateHistory.ACTION_REOPENED,
+            actor=request.user,
+            note="Estimate reopened.",
+            snapshot={},
+        )
+        row = (
+            QuickEstimate.objects
+            .filter(id=row.id)
+            .select_related("organization__owner", "created_by", "assigned_user", "assigned_by")
+            .prefetch_related("items")
+            .first()
+        ) or row
+        return JsonResponse({
+            "message": f"{row.estimate_number} reopened.",
+            "quick_estimate": _serialize_quick_estimate(row, include_preview=True),
+        })
+
+    if patch_action == "assign":
+        assigned_user_id = _coerce_positive_int(
+            payload.get("assigned_user_id") or payload.get("assignedUserId") or payload.get("user_id")
+        )
+        assigned_membership_id = _coerce_positive_int(
+            payload.get("membership_id") or payload.get("assigned_membership_id") or payload.get("assignedMembershipId")
+        )
+        if not assigned_user_id and not assigned_membership_id:
+            row.assigned_user = None
+            row.assigned_by = request.user
+            row.save(update_fields=["assigned_user", "assigned_by", "updated_at"])
+            row = (
+                QuickEstimate.objects
+                .filter(id=row.id)
+                .select_related("organization__owner", "created_by", "assigned_user", "assigned_by")
+                .prefetch_related("items")
+                .first()
+            ) or row
+            _record_quick_estimate_history(
+                row,
+                action=QuickEstimateHistory.ACTION_UNASSIGNED,
+                actor=request.user,
+                note="Assigned user removed.",
+                snapshot={},
+            )
+            return JsonResponse(
+                {
+                    "message": f"Assigned user removed from {row.estimate_number}.",
+                    "quick_estimate": _serialize_quick_estimate(row, include_preview=True),
+                }
+            )
+        membership_query = OrganizationUser.objects.filter(
+            organization=org,
+            role__in=ERP_EMPLOYEE_ROLES,
+            is_deleted=False,
+        ).select_related("user")
+        membership = None
+        if assigned_membership_id:
+            membership = membership_query.filter(id=assigned_membership_id).first()
+        if membership is None and assigned_user_id:
+            membership = membership_query.filter(user_id=assigned_user_id).first()
+        if not membership or _normalize_membership_status(membership) != OrganizationUser.STATUS_ACTIVE:
+            return JsonResponse({"detail": "assigned_user_not_found", "message": "Selected org user is not active."}, status=404)
+        created_by_was_empty = not row.created_by_id
+        if created_by_was_empty:
+            row.created_by = request.user
+        row.assigned_user = membership.user
+        row.assigned_by = request.user
+        update_fields = ["assigned_user", "assigned_by", "updated_at"]
+        if created_by_was_empty:
+            update_fields.append("created_by")
+        row.save(update_fields=update_fields)
+        row = (
+            QuickEstimate.objects
+            .filter(id=row.id)
+            .select_related("organization__owner", "created_by", "assigned_user", "assigned_by")
+            .prefetch_related("items")
+            .first()
+        ) or row
+        _record_quick_estimate_history(
+            row,
+            action=QuickEstimateHistory.ACTION_ASSIGNED,
+            actor=request.user,
+            note=f"Assigned to {_get_org_user_display_name(membership.user)}.",
+            snapshot={
+                "assigned_user_id": membership.user_id,
+                "assigned_user_name": _get_org_user_display_name(membership.user),
+            },
+        )
+        return JsonResponse(
+            {
+                "message": f"{row.estimate_number} assigned to {_get_org_user_display_name(membership.user)}.",
+                "quick_estimate": _serialize_quick_estimate(row, include_preview=True),
+            }
+        )
 
     raw_item_text = str(payload.get("item_text") or payload.get("message") or "").strip()
     item_text = "\n".join(line.rstrip() for line in raw_item_text.splitlines() if line.strip())
@@ -9034,6 +9302,9 @@ def quick_estimates(request, estimate_id: int = None):
         return JsonResponse({"detail": "item_text_required", "message": "Please share the estimate item details."}, status=400)
     next_mobile = _normalize_site_admin_mobile(payload.get("mobile") or row.mobile)
     next_client_name = str(payload.get("client_name") or payload.get("clientName") or row.client_name or "").strip()[:180]
+    next_payment_status = _normalize_quick_estimate_progress_status(payload.get("payment_status") or payload.get("paymentStatus") or row.payment_status)
+    next_job_status = _normalize_quick_estimate_progress_status(payload.get("job_status") or payload.get("jobStatus") or row.job_status)
+    next_delivery_status = _normalize_quick_estimate_progress_status(payload.get("delivery_status") or payload.get("deliveryStatus") or row.delivery_status)
     if len(next_mobile) != 10:
         return JsonResponse({"detail": "invalid_mobile", "message": "Please share a valid 10-digit mobile number."}, status=400)
     if not next_client_name:
@@ -9044,6 +9315,9 @@ def quick_estimates(request, estimate_id: int = None):
             item_text,
             mobile=next_mobile,
             client_name=next_client_name,
+            payment_status=next_payment_status,
+            job_status=next_job_status,
+            delivery_status=next_delivery_status,
             user=request.user,
         )
     except ValueError as exc:
@@ -9051,7 +9325,13 @@ def quick_estimates(request, estimate_id: int = None):
     if not updated:
         return JsonResponse({"detail": "invalid_item_text", "message": "Please share valid estimate item details."}, status=400)
     updated.refresh_from_db()
-    updated = QuickEstimate.objects.filter(organization=org, id=updated.id).prefetch_related("items").first() or updated
+    updated = (
+        QuickEstimate.objects
+        .filter(organization=org, id=updated.id)
+        .select_related("organization__owner", "created_by", "assigned_user", "assigned_by")
+        .prefetch_related("items")
+        .first()
+    ) or updated
     return JsonResponse(
         _site_admin_quick_estimate_response(
             updated,
@@ -9062,7 +9342,7 @@ def quick_estimates(request, estimate_id: int = None):
     )
 
 
-@require_http_methods(["GET", "PATCH"])
+@require_http_methods(["GET", "POST", "PATCH"])
 def quick_estimate_settings(request):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
@@ -9070,9 +9350,15 @@ def quick_estimate_settings(request):
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
+    resolved_method = request.method
+    if request.method == "POST":
+        override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
+        if override_method == "PATCH":
+            resolved_method = "PATCH"
+
     workspace = _get_accounts_workspace(org)
     data = _normalize_accounts_workspace(workspace.data)
-    if request.method == "GET":
+    if resolved_method == "GET":
         return JsonResponse({"settings": _get_quick_estimate_settings(org)})
 
     try:
@@ -9080,9 +9366,21 @@ def quick_estimate_settings(request):
     except json.JSONDecodeError:
         return JsonResponse({"detail": "invalid_json"}, status=400)
 
-    header_text = str(payload.get("headerText") or payload.get("header_text") or "").strip()[:QUICK_ESTIMATE_HEADER_TEXT_MAX_LENGTH]
+    header_text = _normalize_quick_estimate_header_html(payload.get("headerText") or payload.get("header_text"))
+    template_size = str(payload.get("templateSize") or payload.get("template_size") or "4in").strip().lower()
+    if template_size not in {"3in", "4in"}:
+        template_size = "4in"
+    if _quick_estimate_header_text_length(header_text) > QUICK_ESTIMATE_HEADER_TEXT_MAX_LENGTH:
+        return JsonResponse(
+            {
+                "detail": "header_text_too_long",
+                "message": f"Header text supports up to {QUICK_ESTIMATE_HEADER_TEXT_MAX_LENGTH} characters.",
+            },
+            status=400,
+        )
     data["quickEstimateSettings"] = {
         "headerText": header_text,
+        "templateSize": template_size,
     }
     workspace.data = data
     workspace.updated_by = request.user
@@ -9104,6 +9402,25 @@ def quick_estimate_thermal_preview(request, estimate_id: int):
     if not row:
         return JsonResponse({"detail": "quick_estimate_not_found"}, status=404)
     return HttpResponse(_render_quick_estimate_thermal_preview(row, org), content_type="text/html; charset=utf-8")
+
+
+@require_http_methods(["GET"])
+def quick_estimate_history(request, estimate_id: int):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+    estimate = QuickEstimate.objects.filter(organization=org, id=estimate_id).first()
+    if not estimate:
+        return JsonResponse({"detail": "quick_estimate_not_found"}, status=404)
+    rows = (
+        QuickEstimateHistory.objects
+        .filter(quick_estimate=estimate)
+        .select_related("actor")
+        .order_by("-created_at", "-id")
+    )
+    return JsonResponse({"history": [_serialize_quick_estimate_history(row) for row in rows[:100]]})
 
 
 @require_http_methods(["POST"])

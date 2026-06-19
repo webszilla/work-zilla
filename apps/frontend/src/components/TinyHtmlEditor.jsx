@@ -52,6 +52,7 @@ export default function TinyHtmlEditor({
   label,
   value,
   onChange,
+  beforeEditor = null,
   placeholder = "",
   minHeight = 320,
   maxWords = 120,
@@ -292,6 +293,7 @@ export default function TinyHtmlEditor({
   return (
     <div className="tiny-html-editor tiny-html-editor--simple">
       {label ? <label className="form-label" htmlFor={inputId}>{label}</label> : null}
+      {beforeEditor}
       <div className={`tiny-html-editor__frame ${isOverLimit ? "is-overlimit" : ""}`}>
         <div className="tiny-html-editor__toolbar" role="toolbar" aria-label={`${label || "HTML"} toolbar`}>
           <select className="tiny-html-editor__select" defaultValue="" onChange={(event) => {

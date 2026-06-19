@@ -180,11 +180,17 @@ class QuickEstimate(models.Model):
     STATUS_CREATED = "created"
     STATUS_SHARED = "shared"
     STATUS_CANCELLED = "cancelled"
+    PROGRESS_COMPLETED = "completed"
+    PROGRESS_NON_COMPLETED = "non_completed"
     STATUS_CHOICES = (
         (STATUS_DRAFT, "Draft"),
         (STATUS_CREATED, "Created"),
         (STATUS_SHARED, "Shared"),
         (STATUS_CANCELLED, "Cancelled"),
+    )
+    PROGRESS_CHOICES = (
+        (PROGRESS_COMPLETED, "Completed"),
+        (PROGRESS_NON_COMPLETED, "Non Completed"),
     )
 
     organization = models.ForeignKey(
@@ -204,12 +210,29 @@ class QuickEstimate(models.Model):
     tax_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_CREATED)
+    payment_status = models.CharField(max_length=20, choices=PROGRESS_CHOICES, default=PROGRESS_NON_COMPLETED)
+    job_status = models.CharField(max_length=20, choices=PROGRESS_CHOICES, default=PROGRESS_NON_COMPLETED)
+    delivery_status = models.CharField(max_length=20, choices=PROGRESS_CHOICES, default=PROGRESS_NON_COMPLETED)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="business_autopilot_quick_estimates_created",
+    )
+    assigned_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_quick_estimates_assigned",
+    )
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_quick_estimates_assignments_made",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -248,6 +271,44 @@ class QuickEstimateItem(models.Model):
 
     def __str__(self):
         return f"{self.quick_estimate_id}:{self.service_name or 'item'}"
+
+
+class QuickEstimateHistory(models.Model):
+    ACTION_UPDATED = "updated"
+    ACTION_ASSIGNED = "assigned"
+    ACTION_UNASSIGNED = "unassigned"
+    ACTION_CANCELLED = "cancelled"
+    ACTION_REOPENED = "reopened"
+    ACTION_CHOICES = (
+        (ACTION_UPDATED, "Updated"),
+        (ACTION_ASSIGNED, "Assigned"),
+        (ACTION_UNASSIGNED, "Unassigned"),
+        (ACTION_CANCELLED, "Cancelled"),
+        (ACTION_REOPENED, "Reopened"),
+    )
+
+    quick_estimate = models.ForeignKey(
+        QuickEstimate,
+        on_delete=models.CASCADE,
+        related_name="history_entries",
+    )
+    action = models.CharField(max_length=24, choices=ACTION_CHOICES, default=ACTION_UPDATED)
+    note = models.TextField(blank=True, default="")
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_quick_estimate_history_entries",
+    )
+    snapshot = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"{self.quick_estimate_id}:{self.action}:{self.created_at.isoformat() if self.created_at else ''}"
 
 
 class SiteAdminChatState(models.Model):

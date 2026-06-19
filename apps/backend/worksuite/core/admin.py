@@ -783,6 +783,17 @@ class PendingTransferAdmin(admin.ModelAdmin):
                 addon_delta = max(0, transfer.addon_count or 0)
                 sub.addon_count = (sub.addon_count or 0) + addon_delta
                 sub.addon_next_cycle_count = sub.addon_count
+                transfer_user_type_counts = transfer.user_type_counts if isinstance(transfer.user_type_counts, dict) else {}
+                if transfer_user_type_counts:
+                    current_counts = sub.user_type_next_cycle_counts or sub.user_type_counts or {}
+                    merged_counts = dict(current_counts)
+                    for key, value in transfer_user_type_counts.items():
+                        try:
+                            merged_counts[key] = max(0, int(merged_counts.get(key) or 0)) + max(0, int(value or 0))
+                        except (TypeError, ValueError):
+                            merged_counts[key] = max(0, int(merged_counts.get(key) or 0))
+                    sub.user_type_counts = merged_counts
+                    sub.user_type_next_cycle_counts = merged_counts
                 sub.addon_proration_amount = transfer.amount or 0
                 sub.addon_last_proration_at = transfer.updated_at or now
                 sub.save()

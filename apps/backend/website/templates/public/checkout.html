@@ -147,7 +147,7 @@
 			                  </div>
 			                  <div class="checkout-plan-card__billing-row checkout-plan-card__billing-row--card">
 			                    <label for="checkout-billing-cycle" class="checkout-plan-card__billing-label">Billing Cycle</label>
-			                    <select id="checkout-billing-cycle" name="billing" class="form-control checkout-plan-card__billing-control">
+			                    <select id="checkout-billing-cycle" name="billing" class="form-control checkout-plan-card__billing-control" {% if is_addon_checkout %}disabled{% endif %}>
 			                      <option value="monthly" {% if selected_billing == "monthly" %}selected{% endif %}>Monthly</option>
 			                      <option value="yearly" {% if selected_billing == "yearly" %}selected{% endif %}>Yearly</option>
 			                    </select>
@@ -161,7 +161,13 @@
 		                      <div class="checkout-card__header-icon" aria-hidden="true"><i class="bi bi-people"></i></div>
 		                      <div>
 	                        <h3 class="checkout-card__title">Business Autopilot User Types</h3>
-	                        <p class="checkout-card__subtitle">Select user types and seat counts for purchase or renewal.</p>
+	                        <p class="checkout-card__subtitle">
+                            {% if is_addon_checkout %}
+                              Increase CRM, HRM, or Full Access seats in the same checkout.
+                            {% else %}
+                              Select user types and seat counts for purchase or renewal.
+                            {% endif %}
+                          </p>
 	                      </div>
 	                    </div>
                         {% if selected_user_type_rows %}
@@ -190,15 +196,21 @@
                                     id="checkout-user-type-{{ row.key }}"
                                     class="form-control checkoutUserTypeCountInput ba-user-type-card__seat-input"
                                     type="number"
-                                    min="0"
+                                    min="{{ row.current_quantity|default:0 }}"
                                     step="1"
                                     name="user_type_count_{{ row.key }}"
                                     data-user-type="{{ row.key }}"
+                                    data-current-quantity="{{ row.current_quantity|default:0 }}"
                                     value="{{ row.quantity|default:0 }}"
                                   >
                                 </div>
+                                {% if is_addon_checkout %}
+                                  <div class="ba-user-type-card__current">
+                                    Current {{ row.current_quantity|default:0 }} · Adding <span class="ba-user-type-delta">{{ row.delta_quantity|default:0 }}</span>
+                                  </div>
+                                {% endif %}
                                 <div class="ba-user-type-card__line-total">
-                                  <span>Line total</span>
+                                  <span>{% if is_addon_checkout %}Payable now{% else %}Line total{% endif %}</span>
                                   <strong>{{ selected_currency|upper }} <span class="ba-user-type-line-total">0.00</span></strong>
                                 </div>
                               </div>
@@ -357,11 +369,11 @@
             {% endif %}
             {% if selected_plan.allow_addons %}
               <div class="d-flex justify-content-between mt-1">
-                <span class="text-secondary">{% if selected_product_slug == "business-autopilot-erp" or selected_product_slug == "business-autopilot" %}User Seats{% else %}Add-ons{% endif %}</span>
+                <span class="text-secondary">{% if selected_product_slug == "business-autopilot-erp" or selected_product_slug == "business-autopilot" %}{% if is_addon_checkout %}Additional User Seats{% else %}User Seats{% endif %}{% else %}Add-ons{% endif %}</span>
                 <strong>
                   <span id="checkoutAddonCount">{{ selected_addon_count|default:0 }}</span>
                   {% if is_business_autopilot_checkout %}
-                    seats
+                    {% if is_addon_checkout %}new seats{% else %}seats{% endif %}
                   {% else %}
                     × {{ selected_currency|upper }} <span id="checkoutAddonUnit">{{ selected_addon_price }}</span>
                   {% endif %}
@@ -372,7 +384,7 @@
               <div class="checkout-summary__user-types mt-2">
                 {% for row in selected_user_type_rows %}
                   <div class="d-flex justify-content-between small text-secondary checkout-user-type-summary-row" data-user-type="{{ row.key }}">
-                    <span>{{ row.label }} <span class="checkout-user-type-summary-count">{{ row.quantity|default:0 }}</span></span>
+                    <span>{{ row.label }} <span class="checkout-user-type-summary-count">{% if is_addon_checkout %}{{ row.delta_quantity|default:0 }}{% else %}{{ row.quantity|default:0 }}{% endif %}</span></span>
                     <strong>{{ selected_currency|upper }} <span class="checkout-user-type-summary-amount">0.00</span></strong>
                   </div>
                 {% endfor %}
@@ -418,6 +430,7 @@
               .ba-user-type-card__seat-input { flex:0 0 66.6667%; max-width:66.6667%; }
               .ba-user-type-card__modules { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
               .ba-user-type-card__modules span { padding:4px 8px; border-radius:999px; background:rgba(34,197,94,.10); color:#166534; font-size:12px; }
+              .ba-user-type-card__current { margin-top:8px; color:#64748b; font-size:12px; }
               .ba-user-type-card__line-total { display:flex; align-items:center; justify-content:space-between; margin-top:12px; padding-top:12px; border-top:1px dashed rgba(34,197,94,.18); color:#475569; font-size:13px; }
               .checkout-summary__user-types { display:grid; gap:4px; }
               @media (max-width: 1200px) {
@@ -499,29 +512,34 @@
                     addonCount = 0;
                     addonUnit = 0;
                     userTypeInputs.forEach(function (input) {
-                      var count = clampInt(input.value);
+                      var currentCount = clampInt(input.getAttribute("data-current-quantity"));
+                      var count = Math.max(currentCount, clampInt(input.value));
+                      var deltaCount = Math.max(0, count - currentCount);
                       if (String(input.value || "") !== String(count)) {
                         input.value = String(count);
                       }
-                      addonCount += count;
+                      var billableCount = currentCount > 0 ? deltaCount : count;
+                      addonCount += billableCount;
                       var card = input.closest(".ba-user-type-card");
                       var priceNode = card ? card.querySelector(".ba-user-type-unit-price") : null;
                       var lineTotalNode = card ? card.querySelector(".ba-user-type-line-total") : null;
+                      var deltaNode = card ? card.querySelector(".ba-user-type-delta") : null;
                       if (priceNode) {
                         var priceValue = billingSelect.value === "yearly"
                           ? num(priceNode.getAttribute("data-yearly"))
                           : num(priceNode.getAttribute("data-monthly"));
                         priceNode.textContent = String(priceValue);
-                        var lineTotal = priceValue * count;
+                        var lineTotal = priceValue * billableCount;
                         if (lineTotalNode) {
                           lineTotalNode.textContent = formatAmount(lineTotal);
                         }
+                        if (deltaNode) deltaNode.textContent = String(deltaCount);
                         addonUnit += lineTotal;
                         var summaryRow = summary.querySelector('.checkout-user-type-summary-row[data-user-type="' + input.getAttribute("data-user-type") + '"]');
                         if (summaryRow) {
                           var countNode = summaryRow.querySelector(".checkout-user-type-summary-count");
                           var amountNode = summaryRow.querySelector(".checkout-user-type-summary-amount");
-                          if (countNode) countNode.textContent = String(count);
+                          if (countNode) countNode.textContent = String(billableCount);
                           if (amountNode) amountNode.textContent = formatAmount(lineTotal);
                         }
                       }

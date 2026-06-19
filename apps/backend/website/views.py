@@ -1553,6 +1553,22 @@ def _ba_user_type_price_total(plan, counts, currency="inr", billing="monthly"):
     return round(sum(float(row.get("line_total") or 0) for row in rows), 2)
 
 
+def _ba_user_type_delta_counts(target_counts, current_counts, plan=None):
+    target = _normalize_ba_user_type_counts(target_counts, plan=plan)
+    current = _normalize_ba_user_type_counts(current_counts, plan=plan)
+    return {
+        key: max(0, int(target.get(key) or 0) - int(current.get(key) or 0))
+        for key in target.keys()
+    }
+
+
+def _subscription_next_cycle_user_type_counts(subscription, plan=None):
+    if not subscription:
+        return _normalize_ba_user_type_counts({}, plan=plan)
+    source = getattr(subscription, "user_type_next_cycle_counts", None) or getattr(subscription, "user_type_counts", None) or {}
+    return _normalize_ba_user_type_counts(source, plan=plan or getattr(subscription, "plan", None))
+
+
 def pricing_view(request):
     context = _base_context(request)
     try:
@@ -1735,6 +1751,8 @@ def checkout_select(request):
     product_slug = _normalize_product_slug(request.POST.get("product_slug"))
     currency = (request.POST.get("currency") or "inr").lower()
     billing = (request.POST.get("billing") or "monthly").lower()
+    checkout_mode = (request.POST.get("checkout_mode") or request.POST.get("mode") or "new").strip().lower()
+    checkout_mode = "addon" if checkout_mode == "addon" else "new"
     try:
         addon_count = int(request.POST.get("addon_count") or 0)
     except (TypeError, ValueError):
@@ -1758,6 +1776,7 @@ def checkout_select(request):
     request.session["selected_billing"] = billing
     request.session["selected_addon_count"] = addon_count
     request.session["selected_user_type_counts"] = user_type_counts
+    request.session["selected_checkout_mode"] = checkout_mode
 
     if not request.user.is_authenticated:
         return redirect("/auth/signup/?next=/checkout/")
@@ -1781,7 +1800,7 @@ def checkout_select(request):
             .order_by("-start_date", "-id")
             .first()
         )
-        if active_sub and active_sub.plan_id == selected_plan_id:
+        if checkout_mode != "addon" and active_sub and active_sub.plan_id == selected_plan_id:
             messages.info(request, "You already have this plan active. Please choose a different plan.")
             return redirect(f"/pricing/?product={product_slug}")
     return redirect("/checkout/")
@@ -1801,6 +1820,8 @@ def subscription_checkout_select(request):
     product_slug = _normalize_product_slug(payload.get("product_slug") or payload.get("product"))
     currency = (payload.get("currency") or "inr").lower()
     billing = (payload.get("billing") or "monthly").lower()
+    checkout_mode = (payload.get("checkout_mode") or payload.get("mode") or "new").strip().lower()
+    checkout_mode = "addon" if checkout_mode == "addon" else "new"
     try:
         addon_count = int(payload.get("addon_count") or 0)
     except (TypeError, ValueError):
@@ -1824,6 +1845,7 @@ def subscription_checkout_select(request):
     request.session["selected_billing"] = billing
     request.session["selected_addon_count"] = addon_count
     request.session["selected_user_type_counts"] = user_type_counts
+    request.session["selected_checkout_mode"] = checkout_mode
     request.session.modified = True
 
     org = _resolve_org_for_user(request.user)
@@ -1845,7 +1867,7 @@ def subscription_checkout_select(request):
             .order_by("-start_date", "-id")
             .first()
         )
-        if active_sub and active_sub.plan_id == selected_plan_id:
+        if checkout_mode != "addon" and active_sub and active_sub.plan_id == selected_plan_id:
             return JsonResponse({
                 "detail": "already_active",
                 "message": "You already have this plan active. Please choose a different plan.",
@@ -1872,6 +1894,8 @@ def checkout_view(request):
     product_slug = _normalize_product_slug(request.session.get("selected_product_slug"))
     currency = request.session.get("selected_currency") or "inr"
     billing = request.session.get("selected_billing") or "monthly"
+    checkout_mode = (request.session.get("selected_checkout_mode") or "new").strip().lower()
+    is_addon_checkout = checkout_mode == "addon"
     try:
         addon_count = int(request.session.get("selected_addon_count") or 0)
     except (TypeError, ValueError):
@@ -1914,6 +1938,7 @@ def checkout_view(request):
     base_amount = base_amount_monthly if billing == "monthly" else base_amount_yearly
     addon_unit_price = addon_unit_price_monthly if billing == "monthly" else addon_unit_price_yearly
     org = _resolve_org_for_user(request.user)
+    active_addon_sub = _active_subscription_for_product(org, product_slug) if is_addon_checkout else None
 
     # Backend validation: prevent purchasing same active plan again.
     try:
@@ -1933,9 +1958,12 @@ def checkout_view(request):
             .order_by("-start_date", "-id")
             .first()
         )
-        if active_sub and active_sub.plan_id == selected_plan_id:
+        if not is_addon_checkout and active_sub and active_sub.plan_id == selected_plan_id:
             messages.info(request, "You already have this plan active. Please choose a different plan.")
             return redirect(f"/pricing/?product={product_slug}")
+    if is_addon_checkout and (not active_addon_sub or active_addon_sub.plan_id != selected_plan_id):
+        messages.error(request, "Active subscription is required before buying add-on seats.")
+        return redirect("/my-account/")
 
     # Renewal-friendly default: if org already has this plan, prefill current scheduled add-ons
     # when the checkout selection has 0 add-ons. This makes renew checkout reflect existing seats.
@@ -1986,17 +2014,54 @@ def checkout_view(request):
     existing_addon_count = int(renewal_guard.get("existing_addon_count") or 0)
     if getattr(plan, "allow_addons", False) and min_addon_count > addon_count:
         addon_count = min_addon_count
+    addon_current_user_type_counts = {}
+    addon_delta_user_type_counts = {}
     if is_business_autopilot_checkout:
+        if is_addon_checkout and active_addon_sub:
+            addon_current_user_type_counts = _subscription_next_cycle_user_type_counts(active_addon_sub, plan=plan)
+            normalized_target = _normalize_ba_user_type_counts(user_type_counts, plan=plan)
+            for key, current_value in addon_current_user_type_counts.items():
+                if int(normalized_target.get(key) or 0) < int(current_value or 0):
+                    normalized_target[key] = int(current_value or 0)
+            user_type_counts = normalized_target
+            request.session["selected_user_type_counts"] = user_type_counts
+            addon_delta_user_type_counts = _ba_user_type_delta_counts(user_type_counts, addon_current_user_type_counts, plan=plan)
         user_type_rows = _ba_user_type_rows_for_checkout(plan, user_type_counts, currency=currency, billing=billing)
         if not user_type_rows:
             user_type_rows = _ba_user_type_rows_for_checkout(plan, {}, currency=currency, billing=billing)
+        if is_addon_checkout and active_addon_sub:
+            preview = _ba_user_type_proration_preview(active_addon_sub, user_type_counts, currency=currency)
+            prorated_by_key = {row["key"]: row for row in preview.get("rows", [])}
+            for row in user_type_rows:
+                current_value = int(addon_current_user_type_counts.get(row["key"]) or 0)
+                delta_value = int(addon_delta_user_type_counts.get(row["key"]) or 0)
+                prorated_row = prorated_by_key.get(row["key"], {})
+                row["current_quantity"] = current_value
+                row["delta_quantity"] = delta_value
+                row["unit_price"] = float(prorated_row.get("unit_price") or 0)
+                row["line_total"] = float(prorated_row.get("line_total") or 0)
+                row["monthly_price_inr"] = row["yearly_price_inr"] = row["unit_price"]
+                row["monthly_price_usd"] = row["yearly_price_usd"] = row["unit_price"]
+            addon_count = _ba_user_type_total_count(addon_delta_user_type_counts)
+            base_amount = base_amount_monthly = base_amount_yearly = 0.0
+            subtotal_amount = float(preview.get("amount") or 0)
+        else:
+            subtotal_amount = base_amount + _ba_user_type_price_total(plan, user_type_counts, currency=currency, billing=billing)
         addon_unit_price_monthly = 0.0
         addon_unit_price_yearly = 0.0
         addon_unit_price = 0.0
-        subtotal_amount = base_amount + _ba_user_type_price_total(plan, user_type_counts, currency=currency, billing=billing)
     else:
         user_type_rows = []
-        subtotal_amount = base_amount + (addon_unit_price * addon_count)
+        if is_addon_checkout and active_addon_sub:
+            current_addons = _subscription_next_cycle_addon_count(active_addon_sub)
+            addon_delta = max(0, addon_count - current_addons)
+            preview = _addon_proration_preview(active_addon_sub, currency=currency, addon_delta=addon_delta)
+            addon_count = addon_delta
+            base_amount = base_amount_monthly = base_amount_yearly = 0.0
+            addon_unit_price = addon_unit_price_monthly = addon_unit_price_yearly = float(preview.get("prorated_unit_price") or 0)
+            subtotal_amount = float(preview.get("amount") or 0)
+        else:
+            subtotal_amount = base_amount + (addon_unit_price * addon_count)
     profile = BillingProfile.objects.filter(organization=org).first()
     user_profile = UserProfile.objects.filter(user=request.user).first()
     seller = InvoiceSellerProfile.objects.order_by("-updated_at").first()
@@ -2029,8 +2094,11 @@ def checkout_view(request):
         "selected_billing": billing,
         "selected_plan": plan,
         "is_business_autopilot_checkout": is_business_autopilot_checkout,
+        "is_addon_checkout": is_addon_checkout,
         "selected_addon_count": addon_count,
         "selected_user_type_counts": user_type_counts,
+        "addon_current_user_type_counts": addon_current_user_type_counts,
+        "addon_delta_user_type_counts": addon_delta_user_type_counts,
         "selected_user_type_rows": user_type_rows,
         "min_addon_count": min_addon_count,
         "existing_total_users": existing_total_users,
@@ -2129,6 +2197,8 @@ def _active_subscription_for_product(org, product_slug):
     qs = Subscription.objects.filter(organization=org, status__in=("active", "trialing")).select_related("plan", "plan__product")
     if product_slug == "monitor":
         qs = qs.filter(Q(plan__product__slug="monitor") | Q(plan__product__isnull=True))
+    elif _is_business_autopilot_alias(product_slug):
+        qs = qs.filter(plan__product__slug__in=["business-autopilot", "business-autopilot-erp"])
     else:
         qs = qs.filter(plan__product__slug=product_slug)
     return qs.order_by("-start_date", "-id").first()
@@ -2301,6 +2371,46 @@ def _addon_proration_preview(subscription, currency="inr", now=None, addon_delta
         "start_at": start_at,
         "end_at": end_at,
         "description": description,
+    }
+
+
+def _ba_user_type_proration_preview(subscription, target_counts, currency="inr", now=None):
+    now = now or timezone.now()
+    plan = getattr(subscription, "plan", None)
+    current_counts = _subscription_next_cycle_user_type_counts(subscription, plan=plan)
+    delta_counts = _ba_user_type_delta_counts(target_counts, current_counts, plan=plan)
+    billing_cycle = (getattr(subscription, "billing_cycle", None) or "monthly").lower()
+    cycle_days = 365 if billing_cycle == "yearly" else 30
+    end_at = subscription.end_date if subscription and subscription.end_date and subscription.end_date > now else (now + timedelta(days=cycle_days))
+    remaining_seconds = max(0, (end_at - now).total_seconds())
+    cycle_seconds = max(1, cycle_days * 24 * 60 * 60)
+    ratio = Decimal(str(remaining_seconds / cycle_seconds))
+    rows = []
+    total = Decimal("0.00")
+    for row in _plan_ba_user_types(plan):
+        key = row["key"]
+        delta = max(0, int(delta_counts.get(key) or 0))
+        raw_unit = Decimal(str(row[f"{billing_cycle}_price_{'usd' if str(currency).lower() == 'usd' else 'inr'}"] or 0))
+        prorated_unit = (raw_unit * ratio).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        line_total = (prorated_unit * Decimal(delta)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        total += line_total
+        rows.append({
+            "key": key,
+            "unit_price": float(prorated_unit),
+            "line_total": float(line_total),
+            "delta": delta,
+        })
+    remaining_days = max(0, int((end_at.date() - now.date()).days))
+    return {
+        "amount": total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        "rows": rows,
+        "delta_counts": delta_counts,
+        "current_counts": current_counts,
+        "remaining_days": remaining_days,
+        "cycle_days": cycle_days,
+        "start_at": now,
+        "end_at": end_at,
+        "description": f"Business Autopilot add-on seats prorated for {remaining_days} day{'s' if remaining_days != 1 else ''}.",
     }
 
 
@@ -2696,6 +2806,8 @@ def checkout_confirm(request):
     plan_id = request.session.get("selected_plan_id")
     product_slug = _normalize_product_slug(request.session.get("selected_product_slug"))
     currency = request.session.get("selected_currency") or "inr"
+    checkout_mode = (request.session.get("selected_checkout_mode") or "new").strip().lower()
+    is_addon_checkout = checkout_mode == "addon"
     billing = (request.POST.get("billing") or request.session.get("selected_billing") or "monthly").strip().lower()
     billing = billing if billing in ("monthly", "yearly") else "monthly"
     request.session["selected_billing"] = billing
@@ -2737,15 +2849,17 @@ def checkout_confirm(request):
         request.session["selected_user_type_counts"] = user_type_counts
 
     org = _resolve_org_for_user(request.user)
-    renewal_guard = _required_addons_for_renewal(org, product_slug, plan)
-    min_addon_count = int(renewal_guard.get("required_addon_count") or 0)
-    if getattr(plan, "allow_addons", False) and min_addon_count > addon_count:
-        addon_count = min_addon_count
+    if not is_addon_checkout:
+        renewal_guard = _required_addons_for_renewal(org, product_slug, plan)
+        min_addon_count = int(renewal_guard.get("required_addon_count") or 0)
+        if getattr(plan, "allow_addons", False) and min_addon_count > addon_count:
+            addon_count = min_addon_count
     plan_product_slug = _normalize_product_slug(plan.product.slug if plan and plan.product else "", default="")
+    pending_types = ("addon",) if is_addon_checkout else ("new", "renew")
     pending_transfers = PendingTransfer.objects.filter(
         organization=org,
         status="pending",
-        request_type__in=("new", "renew"),
+        request_type__in=pending_types,
     )
     if plan_product_slug == "monitor":
         pending_transfers = pending_transfers.filter(
@@ -2757,7 +2871,7 @@ def checkout_confirm(request):
     if existing_pending:
         messages.info(
             request,
-            "This plan payment is already pending approval. Please wait for admin approval or create a ticket in My Account.",
+            "This payment is already pending approval. Please wait for admin approval or create a ticket in My Account.",
         )
         return redirect(f"/my-account/bank-transfer/{existing_pending.id}/")
 
@@ -2789,6 +2903,77 @@ def checkout_confirm(request):
     if not getattr(receipt, "content_type", "").startswith("image/"):
         messages.error(request, "Receipt must be an image file.")
         return redirect("/checkout/")
+
+    if is_addon_checkout:
+        active_sub = _active_subscription_for_product(org, product_slug)
+        if not active_sub or active_sub.plan_id != plan.id:
+            messages.error(request, "Active subscription is required before buying add-on seats.")
+            return redirect("/my-account/")
+        if _is_business_autopilot_alias(product_slug):
+            current_counts = _subscription_next_cycle_user_type_counts(active_sub, plan=plan)
+            for key, current_value in current_counts.items():
+                if int(user_type_counts.get(key) or 0) < int(current_value or 0):
+                    user_type_counts[key] = int(current_value or 0)
+            delta_counts = _ba_user_type_delta_counts(user_type_counts, current_counts, plan=plan)
+            addon_count = _ba_user_type_total_count(delta_counts)
+            preview = _ba_user_type_proration_preview(active_sub, user_type_counts, currency=currency)
+            amount = preview["amount"]
+            transfer_user_type_counts = delta_counts
+            notes_prefix = (
+                f"{preview['description']} Current seats: {current_counts}. "
+                f"Requested total seats after approval: {user_type_counts}."
+            )
+        else:
+            current_addons = _subscription_next_cycle_addon_count(active_sub)
+            addon_delta = max(0, addon_count - current_addons)
+            addon_count = addon_delta
+            preview = _addon_proration_preview(active_sub, currency=currency, addon_delta=addon_delta)
+            amount = preview["amount"]
+            transfer_user_type_counts = {}
+            notes_prefix = (
+                f"{preview['description']} Current add-ons: {current_addons}. "
+                f"Requested additional add-ons: {addon_delta}."
+            )
+        if addon_count <= 0:
+            messages.info(request, "No additional add-on seats selected.")
+            return redirect("/checkout/")
+        seller_profile = InvoiceSellerProfile.objects.order_by("-updated_at").first()
+        _, _, amount, _ = _apply_invoice_tax(
+            float(amount or 0),
+            currency.upper(),
+            buyer_profile=profile,
+            seller_profile=seller_profile,
+        )
+        with transaction.atomic():
+            PendingTransfer.objects.create(
+                organization=org,
+                user=request.user,
+                plan=plan,
+                request_type="addon",
+                billing_cycle=active_sub.billing_cycle or billing,
+                retention_days=active_sub.retention_days or (plan.retention_days or 30),
+                addon_count=addon_count,
+                user_type_counts=transfer_user_type_counts if _is_business_autopilot_alias(product_slug) else {},
+                currency=currency.upper(),
+                amount=float(amount or 0),
+                status="pending",
+                reference_no=utr_number,
+                paid_on=paid_on,
+                receipt=receipt,
+                notes=f"{notes_prefix} {notes}".strip(),
+            )
+        for key in (
+            "selected_product_slug",
+            "selected_plan_id",
+            "selected_currency",
+            "selected_billing",
+            "selected_addon_count",
+            "selected_user_type_counts",
+            "selected_checkout_mode",
+        ):
+            request.session.pop(key, None)
+        messages.success(request, "Add-on payment request submitted. We will update your seats after approval.")
+        return redirect("/my-account/")
 
     with transaction.atomic():
         subscription = Subscription.objects.create(
@@ -2846,6 +3031,7 @@ def checkout_confirm(request):
         "selected_billing",
         "selected_addon_count",
         "selected_user_type_counts",
+        "selected_checkout_mode",
     ):
         request.session.pop(key, None)
 
@@ -3282,6 +3468,18 @@ def billing_addons_manage(request):
     if not sub.plan.allow_addons:
         messages.info(request, "Add-on users are not available for this plan.")
         return redirect("/my-account/")
+
+    if _is_business_autopilot_alias(product_slug):
+        current_counts = _subscription_next_cycle_user_type_counts(sub, plan=sub.plan)
+        request.session["selected_product_slug"] = product_slug
+        request.session["selected_plan_id"] = sub.plan_id
+        request.session["selected_currency"] = ((request.GET.get("currency") or request.POST.get("currency") or "inr").strip().lower())
+        request.session["selected_billing"] = (sub.billing_cycle or "monthly").lower()
+        request.session["selected_addon_count"] = _ba_user_type_total_count(current_counts)
+        request.session["selected_user_type_counts"] = current_counts
+        request.session["selected_checkout_mode"] = "addon"
+        request.session.modified = True
+        return redirect("/checkout/")
 
     now = timezone.now()
     current_addons = int(sub.addon_count or 0)

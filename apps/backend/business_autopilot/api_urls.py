@@ -111,4 +111,14 @@ urlpatterns = [
         api_views.quick_estimate_thermal_preview,
         name="business_autopilot_quick_estimate_thermal_preview_slash",
     ),
+    path(
+        "quick-estimates/<int:estimate_id>/history",
+        api_views.quick_estimate_history,
+        name="business_autopilot_quick_estimate_history",
+    ),
+    path(
+        "quick-estimates/<int:estimate_id>/history/",
+        api_views.quick_estimate_history,
+        name="business_autopilot_quick_estimate_history_slash",
+    ),
 ]
