@@ -75,6 +75,7 @@ import AiChatbotHistoryPage from "./pages/AiChatbotHistoryPage.jsx";
 import AiChatbotChatSettingsPage from "./pages/AiChatbotChatSettingsPage.jsx";
 import BusinessAutopilotAssistantPage from "./pages/BusinessAutopilotAssistantPage.jsx";
 import BusinessAutopilotSiteAdminPage from "./pages/BusinessAutopilotSiteAdminPage.jsx";
+import BusinessAutopilotSiteAdminDataViewPage from "./pages/BusinessAutopilotSiteAdminDataViewPage.jsx";
 import WhatsappAutomationCompanyProfilePage from "./pages/WhatsappAutomationCompanyProfilePage.jsx";
 import WhatsappAutomationDashboardPage from "./pages/WhatsappAutomationDashboardPage.jsx";
 import WhatsappAutomationOverviewPage from "./pages/WhatsappAutomationOverviewPage.jsx";
@@ -1620,6 +1621,25 @@ function AppShell({ state, productPrefix, productSlug }) {
             path="/site-admin"
             element={renderRouteElement(
               <BusinessAutopilotSiteAdminPage />,
+              {
+                pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
+                allowed:
+                  isBusinessAutopilot &&
+                  businessAutopilotHasActiveSubscription &&
+                  (
+                    hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "dashboard", businessAutopilotIsAdmin)
+                    || hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "crm", businessAutopilotIsAdmin)
+                    || hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "hr", businessAutopilotIsAdmin)
+                    || hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "accounts", businessAutopilotIsAdmin)
+                    || hasBusinessAutopilotSectionAccess(autopilotAccessRecord, "billing", businessAutopilotIsAdmin)
+                  ),
+              }
+            )}
+          />
+          <Route
+            path="/site-admin/data-view"
+            element={renderRouteElement(
+              <BusinessAutopilotSiteAdminDataViewPage />,
               {
                 pending: isBusinessAutopilot && (!autopilotModulesResolved || !autopilotAccessResolved),
                 allowed:

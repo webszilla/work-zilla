@@ -5,7 +5,7 @@ function SiteAdminHeaderTabs() {
   const location = useLocation();
   const pathname = String(location.pathname || "");
   const isAssistantActive = pathname === "/assistant" || pathname.endsWith("/business-autopilot/assistant");
-  const isSiteAdminActive = pathname === "/site-admin" || pathname.endsWith("/business-autopilot/site-admin");
+  const isSiteAdminActive = pathname.includes("/site-admin");
 
   return (
     <div className="ba-assistant-page-tabs__bar">

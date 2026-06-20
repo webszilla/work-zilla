@@ -1,6 +1,7 @@
 import calendar
 import base64
 import binascii
+import hashlib
 import json
 import logging
 import math
@@ -18,6 +19,7 @@ from django.http import HttpResponse, JsonResponse, FileResponse
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.views.decorators.http import require_http_methods
 from django.db import DatabaseError, IntegrityError, OperationalError, transaction
 from django.db.models import Q, Min, Max
@@ -27,7 +29,7 @@ from django.utils.html import strip_tags
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_time
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
+from reportlab.lib.units import inch, mm
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -142,7 +144,7 @@ BUSINESS_AUTOPILOT_USER_TYPE_MAP = {
 
 ERP_EMPLOYEE_ROLES = {"company_admin", "org_user", "hr_view"}
 DELETE_PROTECTED_PROFILE_ROLES = {"org_admin", "owner", "superadmin", "super_admin"}
-ACCOUNTS_ALLOWED_ROOT_KEYS = {"customers", "vendors", "itemMasters", "gstTemplates", "billingTemplates", "estimates", "invoices"}
+ACCOUNTS_ALLOWED_ROOT_KEYS = {"customers", "vendors", "itemMasters", "gstTemplates", "billingTemplates", "estimates", "invoices", "quickEstimateContacts"}
 QUICK_ESTIMATE_HEADER_TEXT_MAX_LENGTH = 200
 ERP_MODULE_SLUG_SET = set(MODULE_PATHS.keys())
 BUSINESS_AUTOPILOT_PRODUCT_SLUG = "business-autopilot-erp"
@@ -4237,6 +4239,7 @@ def _default_accounts_workspace():
         "billingTemplates": [],
         "estimates": [],
         "invoices": [],
+        "quickEstimateContacts": [],
         "quickEstimateSettings": {
             "headerText": "",
             "templateSize": "4in",
@@ -4969,6 +4972,54 @@ def _site_admin_update_customer_for_estimate(org, user, estimate, *, mobile="", 
     return existing_row
 
 
+def _get_quick_estimate_contact_store(data):
+    rows = data.get("quickEstimateContacts")
+    return rows if isinstance(rows, list) else []
+
+
+def _upsert_quick_estimate_contact(
+    org,
+    user,
+    *,
+    contact_id="",
+    mobile="",
+    client_name="",
+    email="",
+    address="",
+    gst_number="",
+):
+    workspace = _get_accounts_workspace(org)
+    data = _normalize_accounts_workspace(workspace.data)
+    contacts = _get_quick_estimate_contact_store(data)
+    normalized_mobile = _normalize_site_admin_mobile(mobile)
+    normalized_name = str(client_name or "").strip()[:180]
+    normalized_email = _normalize_site_admin_email(email)
+    normalized_address = str(address or "").strip()[:500]
+    normalized_gst = str(gst_number or "").strip()[:32]
+    target_id = str(contact_id or "").strip()
+    row = None
+    if target_id:
+        row = next((item for item in contacts if isinstance(item, dict) and str(item.get("id") or "").strip() == target_id), None)
+    if row is None and normalized_mobile:
+        row = next((item for item in contacts if isinstance(item, dict) and _normalize_site_admin_mobile(item.get("phone")) == normalized_mobile), None)
+    if row is None:
+        target_id = target_id or f"qe_contact_{secrets.token_hex(6)}"
+        row = {"id": target_id, "createdAt": timezone.now().isoformat()}
+        contacts.append(row)
+    row["id"] = target_id or str(row.get("id") or "").strip()
+    row["clientName"] = normalized_name
+    row["phone"] = normalized_mobile
+    row["email"] = normalized_email
+    row["address"] = normalized_address
+    row["gstin"] = normalized_gst
+    row["updatedAt"] = timezone.now().isoformat()
+    data["quickEstimateContacts"] = contacts
+    workspace.data = data
+    workspace.updated_by = user
+    workspace.save(update_fields=["data", "updated_by", "updated_at"])
+    return row
+
+
 def _next_quick_estimate_number(org):
     with transaction.atomic():
         sequence, _ = QuickEstimateSequence.objects.select_for_update().get_or_create(
@@ -5015,6 +5066,7 @@ def _serialize_quick_estimate_item_snapshot(entry):
 
 
 def _build_quick_estimate_whatsapp_url(row):
+    public_preview_url = _build_quick_estimate_public_preview_url(row)
     items = list(row.items.all().order_by("id"))
     item_lines = []
     for index, item in enumerate(items, start=1):
@@ -5038,9 +5090,67 @@ def _build_quick_estimate_whatsapp_url(row):
         "",
         f"Total: Rs.{_format_quick_estimate_amount(row.total_amount)}",
         "",
+        f"Preview: {public_preview_url}",
+        "",
         "Thank you.",
     ])
     return f"https://wa.me/91{row.mobile}?text={quote(message)}"
+
+
+def _get_public_site_base_url():
+    configured = str(getattr(settings, "SITE_BASE_URL", "") or "").strip()
+    if configured:
+        return configured.rstrip("/")
+    return "https://getworkzilla.com"
+
+
+def _base36_encode(value: int) -> str:
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    value = int(value or 0)
+    if value <= 0:
+        return "0"
+    encoded = ""
+    while value:
+        value, remainder = divmod(value, 36)
+        encoded = digits[remainder] + encoded
+    return encoded
+
+
+def _base36_decode(value: str) -> int:
+    return int(str(value or "0").strip().lower(), 36)
+
+
+def _build_quick_estimate_public_token(row) -> str:
+    estimate_id = int(getattr(row, "id", 0) or 0)
+    org_id = int(getattr(row, "organization_id", 0) or 0)
+    id_part = _base36_encode(estimate_id)
+    checksum_source = f"{estimate_id}:{org_id}:{settings.SECRET_KEY}".encode("utf-8")
+    checksum = hashlib.sha256(checksum_source).hexdigest()[:8].lower()
+    return f"qe{id_part}{checksum}"
+
+
+def _resolve_quick_estimate_public_token(token: str) -> Optional[int]:
+    raw = str(token or "").strip().lower()
+    if not raw.startswith("qe") or len(raw) <= 10:
+        return None
+    id_part = raw[2:-8]
+    checksum = raw[-8:]
+    if not id_part:
+        return None
+    try:
+        estimate_id = _base36_decode(id_part)
+    except ValueError:
+        return None
+    row = QuickEstimate.objects.filter(id=estimate_id).only("id", "organization_id").first()
+    if not row:
+        return None
+    expected = _build_quick_estimate_public_token(row)
+    return estimate_id if expected == raw else None
+
+
+def _build_quick_estimate_public_preview_url(row):
+    token = _build_quick_estimate_public_token(row)
+    return f"{_get_public_site_base_url()}/api/business-autopilot/qe/{token}/"
 
 
 def _get_quick_estimate_settings(org):
@@ -5051,10 +5161,29 @@ def _get_quick_estimate_settings(org):
     template_size = str(settings_data.get("templateSize") or "4in").strip().lower()
     if template_size not in {"3in", "4in"}:
         template_size = "4in"
+    retention_days = str(settings_data.get("paymentProofRetentionDays") or "45").strip()
+    if retention_days not in {"45", "60"}:
+        retention_days = "45"
     return {
         "headerText": header_text,
         "templateSize": template_size,
+        "paymentProofRetentionDays": retention_days,
     }
+
+
+def _purge_expired_quick_estimate_payment_proof(row):
+    if not row or not getattr(row, "pk", None) or not str(getattr(row, "payment_proof_image", "") or "").strip():
+        return row
+    settings_data = _get_quick_estimate_settings(getattr(row, "organization", None))
+    retention_days = int(str(settings_data.get("paymentProofRetentionDays") or "45").strip() or "45")
+    updated_at = getattr(row, "updated_at", None) or getattr(row, "created_at", None)
+    if not updated_at:
+        return row
+    if timezone.now() < updated_at + timedelta(days=retention_days):
+        return row
+    row.payment_proof_image = ""
+    row.save(update_fields=["payment_proof_image", "updated_at"])
+    return row
 
 
 def _render_quick_estimate_thermal_preview(row, org):
@@ -5083,6 +5212,244 @@ def _render_quick_estimate_thermal_preview(row, org):
     )
 
 
+def _wrap_quick_estimate_pdf_lines(text, max_width, font_name, font_size):
+    cleaned = re.sub(r"\s+", " ", str(text or "").strip())
+    if not cleaned:
+        return []
+    words = cleaned.split(" ")
+    lines = []
+    current = []
+    for word in words:
+        candidate = " ".join(current + [word]).strip()
+        if current and pdfmetrics.stringWidth(candidate, font_name, font_size) > max_width:
+            lines.append(" ".join(current).strip())
+            current = [word]
+        else:
+            current.append(word)
+    if current:
+        lines.append(" ".join(current).strip())
+    return lines
+
+
+def _quick_estimate_pdf_header_segments(header_html, company_name, content_width):
+    raw_html = str(header_html or "").strip()
+    if not raw_html:
+        return [{"text": line, "font_name": "Helvetica-Bold", "font_size": 13} for line in _wrap_quick_estimate_pdf_lines(company_name, content_width, "Helvetica-Bold", 13)]
+
+    normalized = raw_html
+    normalized = re.sub(r"<\s*br\s*/?\s*>", "\n", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"<\s*/?\s*p[^>]*>", "\n", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"<\s*/?\s*div[^>]*>", "\n", normalized, flags=re.IGNORECASE)
+
+    segments = []
+    for raw_line in [part.strip() for part in normalized.splitlines() if part.strip()]:
+        is_bold = bool(re.search(r"<\s*(strong|b)\b", raw_line, flags=re.IGNORECASE))
+        font_size_match = re.search(r"<font[^>]*size=[\"']?([1-7])[\"']?[^>]*>", raw_line, flags=re.IGNORECASE)
+        html_font_size = font_size_match.group(1) if font_size_match else ""
+        text = strip_tags(raw_line).strip()
+        if not text:
+            continue
+        if html_font_size == "4":
+            font_name = "Helvetica-Bold"
+            font_size = 13.8
+        elif html_font_size == "3":
+            font_name = "Helvetica-Bold" if is_bold else "Helvetica"
+            font_size = 10.6
+        elif html_font_size == "2":
+            font_name = "Helvetica-Bold" if is_bold else "Helvetica"
+            font_size = 9.3
+        else:
+            font_name = "Helvetica-Bold" if is_bold else "Helvetica"
+            font_size = 13 if is_bold else 9.4
+        wrapped = _wrap_quick_estimate_pdf_lines(text, content_width, font_name, font_size)
+        for line in wrapped:
+            segments.append({
+                "text": line,
+                "font_name": font_name,
+                "font_size": font_size,
+            })
+    return segments or [{"text": line, "font_name": "Courier-Bold", "font_size": 13} for line in _wrap_quick_estimate_pdf_lines(company_name, content_width, "Courier-Bold", 13)]
+
+
+def _quick_estimate_pdf_response(row, org):
+    settings_data = _get_quick_estimate_settings(org)
+    template_size = str(settings_data.get("templateSize") or "4in").strip().lower()
+    if template_size not in {"3in", "4in"}:
+        template_size = "4in"
+    page_width = 3 * inch if template_size == "3in" else 4 * inch
+    margin_x = 0.18 * inch if template_size == "3in" else 0.22 * inch
+    content_width = page_width - (margin_x * 2)
+    seller = InvoiceSellerProfile.objects.order_by("-updated_at").first()
+    company_name = str(getattr(seller, "company_name", "") or getattr(org, "name", "") or "Work Zilla").strip() or "Work Zilla"
+    header_text = _normalize_quick_estimate_header_html(settings_data.get("headerText"))
+    header_segments = _quick_estimate_pdf_header_segments(header_text, company_name, content_width)
+    created_at_label = timezone.localtime(row.created_at).strftime("%d/%m/%Y, %I:%M %p") if row.created_at else ""
+    assigned_user_name = _get_org_user_display_name(getattr(row, "assigned_user", None)) or "-"
+    items = list(row.items.all().order_by("id"))
+    item_blocks = []
+    total_height = 0
+    amount_font = _ba_get_unicode_pdf_font() or "Helvetica"
+    item_text_width = content_width - 60
+    for item in items:
+        title = str(item.service_name or "").strip()
+        description = str(item.description or "").strip()
+        qty_line = ""
+        if item.quantity:
+            qty_line = f"Qty: {item.quantity}{f' {item.unit}' if item.unit else ''}"
+        lines = []
+        if title:
+            lines.extend(_wrap_quick_estimate_pdf_lines(title, item_text_width, "Helvetica-Bold", 10.2))
+        if description:
+            lines.extend(_wrap_quick_estimate_pdf_lines(description, item_text_width, "Helvetica", 9.4))
+        if qty_line:
+            lines.extend(_wrap_quick_estimate_pdf_lines(qty_line, item_text_width, "Helvetica", 9))
+        if not lines:
+            lines = ["-"]
+        block_height = max(20, len(lines) * 13 + 8)
+        total_height += block_height
+        item_blocks.append({
+            "lines": lines,
+            "amount": f"Rs { _format_quick_estimate_amount(item.amount) }",
+            "title_lines": len(_wrap_quick_estimate_pdf_lines(title, item_text_width, "Helvetica-Bold", 10.2)) if title else 0,
+        })
+    header_height = sum(14 if segment["font_size"] >= 13 else 10 for segment in header_segments)
+    meta_height = 11  # title separator gap
+    for label, value in [
+        ("Estimate No", row.estimate_number or "-"),
+        ("Date", created_at_label or "-"),
+        ("Client", row.client_name or "-"),
+        ("Mobile", row.mobile or "-"),
+        ("EMP Name", assigned_user_name),
+    ]:
+        meta_width = content_width * 0.62 if str(label).lower() == "date" else content_width * 0.54
+        value_lines = _wrap_quick_estimate_pdf_lines(value, meta_width, "Helvetica-Bold", 10) or ["-"]
+        meta_height += 10 + (max(0, len(value_lines) - 1) * 9)
+
+    items_section_height = 30 + total_height
+    total_section_height = 42
+    footer_height = 20
+    top_padding = 18
+    bottom_padding = 12
+    page_height = (
+        top_padding
+        + header_height
+        + 20  # quick estimate title block
+        + meta_height
+        + items_section_height
+        + total_section_height
+        + footer_height
+        + bottom_padding
+    )
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=(page_width, page_height))
+    pdf.setTitle(str(row.estimate_number or "quick-estimate"))
+    left = margin_x
+    right = page_width - margin_x
+    y = page_height - 18
+
+    for segment in header_segments:
+        pdf.setFillColorRGB(0.07, 0.09, 0.13)
+        pdf.setFont(segment["font_name"], segment["font_size"])
+        pdf.drawCentredString(page_width / 2, y, segment["text"])
+        y -= 14 if segment["font_size"] >= 13 else 10
+
+    y -= 6
+    pdf.setFillColorRGB(0, 0, 0)
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawCentredString(page_width / 2, y - 1, "QUICK ESTIMATE")
+    y -= 14
+
+    pdf.setStrokeColorRGB(0, 0, 0)
+    pdf.setDash(3, 2)
+    pdf.line(left, y, right, y)
+    y -= 11
+    pdf.setDash()
+
+    meta_rows = [
+        ("Estimate No", row.estimate_number or "-"),
+        ("Date", created_at_label or "-"),
+        ("Client", row.client_name or "-"),
+        ("Mobile", row.mobile or "-"),
+        ("EMP Name", assigned_user_name),
+    ]
+    for label, value in meta_rows:
+        pdf.setFont("Helvetica", 9.2)
+        pdf.setFillColorRGB(0, 0, 0)
+        pdf.drawString(left, y, str(label))
+        pdf.setFont("Helvetica-Bold", 10)
+        pdf.setFillColorRGB(0, 0, 0)
+        meta_width = content_width * 0.62 if str(label).lower() == "date" else content_width * 0.54
+        value_lines = _wrap_quick_estimate_pdf_lines(value, meta_width, "Helvetica-Bold", 10) or ["-"]
+        pdf.drawRightString(right, y, value_lines[0])
+        y -= 10
+        for continuation in value_lines[1:]:
+            pdf.setFont("Helvetica-Bold", 10)
+            pdf.drawRightString(right, y, continuation)
+            y -= 9
+
+    pdf.setStrokeColorRGB(0, 0, 0)
+    pdf.setDash(3, 2)
+    pdf.line(left, y + 2, right, y + 2)
+    pdf.setDash()
+    y -= 10
+
+    pdf.setFont("Helvetica-Bold", 9.4)
+    pdf.setFillColorRGB(0, 0, 0)
+    pdf.drawString(left, y, "Items")
+    pdf.drawRightString(right, y, "Amt")
+    y -= 8
+    pdf.setStrokeColorRGB(0, 0, 0)
+    pdf.line(left, y, right, y)
+    y -= 12
+
+    for block in item_blocks:
+        line_y = y
+        for idx, line in enumerate(block["lines"]):
+            if idx < block["title_lines"]:
+                pdf.setFont("Helvetica-Bold", 10.2)
+                pdf.setFillColorRGB(0, 0, 0)
+            elif idx == len(block["lines"]) - 1 and line.startswith("Qty:"):
+                pdf.setFont("Helvetica", 9)
+                pdf.setFillColorRGB(0, 0, 0)
+            else:
+                pdf.setFont("Helvetica", 9.4)
+                pdf.setFillColorRGB(0, 0, 0)
+            pdf.drawString(left, line_y, line)
+            line_y -= 12.6
+        pdf.setFont(amount_font, 10.2)
+        pdf.setFillColorRGB(0, 0, 0)
+        pdf.drawRightString(right, y, block["amount"])
+        y = line_y - 3.5
+        pdf.setStrokeColorRGB(0, 0, 0)
+        pdf.setDash(3, 2)
+        pdf.line(left, y, right, y)
+        pdf.setDash()
+        y -= 8
+
+    y -= 10
+    pdf.setFont("Helvetica-Bold", 11.5)
+    pdf.setFillColorRGB(0, 0, 0)
+    pdf.drawString(left, y, "Total")
+    pdf.setFont(amount_font, 11.5)
+    pdf.drawRightString(right, y, f"Rs { _format_quick_estimate_amount(row.total_amount) }")
+    y -= 8
+
+    pdf.setStrokeColorRGB(0, 0, 0)
+    pdf.setDash(3, 2)
+    pdf.line(left, y, right, y)
+    pdf.setDash()
+    y -= 10
+    pdf.setFont("Helvetica", 9)
+    pdf.setFillColorRGB(0, 0, 0)
+    pdf.drawCentredString(page_width / 2, y, "Thank you.")
+    pdf.showPage()
+    pdf.save()
+    response = HttpResponse(buffer.getvalue(), content_type="application/pdf")
+    filename = f"{str(row.estimate_number or 'quick-estimate').replace(' ', '_')}_{template_size}.pdf"
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
 def _safe_render_quick_estimate_thermal_preview(row, org):
     try:
         return _render_quick_estimate_thermal_preview(row, org)
@@ -5092,9 +5459,13 @@ def _safe_render_quick_estimate_thermal_preview(row, org):
 
 
 def _serialize_quick_estimate(row, include_preview=False):
+    row = _purge_expired_quick_estimate_payment_proof(row)
     created_by = getattr(row, "created_by", None) or getattr(getattr(row, "organization", None), "owner", None)
     assigned_user = getattr(row, "assigned_user", None)
     assigned_by = getattr(row, "assigned_by", None)
+    payment_verified_by = getattr(row, "payment_verified_by", None)
+    job_verified_by = getattr(row, "job_verified_by", None)
+    delivery_verified_by = getattr(row, "delivery_verified_by", None)
     payload = {
         "id": row.id,
         "estimate_number": row.estimate_number,
@@ -5110,6 +5481,10 @@ def _serialize_quick_estimate(row, include_preview=False):
         "payment_status": str(getattr(row, "payment_status", "") or ""),
         "job_status": str(getattr(row, "job_status", "") or ""),
         "delivery_status": str(getattr(row, "delivery_status", "") or ""),
+        "payment_proof_image": str(getattr(row, "payment_proof_image", "") or ""),
+        "payment_verified_by_name": _get_org_user_display_name(payment_verified_by),
+        "job_verified_by_name": _get_org_user_display_name(job_verified_by),
+        "delivery_verified_by_name": _get_org_user_display_name(delivery_verified_by),
         "customer_id": row.customer_id or "",
         "created_by_id": getattr(row, "created_by_id", None) or getattr(getattr(row, "organization", None), "owner_id", None),
         "created_by_name": _get_org_user_display_name(created_by),
@@ -5131,6 +5506,7 @@ def _serialize_quick_estimate(row, include_preview=False):
         "updated_at": row.updated_at.isoformat() if row.updated_at else "",
         "whatsapp_url": _build_quick_estimate_whatsapp_url(row),
         "thermal_preview_url": f"/api/business-autopilot/quick-estimates/{row.id}/thermal-preview/",
+        "thermal_preview_pdf_url": f"/api/business-autopilot/quick-estimates/{row.id}/thermal-preview/?format=pdf",
         "items": [_serialize_quick_estimate_item(item) for item in row.items.all().order_by("id")],
     }
     if include_preview:
@@ -5160,6 +5536,60 @@ def _record_quick_estimate_history(estimate, *, action="updated", actor=None, no
         note=str(note or "").strip(),
         snapshot=snapshot if isinstance(snapshot, dict) else {},
     )
+
+
+def _serialize_quick_estimate_contact(row, *, linked_estimate_count=0):
+    if not isinstance(row, dict):
+        row = {}
+    phone = _normalize_site_admin_mobile(row.get("phone"))
+    client_name = str(row.get("clientName") or row.get("companyName") or row.get("name") or "").strip()
+    return {
+        "id": str(row.get("id") or "").strip(),
+        "client_name": client_name,
+        "mobile": phone,
+        "email": _normalize_site_admin_email(row.get("email")),
+        "address": str(row.get("address") or row.get("billingAddress") or row.get("shippingAddress") or "").strip(),
+        "gst_number": str(row.get("gstin") or "").strip(),
+        "linked_estimate_count": int(linked_estimate_count or 0),
+        "created_at": str(row.get("createdAt") or "").strip(),
+        "updated_at": str(row.get("updatedAt") or "").strip(),
+    }
+
+
+def _quick_estimate_contact_rows_with_counts(org):
+    workspace = _get_accounts_workspace(org)
+    data = _normalize_accounts_workspace(workspace.data)
+    contacts = _get_quick_estimate_contact_store(data)
+    estimate_counts = {}
+    for customer_id in (
+        QuickEstimate.objects
+        .filter(organization=org)
+        .exclude(customer_id="")
+        .values_list("customer_id", flat=True)
+    ):
+        key = str(customer_id or "").strip()
+        if key:
+            estimate_counts[key] = estimate_counts.get(key, 0) + 1
+    rows = []
+    for row in contacts:
+        if not isinstance(row, dict):
+            continue
+        contact_id = str(row.get("id") or "").strip()
+        if not contact_id:
+            continue
+        rows.append(_serialize_quick_estimate_contact(row, linked_estimate_count=estimate_counts.get(contact_id, 0)))
+    rows.sort(key=lambda item: (str(item.get("client_name") or "").lower(), str(item.get("mobile") or "")))
+    return workspace, data, contacts, rows
+
+
+def _ensure_quick_estimate_contact_name_mobile(*, mobile="", client_name="", require_client_name=True):
+    normalized_mobile = _normalize_site_admin_mobile(mobile)
+    normalized_name = str(client_name or "").strip()
+    if not normalized_mobile:
+        raise ValueError("Please enter the mobile number.")
+    if require_client_name and not normalized_name:
+        raise ValueError("Please enter the client name.")
+    return normalized_mobile, normalized_name[:180]
 
 
 def _to_decimal(value):
@@ -8761,12 +9191,16 @@ def _site_admin_merge_quick_estimate_fields(state, message):
 
 
 def _site_admin_create_quick_estimate(org, user, collected):
-    mobile = _normalize_site_admin_mobile(collected.get("mobile"))
+    mobile, client_name = _ensure_quick_estimate_contact_name_mobile(
+        mobile=collected.get("mobile"),
+        client_name=collected.get("client_name"),
+        require_client_name=not bool(collected.get("existing_client")),
+    )
     customer_row, customer_name = _site_admin_get_or_create_customer(
         org,
         user,
         mobile=mobile,
-        client_name=str(collected.get("client_name") or "").strip(),
+        client_name=client_name,
         email=str(collected.get("email") or "").strip(),
         address=str(collected.get("address") or "").strip(),
         gst_number=str(collected.get("gst_number") or "").strip(),
@@ -8784,7 +9218,7 @@ def _site_admin_create_quick_estimate(org, user, collected):
             estimate_sequence=estimate_sequence,
             estimate_number=estimate_number,
             mobile=mobile,
-            client_name=str(collected.get("client_name") or customer_name or mobile).strip()[:180],
+            client_name=str(client_name or customer_name or mobile).strip()[:180],
             email=str(collected.get("email") or "").strip()[:254],
             address=str(collected.get("address") or "").strip()[:1000],
             gst_number=str(collected.get("gst_number") or "").strip()[:32],
@@ -8806,6 +9240,16 @@ def _site_admin_create_quick_estimate(org, user, collected):
                 rate=entry.get("rate"),
                 amount=(entry.get("amount") or Decimal("0.00")).quantize(Decimal("0.01")),
             )
+        _upsert_quick_estimate_contact(
+            org,
+            user,
+            contact_id=str(customer_row.get("id") or "").strip(),
+            mobile=mobile,
+            client_name=str(client_name or customer_name or mobile).strip()[:180],
+            email=str(collected.get("email") or "").strip(),
+            address=str(collected.get("address") or "").strip(),
+            gst_number=str(collected.get("gst_number") or "").strip(),
+        )
     return estimate
 
 
@@ -8842,11 +9286,17 @@ def _site_admin_update_quick_estimate_items(
     payment_status="",
     job_status="",
     delivery_status="",
+    payment_proof_image="",
     user=None,
 ):
     item_entries, parsed_total = _site_admin_parse_item_entries(item_text)
     if not item_entries:
         return None
+    next_mobile, next_client_name = _ensure_quick_estimate_contact_name_mobile(
+        mobile=mobile or estimate.mobile,
+        client_name=client_name or estimate.client_name,
+        require_client_name=True,
+    )
     amount = (parsed_total or Decimal("0.00")).quantize(Decimal("0.01"))
     previous_snapshot = {
         "mobile": estimate.mobile,
@@ -8854,6 +9304,7 @@ def _site_admin_update_quick_estimate_items(
         "payment_status": str(getattr(estimate, "payment_status", "") or ""),
         "job_status": str(getattr(estimate, "job_status", "") or ""),
         "delivery_status": str(getattr(estimate, "delivery_status", "") or ""),
+        "payment_proof_image": str(getattr(estimate, "payment_proof_image", "") or ""),
         "total_amount": _decimal_to_string(estimate.total_amount),
         "items": [_serialize_quick_estimate_item(item) for item in estimate.items.all().order_by("id")],
     }
@@ -8869,8 +9320,6 @@ def _site_admin_update_quick_estimate_items(
                 rate=entry.get("rate"),
                 amount=(entry.get("amount") or Decimal("0.00")).quantize(Decimal("0.01")),
             )
-        next_mobile = _normalize_site_admin_mobile(mobile or estimate.mobile)
-        next_client_name = str(client_name or estimate.client_name or "").strip()[:180]
         if user is not None:
             customer_row = _site_admin_update_customer_for_estimate(
                 estimate.organization,
@@ -8892,6 +9341,21 @@ def _site_admin_update_quick_estimate_items(
         estimate.payment_status = _normalize_quick_estimate_progress_status(payment_status or getattr(estimate, "payment_status", ""))
         estimate.job_status = _normalize_quick_estimate_progress_status(job_status or getattr(estimate, "job_status", ""))
         estimate.delivery_status = _normalize_quick_estimate_progress_status(delivery_status or getattr(estimate, "delivery_status", ""))
+        if estimate.payment_status == QuickEstimate.PROGRESS_COMPLETED:
+            estimate.payment_proof_image = str(payment_proof_image or getattr(estimate, "payment_proof_image", "") or "")
+            if user is not None:
+                estimate.payment_verified_by = user
+        else:
+            estimate.payment_proof_image = ""
+            estimate.payment_verified_by = None
+        if estimate.job_status == QuickEstimate.PROGRESS_COMPLETED and user is not None:
+            estimate.job_verified_by = user
+        elif estimate.job_status != QuickEstimate.PROGRESS_COMPLETED:
+            estimate.job_verified_by = None
+        if estimate.delivery_status == QuickEstimate.PROGRESS_COMPLETED and user is not None:
+            estimate.delivery_verified_by = user
+        elif estimate.delivery_status != QuickEstimate.PROGRESS_COMPLETED:
+            estimate.delivery_verified_by = None
         estimate.save(update_fields=[
             "customer_id",
             "mobile",
@@ -8903,8 +9367,23 @@ def _site_admin_update_quick_estimate_items(
             "payment_status",
             "job_status",
             "delivery_status",
+            "payment_proof_image",
+            "payment_verified_by",
+            "job_verified_by",
+            "delivery_verified_by",
             "updated_at",
         ])
+        if user is not None:
+            _upsert_quick_estimate_contact(
+                estimate.organization,
+                user,
+                contact_id=customer_id,
+                mobile=estimate.mobile,
+                client_name=estimate.client_name,
+                email=estimate.email,
+                address=estimate.address,
+                gst_number=estimate.gst_number,
+            )
         _record_quick_estimate_history(
             estimate,
             action=QuickEstimateHistory.ACTION_UPDATED,
@@ -8918,6 +9397,7 @@ def _site_admin_update_quick_estimate_items(
                     "payment_status": estimate.payment_status,
                     "job_status": estimate.job_status,
                     "delivery_status": estimate.delivery_status,
+                    "payment_proof_image": estimate.payment_proof_image,
                     "total_amount": _decimal_to_string(estimate.total_amount),
                     "items": [_serialize_quick_estimate_item_snapshot(entry) for entry in item_entries],
                 },
@@ -9057,10 +9537,7 @@ def site_admin_chat(request):
                     "thermal_preview_html": _render_quick_estimate_thermal_preview(estimate, org),
                 })
 
-    should_start_qe = (
-        state.intent == SiteAdminChatState.INTENT_QUICK_ESTIMATE
-        or _site_admin_detect_quick_estimate_intent(message)
-    )
+    should_start_qe = True
 
     if not should_start_qe:
         lowered = normalized_message
@@ -9116,6 +9593,99 @@ def site_admin_chat(request):
     return JsonResponse(_site_admin_quick_estimate_response(estimate, reply, whatsapp_share_pending=False))
 
 
+@require_http_methods(["GET", "PATCH", "DELETE"])
+def quick_estimate_contacts(request, contact_id: str = ""):
+    if not request.user.is_authenticated:
+        return JsonResponse({"authenticated": False}, status=401)
+    org = _resolve_org(request.user, request)
+    if not org:
+        return JsonResponse({"detail": "organization_not_found"}, status=404)
+
+    workspace, data, contacts, rows = _quick_estimate_contact_rows_with_counts(org)
+    if request.method == "GET":
+        if contact_id:
+            payload = next((row for row in rows if row["id"] == str(contact_id or "").strip()), None)
+            if not payload:
+                return JsonResponse({"detail": "quick_estimate_contact_not_found"}, status=404)
+            return JsonResponse({"contact": payload})
+        return JsonResponse({"contacts": rows})
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "invalid_json"}, status=400)
+
+    normalized_contact_id = str(contact_id or payload.get("contact_id") or payload.get("id") or "").strip()
+    target_row = next(
+        (row for row in contacts if isinstance(row, dict) and str(row.get("id") or "").strip() == normalized_contact_id),
+        None,
+    )
+    if not target_row:
+        return JsonResponse({"detail": "quick_estimate_contact_not_found"}, status=404)
+
+    if request.method == "DELETE":
+        contacts[:] = [row for row in contacts if not (isinstance(row, dict) and str(row.get("id") or "").strip() == normalized_contact_id)]
+        data["quickEstimateContacts"] = contacts
+        workspace.data = data
+        workspace.updated_by = request.user
+        workspace.save(update_fields=["data", "updated_by", "updated_at"])
+        return JsonResponse({"message": "Contact deleted successfully."})
+
+    try:
+        normalized_mobile, normalized_name = _ensure_quick_estimate_contact_name_mobile(
+            mobile=payload.get("mobile") or target_row.get("phone"),
+            client_name=payload.get("client_name") or payload.get("clientName") or target_row.get("clientName"),
+            require_client_name=True,
+        )
+    except ValueError as exc:
+        return JsonResponse({"detail": "validation_error", "message": str(exc)}, status=400)
+
+    conflicting_row = next(
+        (
+            row for row in contacts
+            if isinstance(row, dict)
+            and row is not target_row
+            and _normalize_site_admin_mobile(row.get("phone")) == normalized_mobile
+        ),
+        None,
+    )
+    if conflicting_row is not None:
+        return JsonResponse(
+            {"detail": "duplicate_contact", "message": "A client with the same mobile number already exists."},
+            status=400,
+        )
+
+    normalized_email = _normalize_site_admin_email(payload.get("email") or target_row.get("email"))
+    normalized_address = str(payload.get("address") or target_row.get("address") or "").strip()[:500]
+    normalized_gst = str(payload.get("gst_number") or payload.get("gstin") or target_row.get("gstin") or "").strip()[:32]
+    target_row["clientName"] = normalized_name
+    target_row["phone"] = normalized_mobile
+    target_row["email"] = normalized_email
+    target_row["address"] = normalized_address
+    target_row["gstin"] = normalized_gst
+    target_row["updatedAt"] = timezone.now().isoformat()
+    data["quickEstimateContacts"] = contacts
+    workspace.data = data
+    workspace.updated_by = request.user
+    workspace.save(update_fields=["data", "updated_by", "updated_at"])
+
+    linked_estimates = QuickEstimate.objects.filter(organization=org, customer_id=normalized_contact_id)
+    linked_estimates.update(
+        mobile=normalized_mobile,
+        client_name=normalized_name,
+        email=normalized_email,
+        address=normalized_address,
+        gst_number=normalized_gst,
+        updated_at=timezone.now(),
+    )
+    return JsonResponse(
+        {
+            "message": "Contact updated successfully.",
+            "contact": _serialize_quick_estimate_contact(target_row, linked_estimate_count=linked_estimates.count()),
+        }
+    )
+
+
 @require_http_methods(["GET", "POST", "PATCH", "DELETE"])
 def quick_estimates(request, estimate_id: int = None):
     if not request.user.is_authenticated:
@@ -9141,7 +9711,15 @@ def quick_estimates(request, estimate_id: int = None):
     qs = (
         QuickEstimate.objects
         .filter(organization=org)
-        .select_related("organization__owner", "created_by", "assigned_user", "assigned_by")
+        .select_related(
+            "organization__owner",
+            "created_by",
+            "assigned_user",
+            "assigned_by",
+            "payment_verified_by",
+            "job_verified_by",
+            "delivery_verified_by",
+        )
         .prefetch_related("items")
         .order_by("-created_at", "-id")
     )
@@ -9164,10 +9742,13 @@ def quick_estimates(request, estimate_id: int = None):
         return JsonResponse({"quick_estimate": _serialize_quick_estimate(row, include_preview=True)})
 
     if payload is None:
-        try:
-            payload = json.loads(request.body.decode("utf-8") or "{}")
-        except json.JSONDecodeError:
-            return JsonResponse({"detail": "invalid_json"}, status=400)
+        if request.content_type and request.content_type.startswith("multipart/form-data"):
+            payload = request.POST.dict()
+        else:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
 
     patch_action = str(payload.get("action") or payload.get("__action") or "").strip().lower()
     if resolved_method == "DELETE":
@@ -9189,7 +9770,15 @@ def quick_estimates(request, estimate_id: int = None):
         row = (
             QuickEstimate.objects
             .filter(id=row.id)
-            .select_related("organization__owner", "created_by", "assigned_user", "assigned_by")
+            .select_related(
+                "organization__owner",
+                "created_by",
+                "assigned_user",
+                "assigned_by",
+                "payment_verified_by",
+                "job_verified_by",
+                "delivery_verified_by",
+            )
             .prefetch_related("items")
             .first()
         ) or row
@@ -9211,7 +9800,15 @@ def quick_estimates(request, estimate_id: int = None):
         row = (
             QuickEstimate.objects
             .filter(id=row.id)
-            .select_related("organization__owner", "created_by", "assigned_user", "assigned_by")
+            .select_related(
+                "organization__owner",
+                "created_by",
+                "assigned_user",
+                "assigned_by",
+                "payment_verified_by",
+                "job_verified_by",
+                "delivery_verified_by",
+            )
             .prefetch_related("items")
             .first()
         ) or row
@@ -9234,7 +9831,15 @@ def quick_estimates(request, estimate_id: int = None):
             row = (
                 QuickEstimate.objects
                 .filter(id=row.id)
-                .select_related("organization__owner", "created_by", "assigned_user", "assigned_by")
+                .select_related(
+                    "organization__owner",
+                    "created_by",
+                    "assigned_user",
+                    "assigned_by",
+                    "payment_verified_by",
+                    "job_verified_by",
+                    "delivery_verified_by",
+                )
                 .prefetch_related("items")
                 .first()
             ) or row
@@ -9275,7 +9880,15 @@ def quick_estimates(request, estimate_id: int = None):
         row = (
             QuickEstimate.objects
             .filter(id=row.id)
-            .select_related("organization__owner", "created_by", "assigned_user", "assigned_by")
+            .select_related(
+                "organization__owner",
+                "created_by",
+                "assigned_user",
+                "assigned_by",
+                "payment_verified_by",
+                "job_verified_by",
+                "delivery_verified_by",
+            )
             .prefetch_related("items")
             .first()
         ) or row
@@ -9305,10 +9918,18 @@ def quick_estimates(request, estimate_id: int = None):
     next_payment_status = _normalize_quick_estimate_progress_status(payload.get("payment_status") or payload.get("paymentStatus") or row.payment_status)
     next_job_status = _normalize_quick_estimate_progress_status(payload.get("job_status") or payload.get("jobStatus") or row.job_status)
     next_delivery_status = _normalize_quick_estimate_progress_status(payload.get("delivery_status") or payload.get("deliveryStatus") or row.delivery_status)
+    next_payment_proof_image = str(
+        payload.get("payment_proof_image")
+        or payload.get("paymentProofImage")
+        or getattr(row, "payment_proof_image", "")
+        or ""
+    ).strip()
     if len(next_mobile) != 10:
         return JsonResponse({"detail": "invalid_mobile", "message": "Please share a valid 10-digit mobile number."}, status=400)
     if not next_client_name:
         return JsonResponse({"detail": "client_name_required", "message": "Please share the client name."}, status=400)
+    if next_payment_status == QuickEstimate.PROGRESS_COMPLETED and not next_payment_proof_image:
+        return JsonResponse({"detail": "payment_proof_required", "message": "Please upload the payment proof image."}, status=400)
     try:
         updated = _site_admin_update_quick_estimate_items(
             row,
@@ -9318,6 +9939,7 @@ def quick_estimates(request, estimate_id: int = None):
             payment_status=next_payment_status,
             job_status=next_job_status,
             delivery_status=next_delivery_status,
+            payment_proof_image=next_payment_proof_image,
             user=request.user,
         )
     except ValueError as exc:
@@ -9328,7 +9950,15 @@ def quick_estimates(request, estimate_id: int = None):
     updated = (
         QuickEstimate.objects
         .filter(organization=org, id=updated.id)
-        .select_related("organization__owner", "created_by", "assigned_user", "assigned_by")
+        .select_related(
+            "organization__owner",
+            "created_by",
+            "assigned_user",
+            "assigned_by",
+            "payment_verified_by",
+            "job_verified_by",
+            "delivery_verified_by",
+        )
         .prefetch_related("items")
         .first()
     ) or updated
@@ -9368,8 +9998,15 @@ def quick_estimate_settings(request):
 
     header_text = _normalize_quick_estimate_header_html(payload.get("headerText") or payload.get("header_text"))
     template_size = str(payload.get("templateSize") or payload.get("template_size") or "4in").strip().lower()
+    payment_proof_retention_days = str(
+        payload.get("paymentProofRetentionDays")
+        or payload.get("payment_proof_retention_days")
+        or "45"
+    ).strip()
     if template_size not in {"3in", "4in"}:
         template_size = "4in"
+    if payment_proof_retention_days not in {"45", "60"}:
+        payment_proof_retention_days = "45"
     if _quick_estimate_header_text_length(header_text) > QUICK_ESTIMATE_HEADER_TEXT_MAX_LENGTH:
         return JsonResponse(
             {
@@ -9381,6 +10018,7 @@ def quick_estimate_settings(request):
     data["quickEstimateSettings"] = {
         "headerText": header_text,
         "templateSize": template_size,
+        "paymentProofRetentionDays": payment_proof_retention_days,
     }
     workspace.data = data
     workspace.updated_by = request.user
@@ -9401,7 +10039,32 @@ def quick_estimate_thermal_preview(request, estimate_id: int):
     row = QuickEstimate.objects.filter(organization=org, id=estimate_id).prefetch_related("items").first()
     if not row:
         return JsonResponse({"detail": "quick_estimate_not_found"}, status=404)
+    requested_format = str(request.GET.get("format") or "").strip().lower()
+    if requested_format == "pdf":
+        return _quick_estimate_pdf_response(row, org)
     return HttpResponse(_render_quick_estimate_thermal_preview(row, org), content_type="text/html; charset=utf-8")
+
+
+@require_http_methods(["GET"])
+def quick_estimate_public_preview(request, signed_token: str):
+    estimate_id = _resolve_quick_estimate_public_token(signed_token)
+    if estimate_id is None:
+        signer = TimestampSigner(salt="business-autopilot.quick-estimate-preview")
+        try:
+            estimate_id = int(signer.unsign(signed_token, max_age=60 * 60 * 24 * 30))
+        except (BadSignature, SignatureExpired, ValueError):
+            return HttpResponse("Preview link is invalid or expired.", status=404, content_type="text/plain; charset=utf-8")
+
+    row = (
+        QuickEstimate.objects
+        .filter(id=estimate_id)
+        .select_related("organization")
+        .prefetch_related("items")
+        .first()
+    )
+    if not row or not getattr(row, "organization", None):
+        return HttpResponse("Preview not found.", status=404, content_type="text/plain; charset=utf-8")
+    return HttpResponse(_render_quick_estimate_thermal_preview(row, row.organization), content_type="text/html; charset=utf-8")
 
 
 @require_http_methods(["GET"])

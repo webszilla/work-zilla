@@ -213,6 +213,28 @@ class QuickEstimate(models.Model):
     payment_status = models.CharField(max_length=20, choices=PROGRESS_CHOICES, default=PROGRESS_NON_COMPLETED)
     job_status = models.CharField(max_length=20, choices=PROGRESS_CHOICES, default=PROGRESS_NON_COMPLETED)
     delivery_status = models.CharField(max_length=20, choices=PROGRESS_CHOICES, default=PROGRESS_NON_COMPLETED)
+    payment_proof_image = models.TextField(blank=True, default="")
+    payment_verified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_quick_estimates_payment_verified",
+    )
+    job_verified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_quick_estimates_job_verified",
+    )
+    delivery_verified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="business_autopilot_quick_estimates_delivery_verified",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

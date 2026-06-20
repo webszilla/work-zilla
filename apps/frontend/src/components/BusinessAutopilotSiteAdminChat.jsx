@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/api.js";
+import { API_BASE } from "../lib/apiConfig.js";
 import { useConfirm } from "./ConfirmDialog.jsx";
 import TablePagination from "./TablePagination.jsx";
 import AiAvatar from "./chat/AiAvatar.jsx";
@@ -18,7 +19,9 @@ const ESTIMATE_FILTER_TABS = [
   { key: "all", label: "All" },
   { key: "paid", label: "Paid" },
   { key: "unpaid", label: "Unpaid" },
+  { key: "pending_job", label: "Pending Job" },
   { key: "delivery_pending", label: "Delivery Pending" },
+  { key: "cancelled", label: "Cancel" },
 ];
 
 const TABLE_PAGE_SIZE = 15;
@@ -273,6 +276,20 @@ function getEstimateCreatedByLabel(row) {
   return String(label || "").trim() || "-";
 }
 
+function getEstimateAssignedUserLabels(row) {
+  const values = [
+    row?.assigned_user_name,
+    row?.assignedUserName,
+    row?.assigned_user_email,
+    row?.assignedUserEmail,
+    row?.assigned_user_username,
+    row?.assignedUserUsername,
+  ];
+  return values
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+}
+
 function countPlainTextFromHtml(value) {
   if (typeof window === "undefined") {
     return String(value || "").replace(/<[^>]*>/g, "").trim().length;
@@ -298,15 +315,18 @@ function isTodayDate(value) {
 
 function normalizeEstimateLifecycle(row) {
   const paymentStatus = String(row?.payment_status || row?.paymentStatus || "").trim().toLowerCase();
+  const jobStatus = String(row?.job_status || row?.jobStatus || "").trim().toLowerCase();
   const deliveryStatus = String(row?.delivery_status || row?.deliveryStatus || "").trim().toLowerCase();
   return {
     paymentStatus,
+    jobStatus,
     deliveryStatus,
   };
 }
 
 function matchEstimateFilter(row, filterKey) {
   const lifecycle = normalizeEstimateLifecycle(row);
+  const estimateStatus = String(row?.status || "").trim().toLowerCase();
   if (filterKey === "today") {
     return isTodayDate(row?.created_at);
   }
@@ -316,11 +336,20 @@ function matchEstimateFilter(row, filterKey) {
   if (filterKey === "unpaid") {
     return !lifecycle.paymentStatus || ["pending", "unpaid", "partial", "partial_paid", "advance_paid", "non_completed"].includes(lifecycle.paymentStatus);
   }
+  if (filterKey === "pending_job") {
+    if (!lifecycle.jobStatus) {
+      return false;
+    }
+    return !["completed", "done", "cancelled", "canceled", "ready"].includes(lifecycle.jobStatus);
+  }
   if (filterKey === "delivery_pending") {
     if (!lifecycle.deliveryStatus) {
       return false;
     }
     return !["delivered", "completed", "cancelled", "canceled", "ready"].includes(lifecycle.deliveryStatus);
+  }
+  if (filterKey === "cancelled") {
+    return ["cancelled", "canceled"].includes(estimateStatus);
   }
   return true;
 }
@@ -335,6 +364,86 @@ function buildEstimateStatusNote(row) {
     .filter((item) => String(item.value || "").trim().toLowerCase() === "completed")
     .map((item) => `${item.title}: Done`)
     .join(" • ");
+}
+
+function getEstimatePaymentProofImage(row) {
+  const values = [
+    row?.payment_proof_image,
+    row?.paymentProofImage,
+    row?.payment_proof_url,
+    row?.paymentProofUrl,
+    row?.payment_proof,
+    row?.paymentProof,
+  ];
+  const match = values.find((value) => String(value || "").trim());
+  return String(match || "").trim();
+}
+
+function getStatusProgressMeta(row) {
+  return [
+    {
+      key: "payment",
+      icon: "bi-cash-coin",
+      completed: String(row?.payment_status || row?.paymentStatus || "").toLowerCase() === "completed",
+      tooltip: String(row?.payment_status || row?.paymentStatus || "").toLowerCase() === "completed" ? "Payment Completed" : "Payment Pending",
+      previewImage: getEstimatePaymentProofImage(row),
+    },
+    {
+      key: "job",
+      icon: "bi-briefcase",
+      completed: String(row?.job_status || row?.jobStatus || "").toLowerCase() === "completed",
+      tooltip: String(row?.job_status || row?.jobStatus || "").toLowerCase() === "completed" ? "Job Completed" : "Job Pending",
+      previewImage: "",
+    },
+    {
+      key: "delivery",
+      icon: "bi-truck",
+      completed: String(row?.delivery_status || row?.deliveryStatus || "").toLowerCase() === "completed",
+      tooltip: String(row?.delivery_status || row?.deliveryStatus || "").toLowerCase() === "completed" ? "Delivery Completed" : "Not Delivered",
+      previewImage: "",
+    },
+  ];
+}
+
+function resolvePreviewImageUrl(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (
+    normalized.startsWith("data:")
+    || normalized.startsWith("blob:")
+    || normalized.startsWith("http://")
+    || normalized.startsWith("https://")
+  ) {
+    return normalized;
+  }
+  if (normalized.startsWith("/")) {
+    return `${String(API_BASE || "").replace(/\/+$/, "")}${normalized}`;
+  }
+  return normalized;
+}
+
+function getPaymentVerifierLabel(row) {
+  return String(row?.payment_verified_by_name || "").trim();
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Unable to read selected image."));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function extractFirstImageDataUrl(fileList) {
+  const files = Array.from(fileList || []);
+  const imageFile = files.find((file) => String(file?.type || "").startsWith("image/"));
+  if (!imageFile) {
+    return "";
+  }
+  return readFileAsDataUrl(imageFile);
 }
 
 export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
@@ -353,6 +462,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   const [editPaymentCompleted, setEditPaymentCompleted] = useState(false);
   const [editJobCompleted, setEditJobCompleted] = useState(false);
   const [editDeliveryCompleted, setEditDeliveryCompleted] = useState(false);
+  const [editPaymentProofImage, setEditPaymentProofImage] = useState("");
+  const [paymentProofModalOpen, setPaymentProofModalOpen] = useState(false);
+  const [paymentProofDraftImage, setPaymentProofDraftImage] = useState("");
+  const [paymentProofError, setPaymentProofError] = useState("");
+  const [paymentProofUploading, setPaymentProofUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState("");
   const [editingEstimate, setEditingEstimate] = useState(null);
@@ -360,6 +474,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   const [estimateRows, setEstimateRows] = useState([]);
   const [estimateLoading, setEstimateLoading] = useState(false);
   const [estimateTableNotice, setEstimateTableNotice] = useState("");
+  const [estimateUserFilter, setEstimateUserFilter] = useState("");
   const [estimateSearch, setEstimateSearch] = useState("");
   const [estimateFilter, setEstimateFilter] = useState("today");
   const [estimatePage, setEstimatePage] = useState(1);
@@ -367,6 +482,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [qeHeaderText, setQeHeaderText] = useState("");
   const [qeTemplateSize, setQeTemplateSize] = useState("4in");
+  const [qePaymentProofRetentionDays, setQePaymentProofRetentionDays] = useState("45");
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [assignQuery, setAssignQuery] = useState("");
   const [assigningEstimateId, setAssigningEstimateId] = useState(null);
@@ -382,6 +498,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteConfirmEstimate, setDeleteConfirmEstimate] = useState(null);
   const [deleteReason, setDeleteReason] = useState("");
+  const [statusPreview, setStatusPreview] = useState(null);
+  const [statusTooltip, setStatusTooltip] = useState(null);
+  const [statusPreviewModal, setStatusPreviewModal] = useState(null);
   const demoTimersRef = useRef([]);
   const tutorialAnimatingRef = useRef(false);
   const listRef = useRef(null);
@@ -489,6 +608,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
           setEstimateRows(Array.isArray(estimateData?.quick_estimates) ? estimateData.quick_estimates : []);
           setQeHeaderText(String(settingsData?.settings?.headerText || ""));
           setQeTemplateSize(String(settingsData?.settings?.templateSize || "4in").toLowerCase() === "3in" ? "3in" : "4in");
+          setQePaymentProofRetentionDays(String(settingsData?.settings?.paymentProofRetentionDays || "45") === "60" ? "60" : "45");
         setOrgUsers(filterAssignableOrgUsers(usersData?.users));
         }
       } catch (error) {
@@ -509,7 +629,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
 
   useEffect(() => {
     setEstimatePage(1);
-  }, [estimateSearch, estimateFilter]);
+  }, [estimateSearch, estimateFilter, estimateUserFilter]);
 
   function appendAssistantMessage(data, fallbackText) {
     setMessages((prev) => [...prev, buildAssistantChatMessage(data, fallbackText)]);
@@ -523,9 +643,182 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setEditPaymentCompleted(false);
     setEditJobCompleted(false);
     setEditDeliveryCompleted(false);
+    setEditPaymentProofImage("");
+    setPaymentProofModalOpen(false);
+    setPaymentProofDraftImage("");
+    setPaymentProofError("");
+    setPaymentProofUploading(false);
     if (nextNotice) {
       setNotice(nextNotice);
     }
+  }
+
+  async function loadPaymentProofFromFiles(fileList) {
+    try {
+      setPaymentProofUploading(true);
+      setPaymentProofError("");
+      const dataUrl = await extractFirstImageDataUrl(fileList);
+      if (!dataUrl) {
+        setPaymentProofError("Please upload an image file only.");
+        return false;
+      }
+      setPaymentProofDraftImage(dataUrl);
+      return true;
+    } catch (error) {
+      setPaymentProofError(error?.message || "Unable to load image.");
+      return false;
+    } finally {
+      setPaymentProofUploading(false);
+    }
+  }
+
+  async function handlePaymentProofFileChange(event) {
+    await loadPaymentProofFromFiles(event.target.files);
+    event.target.value = "";
+  }
+
+  async function handlePaymentProofDrop(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    await loadPaymentProofFromFiles(event.dataTransfer?.files);
+  }
+
+  async function handlePaymentProofPaste(event) {
+    const items = event.clipboardData?.items || [];
+    const imageItem = Array.from(items).find((item) => String(item?.type || "").startsWith("image/"));
+    if (!imageItem) {
+      return;
+    }
+    event.preventDefault();
+    const file = imageItem.getAsFile();
+    if (!file) {
+      return;
+    }
+    await loadPaymentProofFromFiles([file]);
+  }
+
+  function openPaymentProofModal() {
+    setPaymentProofDraftImage(editPaymentProofImage || "");
+    setPaymentProofError("");
+    setPaymentProofModalOpen(true);
+  }
+
+  function closePaymentProofModal() {
+    setPaymentProofModalOpen(false);
+    setPaymentProofDraftImage(editPaymentProofImage || "");
+    setPaymentProofError("");
+  }
+
+  function savePaymentProofModal() {
+    if (!paymentProofDraftImage) {
+      setPaymentProofError("Please upload, drag-drop, or paste the payment proof image.");
+      return;
+    }
+    setEditPaymentProofImage(paymentProofDraftImage);
+    setEditPaymentCompleted(true);
+    setPaymentProofModalOpen(false);
+    setPaymentProofError("");
+  }
+
+  function handlePaymentStatusToggle(nextChecked) {
+    if (nextChecked) {
+      openPaymentProofModal();
+      return;
+    }
+    setEditPaymentCompleted(false);
+    setEditPaymentProofImage("");
+    setPaymentProofDraftImage("");
+    setPaymentProofModalOpen(false);
+    setPaymentProofError("");
+  }
+
+  function openStatusPreview(event, image, tooltip) {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const tooltipWidth = Math.min(220, Math.max(120, String(tooltip || "").length * 7 + 20));
+    setStatusTooltip({
+      text: tooltip || "",
+      top: Math.max(12, rect.top - 44),
+      left: Math.max(12, Math.min(window.innerWidth - tooltipWidth - 12, rect.left + (rect.width / 2) - (tooltipWidth / 2))),
+      width: tooltipWidth,
+    });
+    const resolvedImage = resolvePreviewImageUrl(image);
+    if (!resolvedImage) {
+      return;
+    }
+    setStatusPreview({
+      image: resolvedImage,
+      tooltip: tooltip || "",
+      top: Math.max(16, Math.min(window.innerHeight - 220, rect.top - 18)),
+      left: Math.max(16, Math.min(window.innerWidth - 180, rect.right + 12)),
+    });
+  }
+
+  function closeStatusPreview() {
+    setStatusPreview(null);
+    setStatusTooltip(null);
+  }
+
+  async function fetchEstimatePaymentProofImage(estimateId) {
+    if (!estimateId) {
+      return "";
+    }
+    try {
+      const data = await apiFetch(`/api/business-autopilot/quick-estimates/${estimateId}/`);
+      const estimate = data?.quick_estimate || null;
+      if (!estimate) {
+        return "";
+      }
+      upsertEstimateRow(estimate);
+      return getEstimatePaymentProofImage(estimate);
+    } catch {
+      return "";
+    }
+  }
+
+  async function handleStatusIconHover(event, row, item) {
+    openStatusPreview(event, item.previewImage, item.tooltip);
+    if (item.key !== "payment" || item.previewImage || !item.completed) {
+      return;
+    }
+    const fetchedImage = await fetchEstimatePaymentProofImage(row?.id);
+    if (!fetchedImage) {
+      return;
+    }
+    openStatusPreview(event, fetchedImage, item.tooltip);
+  }
+
+  async function handleStatusIconClick(row, item) {
+    if (item.previewImage) {
+      openStatusPreviewModal(item.previewImage, item.tooltip);
+      return;
+    }
+    if (item.key !== "payment" || !item.completed) {
+      return;
+    }
+    const fetchedImage = await fetchEstimatePaymentProofImage(row?.id);
+    if (!fetchedImage) {
+      setNotice("Payment proof image is not available for this estimate.");
+      return;
+    }
+    openStatusPreviewModal(fetchedImage, item.tooltip);
+  }
+
+  function openStatusPreviewModal(image, tooltip) {
+    const resolvedImage = resolvePreviewImageUrl(image);
+    if (!resolvedImage) {
+      return;
+    }
+    setStatusPreviewModal({
+      image: resolvedImage,
+      tooltip: tooltip || "Payment proof preview",
+    });
+  }
+
+  function closeStatusPreviewModal() {
+    setStatusPreviewModal(null);
   }
 
   function upsertEstimateRow(row) {
@@ -628,10 +921,12 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
         body: JSON.stringify({
           headerText: qeHeaderText,
           templateSize: qeTemplateSize,
+          paymentProofRetentionDays: qePaymentProofRetentionDays,
         }),
       });
       setQeHeaderText(String(data?.settings?.headerText || ""));
       setQeTemplateSize(String(data?.settings?.templateSize || "4in").toLowerCase() === "3in" ? "3in" : "4in");
+      setQePaymentProofRetentionDays(String(data?.settings?.paymentProofRetentionDays || "45") === "60" ? "60" : "45");
       setSettingsOpen(false);
       setNotice(String(data?.message || "Quick Estimate settings saved."));
       const previewEstimateIds = Array.from(new Set(
@@ -690,6 +985,23 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     };
     printWindow.addEventListener?.("load", triggerPrint, { once: true });
     window.setTimeout(triggerPrint, 700);
+  }
+
+  function handleDownloadEstimatePdf(row) {
+    const explicitPdfUrl = String(row?.thermal_preview_pdf_url || "").trim();
+    const previewUrl = String(row?.thermal_preview_url || "").trim();
+    const pdfUrl = explicitPdfUrl || (previewUrl ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}format=pdf` : "");
+    if (!pdfUrl || typeof window === "undefined") {
+      setNotice("PDF download is not available for this estimate.");
+      return;
+    }
+    const link = document.createElement("a");
+    link.href = pdfUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   }
 
   function openAssignModal(estimateId) {
@@ -865,6 +1177,8 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       setEditPaymentCompleted(String(estimate.payment_status || "").toLowerCase() === "completed");
       setEditJobCompleted(String(estimate.job_status || "").toLowerCase() === "completed");
       setEditDeliveryCompleted(String(estimate.delivery_status || "").toLowerCase() === "completed");
+      setEditPaymentProofImage(String(estimate.payment_proof_image || ""));
+      setPaymentProofDraftImage(String(estimate.payment_proof_image || ""));
       appendAssistantMessage(
         {
           reply: `Quick Estimate ${estimate.estimate_number} loaded for editing. You can update mobile number, client name, and full item list now.`,
@@ -1002,6 +1316,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
             payment_status: editPaymentCompleted ? "completed" : "non_completed",
             job_status: editJobCompleted ? "completed" : "non_completed",
             delivery_status: editDeliveryCompleted ? "completed" : "non_completed",
+            payment_proof_image: editPaymentCompleted ? editPaymentProofImage : "",
             item_text: text,
           }),
         })
@@ -1022,6 +1337,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
               payment_status: editPaymentCompleted ? "completed" : "non_completed",
               job_status: editJobCompleted ? "completed" : "non_completed",
               delivery_status: editDeliveryCompleted ? "completed" : "non_completed",
+              payment_proof_image: editPaymentCompleted ? editPaymentProofImage : "",
             }
             : row
         )));
@@ -1088,11 +1404,37 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   }
 
   const estimateModuleActive = activeModule === "quick-estimate";
+  const estimateUserOptions = useMemo(() => {
+    const optionMap = new Map();
+    filterAssignableOrgUsers(orgUsers).forEach((user) => {
+      const label = String(user?.name || user?.email || "").trim();
+      if (!label) {
+        return;
+      }
+      optionMap.set(label.toLowerCase(), label);
+    });
+    estimateRows.forEach((row) => {
+      getEstimateAssignedUserLabels(row).forEach((label) => {
+        optionMap.set(label.toLowerCase(), label);
+      });
+    });
+    return Array.from(optionMap.values()).sort((left, right) => left.localeCompare(right));
+  }, [estimateRows, orgUsers]);
+
   const filteredEstimateRows = useMemo(() => {
     const search = estimateSearch.trim().toLowerCase();
+    const userFilter = estimateUserFilter.trim().toLowerCase();
     return estimateRows.filter((row) => {
       if (!matchEstimateFilter(row, estimateFilter)) {
         return false;
+      }
+      if (userFilter) {
+        const userHaystack = getEstimateAssignedUserLabels(row)
+          .map((value) => value.toLowerCase())
+          .join(" ");
+        if (!userHaystack.includes(userFilter)) {
+          return false;
+        }
       }
       if (!search) {
         return true;
@@ -1106,12 +1448,16 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
         row?.paymentStatus,
         row?.delivery_status,
         row?.deliveryStatus,
+        row?.assigned_user_name,
+        row?.assignedUserName,
+        row?.created_by_name,
+        row?.createdByName,
       ]
         .map((value) => String(value || "").toLowerCase())
         .join(" ");
       return haystack.includes(search);
     });
-  }, [estimateFilter, estimateRows, estimateSearch]);
+  }, [estimateFilter, estimateRows, estimateSearch, estimateUserFilter]);
   const estimateTotalPages = Math.max(1, Math.ceil(filteredEstimateRows.length / TABLE_PAGE_SIZE));
   const safeEstimatePage = Math.min(estimatePage, estimateTotalPages);
   const pagedEstimateRows = filteredEstimateRows.slice((safeEstimatePage - 1) * TABLE_PAGE_SIZE, safeEstimatePage * TABLE_PAGE_SIZE);
@@ -1244,8 +1590,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                               type="button"
                               className="btn btn-sm btn-outline-danger saas-org-icon-btn ba-site-admin-chat__action-btn ba-site-admin-chat__action-btn--delete"
                               onClick={() => handleDeleteEstimate(item.quickEstimateId, item.estimateNumber)}
-                              title="Delete Estimate"
-                              aria-label="Delete Estimate"
+                              title="Cancel Estimate"
+                              aria-label="Cancel Estimate"
+                              data-no-delete-confirm="true"
                               disabled={sending}
                             >
                               <i className="bi bi-trash" aria-hidden="true" />
@@ -1296,7 +1643,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                         type="checkbox"
                         className="form-check-input"
                         checked={editPaymentCompleted}
-                        onChange={(event) => setEditPaymentCompleted(event.target.checked)}
+                        onChange={(event) => handlePaymentStatusToggle(event.target.checked)}
                         disabled={sending}
                       />
                       <span className="ba-site-admin-chat__status-switch-copy">
@@ -1331,6 +1678,19 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                       </span>
                     </label>
                   </div>
+                  {editPaymentCompleted ? (
+                    <div className="ba-site-admin-chat__proof-summary">
+                      <button
+                        type="button"
+                        className="btn btn-outline-light ba-site-admin-chat__proof-btn"
+                        onClick={openPaymentProofModal}
+                        disabled={sending}
+                      >
+                        {editPaymentProofImage ? "Change Payment Proof" : "Upload Payment Proof"}
+                      </button>
+                      {editPaymentProofImage ? <small>Payment proof attached.</small> : <small>Payment proof required.</small>}
+                    </div>
+                  ) : null}
                 </>
               ) : null}
               <div className={`ba-assistant__composer-row ${editingEstimate ? "ba-site-admin-chat__composer-row--editing" : ""}`}>
@@ -1395,6 +1755,14 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                   <button
                     type="button"
                     className="btn btn-outline-light ba-site-admin-chat__top-btn ba-site-admin-chat__cta-btn order-2"
+                    onClick={() => navigate("/site-admin/data-view")}
+                    disabled={!estimateModuleActive || sending}
+                  >
+                    Data View
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline-light ba-site-admin-chat__top-btn ba-site-admin-chat__cta-btn order-3"
                     onClick={() => setSettingsOpen(true)}
                     disabled={!estimateModuleActive || sending}
                   >
@@ -1420,14 +1788,30 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                 <div className="ba-site-admin-chat__table-count">
                   {filteredEstimateRows.length} estimate{filteredEstimateRows.length === 1 ? "" : "s"}
                 </div>
-                <input
-                  type="search"
-                  className="form-control ba-site-admin-chat__table-search"
-                  value={estimateSearch}
-                  onChange={(event) => setEstimateSearch(event.target.value)}
-                  placeholder="Search estimate, client, mobile..."
-                  aria-label="Search estimates"
-                />
+                <div className="ba-site-admin-chat__table-toolbar-actions">
+                  <input
+                    type="search"
+                    list="ba-site-admin-chat-user-filter-options"
+                    className="form-control ba-site-admin-chat__table-user-filter"
+                    value={estimateUserFilter}
+                    onChange={(event) => setEstimateUserFilter(event.target.value)}
+                    placeholder="Assigned user..."
+                    aria-label="Filter estimates by assigned user"
+                  />
+                  <datalist id="ba-site-admin-chat-user-filter-options">
+                    {estimateUserOptions.map((label) => (
+                      <option key={label} value={label} />
+                    ))}
+                  </datalist>
+                  <input
+                    type="search"
+                    className="form-control ba-site-admin-chat__table-search"
+                    value={estimateSearch}
+                    onChange={(event) => setEstimateSearch(event.target.value)}
+                    placeholder="Search estimate, client, mobile..."
+                    aria-label="Search estimates"
+                  />
+                </div>
               </div>
 
               {estimateTableNotice ? <div className="ba-assistant__setup-note">{estimateTableNotice}</div> : null}
@@ -1456,8 +1840,16 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                             {(safeEstimatePage - 1) * TABLE_PAGE_SIZE + index + 1}
                           </td>
                           <td>
-                            <div className="ba-site-admin-chat__estimate-meta">
-                              <strong>{row.estimate_number || "-"}</strong>
+                            <div className={`ba-site-admin-chat__estimate-meta ${String(row.status || "").toLowerCase() === "cancelled" ? "is-cancelled" : ""}`}>
+                              <button
+                                type="button"
+                                className="ba-site-admin-chat__estimate-download"
+                                onClick={() => handleDownloadEstimatePdf(row)}
+                                title={`Download ${row.estimate_number || "estimate"} PDF`}
+                                aria-label={`Download ${row.estimate_number || "estimate"} PDF`}
+                              >
+                                {row.estimate_number || "-"}
+                              </button>
                               <span>{row.client_name || "-"}</span>
                               <small>{row.mobile || "-"}</small>
                             </div>
@@ -1480,6 +1872,36 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                               <span className="ba-site-admin-chat__status-pill">
                                 {String(row.status || "created").replace(/_/g, " ")}
                               </span>
+                              {getPaymentVerifierLabel(row) ? (
+                                <small className="ba-site-admin-chat__status-verified">
+                                  <i className="bi bi-cash-coin" aria-hidden="true" />
+                                  <span>{getPaymentVerifierLabel(row)}</span>
+                                </small>
+                              ) : null}
+                              <div className="ba-site-admin-chat__status-icons" aria-label="Estimate progress status">
+                                {getStatusProgressMeta(row).map((item) => (
+                                  <span
+                                    key={item.key}
+                                    className={`ba-site-admin-chat__status-icon ba-site-admin-chat__status-icon--${item.key} ${item.completed ? "is-complete" : "is-pending"}`}
+                                    aria-label={item.tooltip}
+                                    onMouseEnter={(event) => handleStatusIconHover(event, row, item)}
+                                    onMouseLeave={closeStatusPreview}
+                                    onFocus={(event) => handleStatusIconHover(event, row, item)}
+                                    onBlur={closeStatusPreview}
+                                    onClick={() => handleStatusIconClick(row, item)}
+                                    onKeyDown={(event) => {
+                                      if (event.key === "Enter" || event.key === " ") {
+                                        event.preventDefault();
+                                        handleStatusIconClick(row, item);
+                                      }
+                                    }}
+                                    role="button"
+                                    tabIndex={0}
+                                  >
+                                    <i className={`bi ${item.icon}`} aria-hidden="true" />
+                                  </span>
+                                ))}
+                              </div>
                               <small className="ba-site-admin-chat__status-note">{buildEstimateStatusNote(row)}</small>
                             </div>
                           </td>
@@ -1548,6 +1970,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                                   onClick={() => handleDeleteEstimate(row.id, row.estimate_number)}
                                   title="Cancel Estimate"
                                   aria-label="Cancel Estimate"
+                                  data-no-delete-confirm="true"
                                 >
                                   <i className="bi bi-x-circle" aria-hidden="true" />
                                 </button>
@@ -1577,6 +2000,25 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
           </aside>
         </div>
       </div>
+      {statusPreview?.image ? (
+        <div
+          className="ba-site-admin-chat__status-preview ba-site-admin-chat__status-preview--floating"
+          style={{ top: `${statusPreview.top}px`, left: `${statusPreview.left}px` }}
+          role="presentation"
+        >
+          <img src={statusPreview.image} alt={statusPreview.tooltip || "Payment proof preview"} className="ba-site-admin-chat__status-preview-image" />
+        </div>
+      ) : null}
+      {statusTooltip?.text ? (
+        <div
+          className="ba-site-admin-chat__status-tooltip"
+          style={{ top: `${statusTooltip.top}px`, left: `${statusTooltip.left}px`, width: `${statusTooltip.width}px` }}
+          role="tooltip"
+        >
+          {statusTooltip.text}
+          <span className="ba-site-admin-chat__status-tooltip-arrow" aria-hidden="true" />
+        </div>
+      ) : null}
       {settingsOpen ? (
         <div className="ba-site-admin-chat__modal-overlay" onClick={() => !settingsSaving && setSettingsOpen(false)}>
           <div className="ba-site-admin-chat__modal" onClick={(event) => event.stopPropagation()}>
@@ -1596,17 +2038,31 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
             </div>
             <TinyHtmlEditor
               beforeEditor={(
-                <div className="mb-3">
-                  <label className="form-label fw-semibold" htmlFor="qeTemplateSize">Bill Template Size</label>
-                  <select
-                    id="qeTemplateSize"
-                    className="form-select"
-                    value={qeTemplateSize}
-                    onChange={(event) => setQeTemplateSize(event.target.value === "3in" ? "3in" : "4in")}
-                  >
-                    <option value="3in">3in Thermal</option>
-                    <option value="4in">4in Thermal</option>
-                  </select>
+                <div className="row g-3 mb-3">
+                  <div className="col-md-6">
+                    <label className="form-label fw-semibold" htmlFor="qeTemplateSize">Bill Template Size</label>
+                    <select
+                      id="qeTemplateSize"
+                      className="form-select"
+                      value={qeTemplateSize}
+                      onChange={(event) => setQeTemplateSize(event.target.value === "3in" ? "3in" : "4in")}
+                    >
+                      <option value="3in">3in Thermal</option>
+                      <option value="4in">4in Thermal</option>
+                    </select>
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label fw-semibold" htmlFor="qePaymentProofRetentionDays">Proof Auto Delete</label>
+                    <select
+                      id="qePaymentProofRetentionDays"
+                      className="form-select"
+                      value={qePaymentProofRetentionDays}
+                      onChange={(event) => setQePaymentProofRetentionDays(event.target.value === "60" ? "60" : "45")}
+                    >
+                      <option value="45">45 days</option>
+                      <option value="60">60 days</option>
+                    </select>
+                  </div>
                 </div>
               )}
               label=""
@@ -1636,6 +2092,110 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                 disabled={settingsSaving}
               >
                 {settingsSaving ? "Saving..." : "Save Setting"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {statusPreviewModal?.image ? (
+        <div className="ba-site-admin-chat__modal-overlay" onClick={closeStatusPreviewModal}>
+          <div className="ba-site-admin-chat__modal ba-site-admin-chat__status-preview-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="ba-site-admin-chat__modal-head">
+              <div>
+                <div className="ba-site-admin-chat__modal-title">{statusPreviewModal.tooltip}</div>
+              </div>
+              <button
+                type="button"
+                className="ba-assistant__close d-inline-flex align-items-center justify-content-center"
+                aria-label="Close payment proof preview"
+                onClick={closeStatusPreviewModal}
+              >
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="ba-site-admin-chat__status-preview-modal-body">
+              <img
+                src={statusPreviewModal.image}
+                alt={statusPreviewModal.tooltip}
+                className="ba-site-admin-chat__status-preview-modal-image"
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {paymentProofModalOpen ? (
+        <div className="ba-site-admin-chat__modal-overlay" onClick={() => !paymentProofUploading && closePaymentProofModal()}>
+          <div className="ba-site-admin-chat__modal ba-site-admin-chat__modal--proof" onClick={(event) => event.stopPropagation()}>
+            <div className="ba-site-admin-chat__modal-head">
+              <div>
+                <div className="ba-site-admin-chat__modal-title">Upload Payment Proof</div>
+                <div className="ba-site-admin-chat__modal-subtitle">Upload, drag-drop, or paste the payment screenshot/image here.</div>
+              </div>
+              <button
+                type="button"
+                className="ba-assistant__close d-inline-flex align-items-center justify-content-center"
+                aria-label="Close payment proof popup"
+                onClick={closePaymentProofModal}
+                disabled={paymentProofUploading}
+              >
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div
+              className={`ba-site-admin-chat__proof-dropzone ${paymentProofDraftImage ? "has-image" : ""}`}
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "copy";
+              }}
+              onDrop={handlePaymentProofDrop}
+              onPaste={handlePaymentProofPaste}
+              tabIndex={0}
+              role="button"
+              aria-label="Payment proof upload area"
+            >
+              {paymentProofDraftImage ? (
+                <img src={paymentProofDraftImage} alt="Payment proof preview" className="ba-site-admin-chat__proof-preview" />
+              ) : (
+                <div className="ba-site-admin-chat__proof-placeholder">
+                  <i className="bi bi-image" aria-hidden="true" />
+                  <strong>Drop image here</strong>
+                  <span>Paste screenshot or choose image file</span>
+                </div>
+              )}
+            </div>
+            <div className="ba-site-admin-chat__proof-actions">
+              <label className="btn btn-outline-light ba-site-admin-chat__proof-btn">
+                <input type="file" accept="image/*" hidden onChange={handlePaymentProofFileChange} />
+                Choose Image
+              </label>
+              {paymentProofDraftImage ? (
+                <button
+                  type="button"
+                  className="btn btn-outline-light ba-site-admin-chat__proof-btn"
+                  onClick={() => setPaymentProofDraftImage("")}
+                  disabled={paymentProofUploading}
+                >
+                  Remove
+                </button>
+              ) : null}
+            </div>
+            {paymentProofError ? <div className="ba-assistant__setup-note">{paymentProofError}</div> : null}
+            <div className="ba-site-admin-chat__modal-actions">
+              <button
+                type="button"
+                className="btn btn-outline-light ba-site-admin-chat__modal-btn ba-site-admin-chat__cta-btn"
+                onClick={closePaymentProofModal}
+                disabled={paymentProofUploading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary ba-site-admin-chat__modal-btn ba-site-admin-chat__cta-btn"
+                onClick={savePaymentProofModal}
+                disabled={paymentProofUploading}
+              >
+                {paymentProofUploading ? "Uploading..." : "Use Proof"}
               </button>
             </div>
           </div>
@@ -1815,7 +2375,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
           <div className="ba-site-admin-chat__modal ba-site-admin-chat__modal--confirm" onClick={(event) => event.stopPropagation()}>
             <div className="ba-site-admin-chat__modal-head">
               <div>
-                <div className="ba-site-admin-chat__modal-title">Delete Estimate</div>
+                <div className="ba-site-admin-chat__modal-title">Cancel Estimate</div>
                 <div className="ba-site-admin-chat__modal-subtitle">
                   Cancel {deleteConfirmEstimate?.estimateNumber || "this Quick Estimate"}?
                 </div>
@@ -1823,7 +2383,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
               <button
                 type="button"
                 className="ba-assistant__close d-inline-flex align-items-center justify-content-center"
-                aria-label="Close delete popup"
+                aria-label="Close cancel popup"
                 onClick={() => setDeleteConfirmOpen(false)}
                 disabled={sending}
               >
@@ -1846,6 +2406,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
               <button
                 type="button"
                 className="btn btn-outline-secondary"
+                data-no-delete-confirm="true"
                 onClick={() => setDeleteConfirmOpen(false)}
                 disabled={sending}
               >
@@ -1854,6 +2415,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
               <button
                 type="button"
                 className="btn btn-danger"
+                data-no-delete-confirm="true"
                 onClick={confirmDeleteEstimate}
                 disabled={sending}
               >

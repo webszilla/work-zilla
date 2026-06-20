@@ -2515,6 +2515,72 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         self.assertEqual(str(customers[0].get("phone") or ""), "9876543210")
         self.assertEqual(str(customers[0].get("clientName") or ""), "Guru Prakash")
 
+    def test_quick_estimate_contact_list_returns_workspace_customers(self):
+        self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "9092833701\nGuru\nBusiness Card 500 nos Rs.1050"},
+            content_type="application/json",
+        )
+
+        response = self.client.get("/api/business-autopilot/quick-estimate-contacts/")
+
+        self.assertEqual(response.status_code, 200)
+        rows = response.json()["contacts"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["client_name"], "Guru")
+        self.assertEqual(rows[0]["mobile"], "9092833701")
+        self.assertEqual(rows[0]["linked_estimate_count"], 1)
+
+    def test_quick_estimate_contact_delete_keeps_existing_estimate_client_data(self):
+        created = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "9092833701\nGuru\nBusiness Card 500 nos Rs.1050"},
+            content_type="application/json",
+        )
+        estimate_id = created.json()["quick_estimate_id"]
+        estimate = QuickEstimate.objects.get(id=estimate_id)
+
+        response = self.client.delete(f"/api/business-autopilot/quick-estimate-contacts/{estimate.customer_id}/")
+
+        self.assertEqual(response.status_code, 200)
+        estimate.refresh_from_db()
+        self.assertEqual(estimate.client_name, "Guru")
+        self.assertEqual(estimate.mobile, "9092833701")
+        workspace = AccountsWorkspace.objects.get(organization=self.org)
+        self.assertEqual(workspace.data.get("quickEstimateContacts") or [], [])
+
+    def test_quick_estimate_contact_edit_updates_linked_estimate_client_data(self):
+        created = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "9092833701\nGuru\nBusiness Card 500 nos Rs.1050"},
+            content_type="application/json",
+        )
+        estimate_id = created.json()["quick_estimate_id"]
+        estimate = QuickEstimate.objects.get(id=estimate_id)
+
+        response = self.client.patch(
+            f"/api/business-autopilot/quick-estimate-contacts/{estimate.customer_id}/",
+            data=json.dumps({"client_name": "Guru Updated", "mobile": "9876543210"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        estimate.refresh_from_db()
+        self.assertEqual(estimate.client_name, "Guru Updated")
+        self.assertEqual(estimate.mobile, "9876543210")
+
+    def test_site_admin_qe_new_mobile_without_client_name_does_not_save(self):
+        response = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "9092833701\nBusiness Card Printing Rs.1050"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["action"], "collecting_quick_estimate")
+        self.assertEqual(response.json()["reply"], "Please share the client name.")
+        self.assertFalse(QuickEstimate.objects.filter(organization=self.org, mobile="9092833701").exists())
+
     def test_quick_estimate_detail_delete_removes_row(self):
         created = self.client.post(
             "/api/business-autopilot/site-admin/chat",
@@ -2709,6 +2775,65 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         rows = response.json()["history"]
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["actor_name"], self.admin.username)
+
+    def test_quick_estimate_list_includes_pdf_download_url(self):
+        estimate = QuickEstimate.objects.create(
+            organization=self.org,
+            customer_id="cust_pdf_001",
+            estimate_sequence=11,
+            estimate_number="QE-0011",
+            mobile="9092833701",
+            client_name="Guru",
+            subtotal="950",
+            total_amount="950",
+            status=QuickEstimate.STATUS_CREATED,
+            created_by=self.admin,
+        )
+
+        response = self.client.get("/api/business-autopilot/quick-estimates/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = next(row for row in response.json()["quick_estimates"] if row["id"] == estimate.id)
+        self.assertEqual(
+            payload["thermal_preview_pdf_url"],
+            f"/api/business-autopilot/quick-estimates/{estimate.id}/thermal-preview/?format=pdf",
+        )
+
+    def test_quick_estimate_thermal_preview_pdf_uses_template_size_in_filename(self):
+        estimate = QuickEstimate.objects.create(
+            organization=self.org,
+            customer_id="cust_pdf_002",
+            estimate_sequence=12,
+            estimate_number="QE-0012",
+            mobile="9092833701",
+            client_name="Guru",
+            subtotal="950",
+            total_amount="950",
+            status=QuickEstimate.STATUS_CREATED,
+            created_by=self.admin,
+        )
+        QuickEstimateItem.objects.create(
+            quick_estimate=estimate,
+            service_name="Business Card",
+            description="Matte lamination",
+            quantity="500",
+            unit="Nos",
+            amount="950",
+        )
+
+        workspace = AccountsWorkspace.objects.get(organization=self.org)
+        workspace.data["quickEstimateSettings"] = {
+            "headerText": "<p>Demo Header</p>",
+            "templateSize": "3in",
+        }
+        workspace.save(update_fields=["data", "updated_at"])
+
+        response = self.client.get(f"/api/business-autopilot/quick-estimates/{estimate.id}/thermal-preview/?format=pdf")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn('filename="QE-0012_3in.pdf"', response["Content-Disposition"])
+        self.assertTrue(response.content.startswith(b"%PDF"))
 
     def test_site_admin_reset_clears_pending_state(self):
         self.client.post(

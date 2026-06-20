@@ -97,6 +97,18 @@ urlpatterns = [
     ),
     path("quick-estimates", api_views.quick_estimates, name="business_autopilot_quick_estimates"),
     path("quick-estimates/", api_views.quick_estimates, name="business_autopilot_quick_estimates_slash"),
+    path("quick-estimate-contacts", api_views.quick_estimate_contacts, name="business_autopilot_quick_estimate_contacts"),
+    path("quick-estimate-contacts/", api_views.quick_estimate_contacts, name="business_autopilot_quick_estimate_contacts_slash"),
+    path(
+        "quick-estimate-contacts/<str:contact_id>",
+        api_views.quick_estimate_contacts,
+        name="business_autopilot_quick_estimate_contact_detail",
+    ),
+    path(
+        "quick-estimate-contacts/<str:contact_id>/",
+        api_views.quick_estimate_contacts,
+        name="business_autopilot_quick_estimate_contact_detail_slash",
+    ),
     path("quick-estimate-settings", api_views.quick_estimate_settings, name="business_autopilot_quick_estimate_settings"),
     path("quick-estimate-settings/", api_views.quick_estimate_settings, name="business_autopilot_quick_estimate_settings_slash"),
     path("quick-estimates/<int:estimate_id>", api_views.quick_estimates, name="business_autopilot_quick_estimate_detail"),
@@ -110,6 +122,16 @@ urlpatterns = [
         "quick-estimates/<int:estimate_id>/thermal-preview/",
         api_views.quick_estimate_thermal_preview,
         name="business_autopilot_quick_estimate_thermal_preview_slash",
+    ),
+    path(
+        "quick-estimates/share/<str:signed_token>/",
+        api_views.quick_estimate_public_preview,
+        name="business_autopilot_quick_estimate_public_preview",
+    ),
+    path(
+        "qe/<str:signed_token>/",
+        api_views.quick_estimate_public_preview,
+        name="business_autopilot_quick_estimate_public_preview_masked",
     ),
     path(
         "quick-estimates/<int:estimate_id>/history",
