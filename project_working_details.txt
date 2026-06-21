@@ -143,14 +143,15 @@ VERIFY (AFTER DEPLOY)
 - `pgrep -af "core_platform.wsgi:application"`
 
 ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
-- Published at (UTC): `2026-06-21T04:26:29Z`
-- Local SHA: `53ddbf3da72dad3b2621b8dfaf42511a593073fb`
-- GitHub main SHA: `53ddbf3da72dad3b2621b8dfaf42511a593073fb`
-- Server SHA: `53ddbf3da72dad3b2621b8dfaf42511a593073fb`
+- Published at (UTC): `2026-06-21T04:41:55Z`
+- Local SHA: `b765fcd9bba3d49de757aec79f2a3a85268049c4`
+- GitHub main SHA: `b765fcd9bba3d49de757aec79f2a3a85268049c4`
+- Server SHA: `b765fcd9bba3d49de757aec79f2a3a85268049c4`
 - Deploy method: `git-pull`
 - Gunicorn: listening on `:8000` (`yes`)
 - Verified URLs:
   - `/` -> `200`
+  - `/pricing/` -> `200`
   - `/downloads/bootstrap-products.json` -> `200`
   - `/downloads/windows-agent/` -> `404`
   - `/downloads/mac-agent/` -> `404`
