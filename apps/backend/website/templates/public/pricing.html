@@ -1143,8 +1143,10 @@
                       ? escapeHtml(impositionPlanDescription(plan.name))
                 : "Visibility controls and activity insights built for teams."}</p>
           <div class="plan-price ${isBusinessAutopilot && !isFreePlan ? "erp-base-price" : ""}">
-            <span class="plan-price-original" data-original-price style="display:none;"></span>
-            <span data-price>Custom</span>
+            <div class="plan-price-values">
+              <span class="plan-price-original" data-original-price style="display:none;"></span>
+              <span class="plan-price-offer" data-price>Custom</span>
+            </div>
             <span class="price-suffix-inline" data-suffix data-extra="${trialSuffix ? ` / ${trialSuffix}` : ""}"></span>
           </div>
           ${isBusinessAutopilot && !isFreePlan ? `

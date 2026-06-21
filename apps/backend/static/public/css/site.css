@@ -1366,35 +1366,50 @@ img {
 
 .plan-price {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
   font-size: 1.4rem;
   font-weight: 700;
   margin: 14px 0 4px;
 }
 
+.plan-price-values {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .plan-price-original {
-  display: block;
-  width: 100%;
-  color: #94a3b8;
+  color: #dc2626;
   font-size: 0.95rem;
   font-weight: 700;
   line-height: 1.1;
   text-decoration: line-through;
   text-decoration-thickness: 2px;
+  text-decoration-color: #dc2626;
+}
+
+.plan-price-offer {
+  color: #16a34a;
+  font-weight: 800;
 }
 
 .erp-base-price {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0;
+  gap: 4px;
   margin-bottom: 0;
 }
 
+.erp-base-price .plan-price-values {
+  gap: 10px;
+}
+
 .erp-base-price [data-price] {
-  line-height: 1;
+  line-height: 1.05;
 }
 
 .erp-user-price {
