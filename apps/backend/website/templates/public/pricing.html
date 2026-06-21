@@ -250,6 +250,10 @@
           card.querySelectorAll("[data-user-type-price]").forEach((row) => {
             const userTypeKey = String(row.getAttribute("data-user-type-price") || "").trim().toLowerCase();
             const tier = businessAutopilotTier(plan);
+            if (tier === "free") {
+              row.textContent = "One";
+              return;
+            }
             if (tier === "starter" && (userTypeKey === "hrm_user" || userTypeKey === "full_access_user")) {
               row.textContent = "Nil";
               return;
@@ -267,7 +271,7 @@
           card.querySelectorAll("[data-user-type-suffix]").forEach((row) => {
             const parent = row.closest(".erp-seat-pricing__amount");
             const priceValue = parent?.querySelector("[data-user-type-price]")?.textContent?.trim().toLowerCase();
-            if (priceValue === "nil") {
+            if (priceValue === "nil" || priceValue === "one") {
               row.textContent = "";
               return;
             }
@@ -1149,14 +1153,14 @@
                     : normalizedSlug === "imposition-software"
                       ? escapeHtml(impositionPlanDescription(plan.name))
                 : "Visibility controls and activity insights built for teams."}</p>
-          <div class="plan-price ${isBusinessAutopilot && !isFreePlan ? "erp-base-price" : ""}">
+          <div class="plan-price ${isBusinessAutopilot ? "erp-base-price" : ""}">
             <div class="plan-price-values">
               <span class="plan-price-original" data-original-price style="display:none;"></span>
               <span class="plan-price-offer" data-price>Custom</span>
             </div>
             <span class="price-suffix-inline" data-suffix data-extra="${trialSuffix ? ` / ${trialSuffix}` : ""}"></span>
           </div>
-          ${isBusinessAutopilot && !isFreePlan ? `
+          ${isBusinessAutopilot ? `
             <div class="erp-seat-pricing">
               <div class="erp-seat-pricing__title">Additional user pricing</div>
               <div class="erp-seat-pricing__grid">
