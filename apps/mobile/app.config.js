@@ -1,11 +1,12 @@
 const version = "0.1.1";
+const defaultProjectId = "c33ca2bf-0314-41ad-854a-de2c5b92c32f";
 
 function intEnv(name, fallback) {
   const value = Number.parseInt(process.env[name] || "", 10);
   return Number.isFinite(value) ? value : fallback;
 }
 
-const projectId = process.env.EXPO_PUBLIC_EAS_PROJECT_ID || process.env.EAS_PROJECT_ID || "";
+const projectId = process.env.EXPO_PUBLIC_EAS_PROJECT_ID || process.env.EAS_PROJECT_ID || defaultProjectId;
 const updateChannel = process.env.EXPO_PUBLIC_UPDATE_CHANNEL || "production";
 
 module.exports = {
