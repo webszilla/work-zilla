@@ -24,6 +24,7 @@ npm run update:production
 
 Notes:
 
+- The npm scripts call `npx eas`, so `eas-cli` does not need to stay in project dependencies.
 - Android preview builds use `apk`.
 - Android production builds use `aab`.
 - iOS production requires Apple signing inside EAS / App Store Connect.
