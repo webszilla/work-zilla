@@ -166,6 +166,16 @@ LATEST WORK LOG (2026-06-15)
   - edit flow now updates mobile number, client name, and same customer row sync
   - QE Setting popup added for thermal header text with 200-character limit
   - migration `business_autopilot.0036_quickestimate_quickestimatesequence_and_more` applied on server
+PREVIOUS WORK LOG (2026-06-13)
+- Attendance face-recognition update pulled and deployed:
+  - local repo fast-forwarded from GitHub
+  - new migration `business_autopilot.0035_attendanceentry_admin_notes_and_more` applied locally
+  - server git pull completed
+  - server DB auth check passed
+  - server migration check completed with no pending migrations
+  - collectstatic completed
+  - gunicorn restarted
+  - live site verified with `200`
 - Business Autopilot assistant refinements deployed:
   - wake-word flow tightened for manual Maya-prefixed recording
   - fullscreen assistant layout cleanup and dashboard return behavior

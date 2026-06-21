@@ -89,6 +89,23 @@ function formatValue(value) {
   return formatDateLikeValue(value, "-");
 }
 
+function renderSplitDateTime(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "-";
+  }
+  const normalized = raw.replace("T", " ");
+  const parts = normalized.split(/\s+/);
+  const datePart = parts[0] || raw;
+  const timePart = parts[1] || "";
+  return (
+    <span className="pending-transfer-created-cell">
+      <span>{datePart}</span>
+      {timePart ? <span className="pending-transfer-created-time">{timePart}</span> : null}
+    </span>
+  );
+}
+
 function SaasTableActionButton({
   title,
   icon,
@@ -3666,7 +3683,7 @@ export default function SaasAdminProductPage() {
                           <td>{transfer.plan}</td>
                           <td>{transfer.currency} {transfer.amount}</td>
                           <td>{titleCase(transfer.billing_cycle)}</td>
-                          <td>{transfer.created_at || "-"}</td>
+                          <td>{renderSplitDateTime(transfer.created_at)}</td>
                           <td className="table-actions">
                             {transfer.receipt_url ? (
                               <SaasTableActionButton
@@ -3686,8 +3703,8 @@ export default function SaasAdminProductPage() {
                               <span className="text-secondary">Not Available</span>
                             )}
                           </td>
-                          <td className="table-actions">
-                            <div className="d-flex flex-wrap gap-1 pending-action-group">
+                          <td className="table-actions pending-transfer-action-cell">
+                            <div className="pending-action-group">
                               <SaasTableActionButton
                                 title="View Transfer"
                                 icon="bi-eye"

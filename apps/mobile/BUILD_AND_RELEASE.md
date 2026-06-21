@@ -6,6 +6,7 @@ Required env:
 
 - `EXPO_PUBLIC_EAS_PROJECT_ID`
 - `EXPO_PUBLIC_UPDATE_CHANNEL`
+- `EXPO_PUBLIC_API_BASE_URL`
 - `ANDROID_VERSION_CODE`
 - `IOS_BUILD_NUMBER`
 
@@ -27,3 +28,5 @@ Notes:
 - Android production builds use `aab`.
 - iOS production requires Apple signing inside EAS / App Store Connect.
 - OTA updates use `runtimeVersion.policy = appVersion`, so JS updates stay aligned to app binary versions.
+- Set `EXPO_PUBLIC_API_BASE_URL=https://getworkzilla.com` for installed preview/production builds.
+- Do not use `localhost` in installed mobile binaries unless testing against a machine reachable from the device LAN.

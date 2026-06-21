@@ -1185,7 +1185,7 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 
 .ba-site-admin-chat__workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
   min-height: 0;
   flex: 1;
   height: 100%;

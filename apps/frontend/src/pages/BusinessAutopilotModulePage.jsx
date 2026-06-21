@@ -30473,27 +30473,27 @@ export function HrManagementModule({
 
       {!showOnlyEmployeeForm && activeTab === "attendanceSettings" && hasHrFullAccess && !shiftAssignPage.open && !attendanceLogicPage.open ? (
         <div className="row g-3">
-          <div className="col-12">
+          <div className="col-12 col-xl-5">
             <div className="card p-3 h-100">
               <div className="row g-3 align-items-start mb-3">
-                <div className="col-12 col-lg-5">
+                <div className="col-12">
                   <h6 className="mb-1 text-body">Geo Attendance Settings</h6>
                   <div className="small text-body-secondary">Configure GPS check-in, office radius, and fence rules.</div>
                 </div>
-                <div className="col-12 col-lg-7">
-                  <div className="d-flex flex-wrap justify-content-lg-end align-items-center gap-3">
+                <div className="col-12">
+                  <div className="wz-attendance-settings-checklist">
                     {[
                       ["enabled", "Enable Geo Attendance"],
                       ["allow_outside_fence", "Allow Check-In Outside Fence"],
                       ["require_gps", "Require GPS For In/Out"],
                     ].map(([key, label]) => (
-                      <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0" key={`geo-settings-header-${key}`}>
+                      <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0 wz-attendance-settings-check-item" key={`geo-settings-header-${key}`}>
                         <input type="checkbox" className="form-check-input mt-0" checked={Boolean(geoAttendanceSettings[key])} onChange={(event) => setGeoAttendanceSettings((prev) => ({ ...prev, [key]: event.target.checked }))} />
                         {label}
                       </label>
                     ))}
                     {geoAttendanceSettings.google_maps_url ? (
-                      <button type="button" className="btn btn-outline-light btn-sm" onClick={() => window.open(geoAttendanceSettings.google_maps_url, "_blank", "noopener,noreferrer")}>
+                      <button type="button" className="btn btn-outline-light btn-sm wz-attendance-settings-inline-btn" onClick={() => window.open(geoAttendanceSettings.google_maps_url, "_blank", "noopener,noreferrer")}>
                         Open Location in Google Maps
                       </button>
                     ) : null}
@@ -30502,44 +30502,44 @@ export function HrManagementModule({
               </div>
               {geoSettingsNotice ? <div className="alert alert-secondary py-2 small">{geoSettingsNotice}</div> : null}
               <form className="row g-3 align-items-end" onSubmit={saveGeoAttendanceSettings}>
-                <div className="col-12 col-lg-3">
+                <div className="col-12">
                   <label className="form-label small text-secondary mb-1">Office Location Name</label>
                   <input className="form-control form-control-sm" value={geoAttendanceSettings.location_name} onChange={(event) => setGeoAttendanceSettings((prev) => ({ ...prev, location_name: event.target.value }))} placeholder="Head Office" />
                 </div>
-                <div className="col-6 col-lg-2">
+                <div className="col-12 col-md-6">
                   <label className="form-label small text-secondary mb-1">Latitude</label>
                   <input className="form-control form-control-sm" value={geoAttendanceSettings.latitude} onChange={(event) => setGeoAttendanceSettings((prev) => ({ ...prev, latitude: event.target.value }))} placeholder="13.0827" />
                 </div>
-                <div className="col-6 col-lg-2">
+                <div className="col-12 col-md-6">
                   <label className="form-label small text-secondary mb-1">Longitude</label>
                   <input className="form-control form-control-sm" value={geoAttendanceSettings.longitude} onChange={(event) => setGeoAttendanceSettings((prev) => ({ ...prev, longitude: event.target.value }))} placeholder="80.2707" />
                 </div>
-                <div className="col-12 col-lg-3">
+                <div className="col-12 col-md-7">
                   <label className="form-label small text-secondary mb-1">Allowed Radius in meters</label>
                   <input className="form-control form-control-sm" value={geoAttendanceSettings.radius_meters} onChange={(event) => setGeoAttendanceSettings((prev) => ({ ...prev, radius_meters: event.target.value }))} placeholder="100" />
                 </div>
-                <div className="col-12 col-lg-2 d-flex align-items-end justify-content-lg-end">
-                  <button type="submit" className="btn btn-success btn-sm">Save Geo Settings</button>
+                <div className="col-12 col-md-5 d-flex align-items-end">
+                  <button type="submit" className="btn btn-success btn-sm wz-attendance-settings-submit-btn">Save Geo Settings</button>
                 </div>
               </form>
             </div>
           </div>
-          <div className="col-12">
+          <div className="col-12 col-xl-4">
             <div className="card p-3 h-100">
               <div className="row g-3 align-items-start mb-3">
-                <div className="col-12 col-lg-5">
+                <div className="col-12">
                   <h6 className="mb-1 text-body">Face Recognition Settings</h6>
                   <div className="small text-body-secondary">Optional local face verification for employee attendance check-in.</div>
                 </div>
-                <div className="col-12 col-lg-7">
-                  <div className="d-flex flex-wrap justify-content-lg-end align-items-center gap-3">
+                <div className="col-12">
+                  <div className="wz-attendance-settings-checklist">
                     {[
                       ["enabled", "Enable Face Recognition Attendance"],
                       ["require_internal_face", "Require Face Verification for Internal Check-In"],
                       ["require_external_face", "Require Face Verification for External/Field Check-In"],
                       ["allow_external_photo_proof", "Allow External Attendance With Photo Proof"],
                     ].map(([key, label]) => (
-                      <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0" key={`face-settings-${key}`}>
+                      <label className="form-check-label small text-secondary d-flex align-items-center gap-2 mb-0 wz-attendance-settings-check-item" key={`face-settings-${key}`}>
                         <input type="checkbox" className="form-check-input mt-0" checked={Boolean(faceSettings[key])} onChange={(event) => setFaceSettings((prev) => ({ ...prev, [key]: event.target.checked }))} />
                         {label}
                       </label>
@@ -30549,21 +30549,57 @@ export function HrManagementModule({
               </div>
               {faceSettingsNotice ? <div className="alert alert-secondary py-2 small">{faceSettingsNotice}</div> : null}
               <form className="row g-3 align-items-end" onSubmit={saveFaceRecognitionSettings}>
-                <div className="col-12 col-lg-3">
+                <div className="col-12 col-md-6">
                   <label className="form-label small text-secondary mb-1">Minimum Face Match Score</label>
                   <input className="form-control form-control-sm" value={faceSettings.min_match_score} onChange={(event) => setFaceSettings((prev) => ({ ...prev, min_match_score: event.target.value }))} placeholder="0.90" />
                 </div>
-                <div className="col-12 col-lg-3">
+                <div className="col-12 col-md-6">
                   <label className="form-label small text-secondary mb-1">Photo Retention Days</label>
                   <input className="form-control form-control-sm" value={faceSettings.photo_retention_days} onChange={(event) => setFaceSettings((prev) => ({ ...prev, photo_retention_days: event.target.value }))} placeholder="60" />
                 </div>
-                <div className="col-12 col-lg-6 d-flex align-items-end justify-content-lg-end">
-                  <button type="submit" className="btn btn-success btn-sm">Save Face Settings</button>
+                <div className="col-12 d-flex align-items-end">
+                  <button type="submit" className="btn btn-success btn-sm wz-attendance-settings-submit-btn">Save Face Settings</button>
                 </div>
               </form>
             </div>
           </div>
-          <div className="col-12 col-xl-8">
+          <div className="col-12 col-xl-3">
+            <div className="card p-3 h-100">
+              <div className="d-flex flex-column gap-3 h-100">
+                <div>
+                  <h6 className="mb-1">Attendance Logic - {attendanceLogicRules.length} active rule(s)</h6>
+                  <div className="small text-secondary">Configure late entry, short-hours, and half-day deduction rules.</div>
+                </div>
+                <hr className="my-0" style={{ borderColor: "rgba(25, 135, 84, 0.2)", opacity: 1 }} />
+                <div className="d-grid gap-2">
+                  <button type="button" className="btn btn-success btn-sm" onClick={() => openAttendanceLogicPage("add")}>
+                    <i className="bi bi-plus-lg me-1" aria-hidden="true" />
+                    Add
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline-light btn-sm"
+                    onClick={() => openAttendanceLogicPage("edit")}
+                  >
+                    <i className="bi bi-pencil me-1" aria-hidden="true" />
+                    Edit
+                  </button>
+                  <button type="button" className="btn btn-outline-light btn-sm" onClick={() => openAttendanceLogicPage("view")}>
+                    <i className="bi bi-eye me-1" aria-hidden="true" />
+                    View
+                  </button>
+                </div>
+                {!attendanceLogicRules.length ? (
+                  <div className="small text-secondary mt-auto">No rules configured yet.</div>
+                ) : (
+                  <div className="small text-secondary mt-auto">
+                    Open the workspace to review, edit, and manage all attendance logic rules.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="col-12">
             <div className="card p-3 h-100">
               <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
                 <div>
@@ -30619,38 +30655,6 @@ export function HrManagementModule({
                   )}
                 </tbody>
               </table>
-            </div>
-          </div>
-          <div className="col-12 col-xl-4 align-self-start">
-            <div className="card p-3">
-              <div className="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
-                <div>
-                  <h6 className="mb-1">Attendance Logic - {attendanceLogicRules.length} active rule(s)</h6>
-                  <div className="small text-secondary">Configure late entry, short-hours, and half-day deduction rules.</div>
-                  <hr className="my-2" style={{ borderColor: "rgba(25, 135, 84, 0.2)", opacity: 1 }} />
-                </div>
-                <div className="d-flex flex-wrap gap-2">
-                  <button type="button" className="btn btn-success btn-sm" onClick={() => openAttendanceLogicPage("add")}>
-                    <i className="bi bi-plus-lg me-1" aria-hidden="true" />
-                    Add
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-outline-light btn-sm"
-                    onClick={() => openAttendanceLogicPage("edit")}
-                  >
-                    <i className="bi bi-pencil me-1" aria-hidden="true" />
-                    Edit
-                  </button>
-                  <button type="button" className="btn btn-outline-light btn-sm" onClick={() => openAttendanceLogicPage("view")}>
-                    <i className="bi bi-eye me-1" aria-hidden="true" />
-                    View
-                  </button>
-                </div>
-              </div>
-              {!attendanceLogicRules.length ? (
-                <div className="small text-secondary">No rules configured yet.</div>
-              ) : null}
             </div>
           </div>
         </div>
