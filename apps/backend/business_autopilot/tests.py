@@ -2318,6 +2318,48 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         workspace = AccountsWorkspace.objects.get(organization=self.org)
         self.assertEqual(len(workspace.data.get("customers") or []), 1)
 
+    def test_site_admin_qe_same_mobile_only_asks_for_item_details_without_creating_estimate(self):
+        AccountsWorkspace.objects.create(
+            organization=self.org,
+            data={
+                "customers": [
+                    {
+                        "id": "cust_existing_2",
+                        "companyName": "Madavan",
+                        "clientName": "Madavan",
+                        "name": "Madavan",
+                        "phoneCountryCode": "+91",
+                        "phone": "4545454545",
+                        "phoneList": [{"countryCode": "+91", "number": "4545454545"}],
+                        "email": "",
+                        "additionalEmails": [],
+                        "emailList": [],
+                        "billingAddress": "",
+                        "shippingAddress": "",
+                        "gstin": "",
+                    }
+                ],
+                "vendors": [],
+                "itemMasters": [],
+                "gstTemplates": [],
+                "billingTemplates": [],
+                "estimates": [],
+                "invoices": [],
+            },
+        )
+
+        response = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "4545454545"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["action"], "collecting_quick_estimate")
+        self.assertEqual(payload["reply"], "Client name: Madavan. Please share the estimate item details.")
+        self.assertFalse(QuickEstimate.objects.filter(organization=self.org, mobile="4545454545").exists())
+
     def test_site_admin_qe_numbered_item_list_creates_multiple_items_in_order(self):
         response = self.client.post(
             "/api/business-autopilot/site-admin/chat",

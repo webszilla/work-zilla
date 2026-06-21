@@ -4589,7 +4589,10 @@ def _site_admin_detect_quick_estimate_intent(message):
 
 
 def _site_admin_find_mobile(text):
-    candidates = re.findall(r"(?:\+?91[\s-]*)?[6-9]\d[\d\s-]{8,12}", str(text or ""))
+    content = str(text or "")
+    candidates = re.findall(r"(?:\+?91[\s-]*)?[6-9]\d[\d\s-]{8,12}", content)
+    if not candidates:
+        candidates = re.findall(r"(?:\+?91[\s-]*)?\d[\d\s-]{8,12}", content)
     for candidate in candidates:
         normalized = _normalize_site_admin_mobile(candidate)
         if len(normalized) == 10:
@@ -4769,14 +4772,22 @@ def _site_admin_parse_item_entries(text, fallback_total=None):
 def _site_admin_parse_message_fields(message):
     lines = [line.strip() for line in str(message or "").splitlines() if str(line or "").strip()]
     combined = " ".join(lines)
+    parsed_mobile = _site_admin_find_mobile(combined)
+    parsed_amount = _site_admin_find_amount(combined)
+    if (
+        parsed_mobile
+        and len(lines) == 1
+        and re.sub(r"\s+", "", combined) == parsed_mobile
+    ):
+        parsed_amount = None
     parsed = {
-        "mobile": _site_admin_find_mobile(combined),
+        "mobile": parsed_mobile,
         "client_name": "",
         "email": _site_admin_find_email(combined),
         "address": "",
         "gst_number": _site_admin_find_gst_number(combined),
         "item_text": "",
-        "amount": _site_admin_find_amount(combined),
+        "amount": parsed_amount,
     }
     remaining_lines = list(lines)
     if parsed["mobile"]:
@@ -5271,6 +5282,18 @@ def _quick_estimate_pdf_header_segments(header_html, company_name, content_width
     return segments or [{"text": line, "font_name": "Courier-Bold", "font_size": 13} for line in _wrap_quick_estimate_pdf_lines(company_name, content_width, "Courier-Bold", 13)]
 
 
+def _quick_estimate_pdf_header_images(header_html):
+    raw_html = str(header_html or "").strip()
+    if not raw_html:
+        return []
+    images = []
+    for match in re.finditer(r"<img[^>]+src=[\"']([^\"']+)[\"'][^>]*>", raw_html, flags=re.IGNORECASE):
+        image = _ba_pdf_image_from_data_url(match.group(1))
+        if image:
+            images.append(image)
+    return images
+
+
 def _quick_estimate_pdf_response(row, org):
     settings_data = _get_quick_estimate_settings(org)
     template_size = str(settings_data.get("templateSize") or "4in").strip().lower()
@@ -5283,6 +5306,7 @@ def _quick_estimate_pdf_response(row, org):
     company_name = str(getattr(seller, "company_name", "") or getattr(org, "name", "") or "Work Zilla").strip() or "Work Zilla"
     header_text = _normalize_quick_estimate_header_html(settings_data.get("headerText"))
     header_segments = _quick_estimate_pdf_header_segments(header_text, company_name, content_width)
+    header_images = _quick_estimate_pdf_header_images(header_text)
     created_at_label = timezone.localtime(row.created_at).strftime("%d/%m/%Y, %I:%M %p") if row.created_at else ""
     assigned_user_name = _get_org_user_display_name(getattr(row, "assigned_user", None)) or "-"
     items = list(row.items.all().order_by("id"))
@@ -5313,6 +5337,7 @@ def _quick_estimate_pdf_response(row, org):
             "title_lines": len(_wrap_quick_estimate_pdf_lines(title, item_text_width, "Helvetica-Bold", 10.2)) if title else 0,
         })
     header_height = sum(14 if segment["font_size"] >= 13 else 10 for segment in header_segments)
+    header_image_height = len(header_images) * 58
     meta_height = 11  # title separator gap
     for label, value in [
         ("Estimate No", row.estimate_number or "-"),
@@ -5326,13 +5351,14 @@ def _quick_estimate_pdf_response(row, org):
         meta_height += 10 + (max(0, len(value_lines) - 1) * 9)
 
     items_section_height = 30 + total_height
-    total_section_height = 42
-    footer_height = 20
+    total_section_height = 28
+    footer_height = 10
     top_padding = 18
-    bottom_padding = 12
+    bottom_padding = 4
     page_height = (
         top_padding
         + header_height
+        + header_image_height
         + 20  # quick estimate title block
         + meta_height
         + items_section_height
@@ -5352,6 +5378,21 @@ def _quick_estimate_pdf_response(row, org):
         pdf.setFont(segment["font_name"], segment["font_size"])
         pdf.drawCentredString(page_width / 2, y, segment["text"])
         y -= 14 if segment["font_size"] >= 13 else 10
+
+    if header_images:
+        y -= 2
+        image_size = min(48, max(34, content_width * 0.28))
+        for image in header_images:
+            pdf.drawImage(
+                image,
+                (page_width - image_size) / 2,
+                y - image_size,
+                width=image_size,
+                height=image_size,
+                preserveAspectRatio=True,
+                mask="auto",
+            )
+            y -= image_size + 10
 
     y -= 6
     pdf.setFillColorRGB(0, 0, 0)
@@ -5426,19 +5467,19 @@ def _quick_estimate_pdf_response(row, org):
         pdf.setDash()
         y -= 8
 
-    y -= 10
+    y -= 6
     pdf.setFont("Helvetica-Bold", 11.5)
     pdf.setFillColorRGB(0, 0, 0)
     pdf.drawString(left, y, "Total")
     pdf.setFont(amount_font, 11.5)
     pdf.drawRightString(right, y, f"Rs { _format_quick_estimate_amount(row.total_amount) }")
-    y -= 8
+    y -= 6
 
     pdf.setStrokeColorRGB(0, 0, 0)
     pdf.setDash(3, 2)
     pdf.line(left, y, right, y)
     pdf.setDash()
-    y -= 10
+    y -= 6
     pdf.setFont("Helvetica", 9)
     pdf.setFillColorRGB(0, 0, 0)
     pdf.drawCentredString(page_width / 2, y, "Thank you.")
@@ -5471,6 +5512,7 @@ def _serialize_quick_estimate(row, include_preview=False):
         "estimate_number": row.estimate_number,
         "mobile": row.mobile,
         "client_name": row.client_name,
+        "notes": row.notes or "",
         "email": row.email or "",
         "address": row.address or "",
         "gst_number": row.gst_number or "",
@@ -5479,6 +5521,7 @@ def _serialize_quick_estimate(row, include_preview=False):
         "total_amount": _decimal_to_string(row.total_amount),
         "status": row.status,
         "payment_status": str(getattr(row, "payment_status", "") or ""),
+        "payment_mode": str(getattr(row, "payment_mode", "") or ""),
         "job_status": str(getattr(row, "job_status", "") or ""),
         "delivery_status": str(getattr(row, "delivery_status", "") or ""),
         "payment_proof_image": str(getattr(row, "payment_proof_image", "") or ""),
@@ -5580,6 +5623,50 @@ def _quick_estimate_contact_rows_with_counts(org):
         rows.append(_serialize_quick_estimate_contact(row, linked_estimate_count=estimate_counts.get(contact_id, 0)))
     rows.sort(key=lambda item: (str(item.get("client_name") or "").lower(), str(item.get("mobile") or "")))
     return workspace, data, contacts, rows
+
+
+def _sync_quick_estimate_contacts_from_estimates(org, user=None):
+    workspace = _get_accounts_workspace(org)
+    data = _normalize_accounts_workspace(workspace.data)
+    contacts = _get_quick_estimate_contact_store(data)
+    known_ids = {
+        str(row.get("id") or "").strip()
+        for row in contacts
+        if isinstance(row, dict) and str(row.get("id") or "").strip()
+    }
+    changed = False
+    estimates = (
+        QuickEstimate.objects
+        .filter(organization=org)
+        .exclude(customer_id="")
+        .order_by("created_at", "id")
+    )
+    for estimate in estimates:
+        contact_id = str(getattr(estimate, "customer_id", "") or "").strip()
+        if not contact_id or contact_id in known_ids:
+            continue
+        normalized_mobile = _normalize_site_admin_mobile(getattr(estimate, "mobile", ""))
+        normalized_name = str(getattr(estimate, "client_name", "") or "").strip()[:180]
+        if not normalized_mobile or not normalized_name:
+            continue
+        contacts.append({
+            "id": contact_id,
+            "clientName": normalized_name,
+            "phone": normalized_mobile,
+            "email": _normalize_site_admin_email(getattr(estimate, "email", "")),
+            "address": str(getattr(estimate, "address", "") or "").strip()[:500],
+            "gstin": str(getattr(estimate, "gst_number", "") or "").strip()[:32],
+            "createdAt": (estimate.created_at.isoformat() if getattr(estimate, "created_at", None) else timezone.now().isoformat()),
+            "updatedAt": (estimate.updated_at.isoformat() if getattr(estimate, "updated_at", None) else timezone.now().isoformat()),
+        })
+        known_ids.add(contact_id)
+        changed = True
+    if changed:
+        data["quickEstimateContacts"] = contacts
+        workspace.data = data
+        workspace.updated_by = user
+        workspace.save(update_fields=["data", "updated_by", "updated_at"])
+    return workspace, data, contacts
 
 
 def _ensure_quick_estimate_contact_name_mobile(*, mobile="", client_name="", require_client_name=True):
@@ -9104,6 +9191,9 @@ def _site_admin_next_quick_estimate_step(collected):
     if not bool(collected.get("existing_client")) and not str(collected.get("client_name") or "").strip():
         return "client_name", "Please share the client name."
     if not str(collected.get("item_text") or "").strip():
+        existing_name = str(collected.get("client_name") or "").strip()
+        if bool(collected.get("existing_client")) and existing_name:
+            return "item_text", f"Client name: {existing_name}. Please share the estimate item details."
         return "item_text", "Please share the estimate item details."
     if not str(collected.get("amount") or "").strip():
         return "amount", "Please share the estimate amount."
@@ -9219,6 +9309,7 @@ def _site_admin_create_quick_estimate(org, user, collected):
             estimate_number=estimate_number,
             mobile=mobile,
             client_name=str(client_name or customer_name or mobile).strip()[:180],
+            notes="",
             email=str(collected.get("email") or "").strip()[:254],
             address=str(collected.get("address") or "").strip()[:1000],
             gst_number=str(collected.get("gst_number") or "").strip()[:32],
@@ -9283,7 +9374,9 @@ def _site_admin_update_quick_estimate_items(
     *,
     mobile="",
     client_name="",
+    notes="",
     payment_status="",
+    payment_mode="",
     job_status="",
     delivery_status="",
     payment_proof_image="",
@@ -9301,7 +9394,9 @@ def _site_admin_update_quick_estimate_items(
     previous_snapshot = {
         "mobile": estimate.mobile,
         "client_name": estimate.client_name,
+        "notes": str(getattr(estimate, "notes", "") or ""),
         "payment_status": str(getattr(estimate, "payment_status", "") or ""),
+        "payment_mode": str(getattr(estimate, "payment_mode", "") or ""),
         "job_status": str(getattr(estimate, "job_status", "") or ""),
         "delivery_status": str(getattr(estimate, "delivery_status", "") or ""),
         "payment_proof_image": str(getattr(estimate, "payment_proof_image", "") or ""),
@@ -9334,19 +9429,26 @@ def _site_admin_update_quick_estimate_items(
         estimate.customer_id = customer_id
         estimate.mobile = next_mobile
         estimate.client_name = next_client_name or estimate.client_name
+        estimate.notes = str(notes or getattr(estimate, "notes", "") or "").strip()[:120]
         estimate.subtotal = amount
         estimate.tax_amount = Decimal("0.00")
         estimate.total_amount = amount
         estimate.status = QuickEstimate.STATUS_CREATED
         estimate.payment_status = _normalize_quick_estimate_progress_status(payment_status or getattr(estimate, "payment_status", ""))
+        estimate.payment_mode = str(payment_mode or getattr(estimate, "payment_mode", "") or "").strip().lower()[:20]
         estimate.job_status = _normalize_quick_estimate_progress_status(job_status or getattr(estimate, "job_status", ""))
         estimate.delivery_status = _normalize_quick_estimate_progress_status(delivery_status or getattr(estimate, "delivery_status", ""))
-        if estimate.payment_status == QuickEstimate.PROGRESS_COMPLETED:
+        if estimate.payment_status == QuickEstimate.PROGRESS_COMPLETED and estimate.payment_mode == "online":
             estimate.payment_proof_image = str(payment_proof_image or getattr(estimate, "payment_proof_image", "") or "")
+            if user is not None:
+                estimate.payment_verified_by = user
+        elif estimate.payment_status == QuickEstimate.PROGRESS_COMPLETED and estimate.payment_mode == "cash":
+            estimate.payment_proof_image = ""
             if user is not None:
                 estimate.payment_verified_by = user
         else:
             estimate.payment_proof_image = ""
+            estimate.payment_mode = ""
             estimate.payment_verified_by = None
         if estimate.job_status == QuickEstimate.PROGRESS_COMPLETED and user is not None:
             estimate.job_verified_by = user
@@ -9360,11 +9462,13 @@ def _site_admin_update_quick_estimate_items(
             "customer_id",
             "mobile",
             "client_name",
+            "notes",
             "subtotal",
             "tax_amount",
             "total_amount",
             "status",
             "payment_status",
+            "payment_mode",
             "job_status",
             "delivery_status",
             "payment_proof_image",
@@ -9394,7 +9498,9 @@ def _site_admin_update_quick_estimate_items(
                 "after": {
                     "mobile": estimate.mobile,
                     "client_name": estimate.client_name,
+                    "notes": estimate.notes,
                     "payment_status": estimate.payment_status,
+                    "payment_mode": estimate.payment_mode,
                     "job_status": estimate.job_status,
                     "delivery_status": estimate.delivery_status,
                     "payment_proof_image": estimate.payment_proof_image,
@@ -9601,6 +9707,7 @@ def quick_estimate_contacts(request, contact_id: str = ""):
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
+    _sync_quick_estimate_contacts_from_estimates(org, request.user)
     workspace, data, contacts, rows = _quick_estimate_contact_rows_with_counts(org)
     if request.method == "GET":
         if contact_id:
@@ -9909,13 +10016,85 @@ def quick_estimates(request, estimate_id: int = None):
             }
         )
 
+    if patch_action == "payment":
+        next_payment_status = _normalize_quick_estimate_progress_status(
+            payload.get("payment_status") or payload.get("paymentStatus") or row.payment_status
+        )
+        next_payment_mode = str(payload.get("payment_mode") or payload.get("paymentMode") or row.payment_mode or "").strip().lower()[:20]
+        if next_payment_status == QuickEstimate.PROGRESS_COMPLETED and next_payment_mode not in {"cash", "online"}:
+            return JsonResponse({"detail": "payment_mode_required", "message": "Please choose cash or online payment mode."}, status=400)
+        next_payment_proof_image = str(
+            payload.get("payment_proof_image")
+            or payload.get("paymentProofImage")
+            or getattr(row, "payment_proof_image", "")
+            or ""
+        ).strip()
+        if next_payment_status == QuickEstimate.PROGRESS_COMPLETED and next_payment_mode == "online" and not next_payment_proof_image:
+            return JsonResponse({"detail": "payment_proof_required", "message": "Please upload the payment proof image."}, status=400)
+
+        previous_snapshot = {
+            "payment_status": str(getattr(row, "payment_status", "") or ""),
+            "payment_mode": str(getattr(row, "payment_mode", "") or ""),
+            "payment_proof_image": str(getattr(row, "payment_proof_image", "") or ""),
+        }
+        row.payment_status = next_payment_status
+        row.payment_mode = next_payment_mode if next_payment_status == QuickEstimate.PROGRESS_COMPLETED else ""
+        if row.payment_status == QuickEstimate.PROGRESS_COMPLETED and row.payment_mode == "online":
+            row.payment_proof_image = next_payment_proof_image
+            row.payment_verified_by = request.user
+        elif row.payment_status == QuickEstimate.PROGRESS_COMPLETED and row.payment_mode == "cash":
+            row.payment_proof_image = ""
+            row.payment_verified_by = request.user
+        else:
+            row.payment_proof_image = ""
+            row.payment_mode = ""
+            row.payment_verified_by = None
+        row.save(update_fields=["payment_status", "payment_mode", "payment_proof_image", "payment_verified_by", "updated_at"])
+        _record_quick_estimate_history(
+            row,
+            action=QuickEstimateHistory.ACTION_UPDATED,
+            actor=request.user,
+            note=f"Payment updated for {row.estimate_number}.",
+            snapshot={
+                "before": previous_snapshot,
+                "after": {
+                    "payment_status": row.payment_status,
+                    "payment_mode": row.payment_mode,
+                    "payment_proof_image": row.payment_proof_image,
+                },
+            },
+        )
+        row = (
+            QuickEstimate.objects
+            .filter(id=row.id)
+            .select_related(
+                "organization__owner",
+                "created_by",
+                "assigned_user",
+                "assigned_by",
+                "payment_verified_by",
+                "job_verified_by",
+                "delivery_verified_by",
+            )
+            .prefetch_related("items")
+            .first()
+        ) or row
+        return JsonResponse(
+            {
+                "message": f"Payment updated for {row.estimate_number}.",
+                "quick_estimate": _serialize_quick_estimate(row, include_preview=True),
+            }
+        )
+
     raw_item_text = str(payload.get("item_text") or payload.get("message") or "").strip()
     item_text = "\n".join(line.rstrip() for line in raw_item_text.splitlines() if line.strip())
     if not item_text:
         return JsonResponse({"detail": "item_text_required", "message": "Please share the estimate item details."}, status=400)
     next_mobile = _normalize_site_admin_mobile(payload.get("mobile") or row.mobile)
     next_client_name = str(payload.get("client_name") or payload.get("clientName") or row.client_name or "").strip()[:180]
+    next_notes = str(payload.get("notes") or payload.get("note") or getattr(row, "notes", "") or "").strip()[:120]
     next_payment_status = _normalize_quick_estimate_progress_status(payload.get("payment_status") or payload.get("paymentStatus") or row.payment_status)
+    next_payment_mode = str(payload.get("payment_mode") or payload.get("paymentMode") or getattr(row, "payment_mode", "") or "").strip().lower()[:20]
     next_job_status = _normalize_quick_estimate_progress_status(payload.get("job_status") or payload.get("jobStatus") or row.job_status)
     next_delivery_status = _normalize_quick_estimate_progress_status(payload.get("delivery_status") or payload.get("deliveryStatus") or row.delivery_status)
     next_payment_proof_image = str(
@@ -9928,15 +10107,21 @@ def quick_estimates(request, estimate_id: int = None):
         return JsonResponse({"detail": "invalid_mobile", "message": "Please share a valid 10-digit mobile number."}, status=400)
     if not next_client_name:
         return JsonResponse({"detail": "client_name_required", "message": "Please share the client name."}, status=400)
+    if next_payment_status == QuickEstimate.PROGRESS_COMPLETED and next_payment_mode not in {"cash", "online"}:
+        return JsonResponse({"detail": "payment_mode_required", "message": "Please choose cash or online payment mode."}, status=400)
     if next_payment_status == QuickEstimate.PROGRESS_COMPLETED and not next_payment_proof_image:
-        return JsonResponse({"detail": "payment_proof_required", "message": "Please upload the payment proof image."}, status=400)
+        if next_payment_mode == "online":
+            return JsonResponse({"detail": "payment_proof_required", "message": "Please upload the payment proof image."}, status=400)
+        next_payment_proof_image = ""
     try:
         updated = _site_admin_update_quick_estimate_items(
             row,
             item_text,
             mobile=next_mobile,
             client_name=next_client_name,
+            notes=next_notes,
             payment_status=next_payment_status,
+            payment_mode=next_payment_mode,
             job_status=next_job_status,
             delivery_status=next_delivery_status,
             payment_proof_image=next_payment_proof_image,

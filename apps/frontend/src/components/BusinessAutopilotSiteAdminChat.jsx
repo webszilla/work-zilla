@@ -16,6 +16,7 @@ const MODULE_TABS = [
 
 const ESTIMATE_FILTER_TABS = [
   { key: "today", label: "Today" },
+  { key: "yesterday", label: "Yesterday" },
   { key: "all", label: "All" },
   { key: "paid", label: "Paid" },
   { key: "unpaid", label: "Unpaid" },
@@ -313,6 +314,22 @@ function isTodayDate(value) {
     && date.getDate() === now.getDate();
 }
 
+function isYesterdayDate(value) {
+  if (!value) {
+    return false;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return false;
+  }
+  const yesterday = new Date();
+  yesterday.setHours(0, 0, 0, 0);
+  yesterday.setDate(yesterday.getDate() - 1);
+  return date.getFullYear() === yesterday.getFullYear()
+    && date.getMonth() === yesterday.getMonth()
+    && date.getDate() === yesterday.getDate();
+}
+
 function normalizeEstimateLifecycle(row) {
   const paymentStatus = String(row?.payment_status || row?.paymentStatus || "").trim().toLowerCase();
   const jobStatus = String(row?.job_status || row?.jobStatus || "").trim().toLowerCase();
@@ -329,6 +346,9 @@ function matchEstimateFilter(row, filterKey) {
   const estimateStatus = String(row?.status || "").trim().toLowerCase();
   if (filterKey === "today") {
     return isTodayDate(row?.created_at);
+  }
+  if (filterKey === "yesterday") {
+    return isYesterdayDate(row?.created_at);
   }
   if (filterKey === "paid") {
     return ["paid", "completed"].includes(lifecycle.paymentStatus);
@@ -402,6 +422,13 @@ function getStatusProgressMeta(row) {
       tooltip: String(row?.delivery_status || row?.deliveryStatus || "").toLowerCase() === "completed" ? "Delivery Completed" : "Not Delivered",
       previewImage: "",
     },
+    {
+      key: "notes",
+      icon: "bi-journal-text",
+      completed: Boolean(String(row?.notes || row?.note || "").trim()),
+      tooltip: String(row?.notes || row?.note || "").trim() ? "View Notes" : "No Notes",
+      previewImage: "",
+    },
   ];
 }
 
@@ -459,10 +486,13 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   const [prompt, setPrompt] = useState("");
   const [editMobile, setEditMobile] = useState("");
   const [editClientName, setEditClientName] = useState("");
+  const [editNotes, setEditNotes] = useState("");
   const [editPaymentCompleted, setEditPaymentCompleted] = useState(false);
+  const [editPaymentMode, setEditPaymentMode] = useState("");
   const [editJobCompleted, setEditJobCompleted] = useState(false);
   const [editDeliveryCompleted, setEditDeliveryCompleted] = useState(false);
   const [editPaymentProofImage, setEditPaymentProofImage] = useState("");
+  const [paymentModeModalOpen, setPaymentModeModalOpen] = useState(false);
   const [paymentProofModalOpen, setPaymentProofModalOpen] = useState(false);
   const [paymentProofDraftImage, setPaymentProofDraftImage] = useState("");
   const [paymentProofError, setPaymentProofError] = useState("");
@@ -495,6 +525,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   const [historyRows, setHistoryRows] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyEstimateNumber, setHistoryEstimateNumber] = useState("");
+  const [notesModal, setNotesModal] = useState(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteConfirmEstimate, setDeleteConfirmEstimate] = useState(null);
   const [deleteReason, setDeleteReason] = useState("");
@@ -698,9 +729,37 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   }
 
   function openPaymentProofModal() {
+    setEditPaymentMode("online");
     setPaymentProofDraftImage(editPaymentProofImage || "");
     setPaymentProofError("");
     setPaymentProofModalOpen(true);
+  }
+
+  function openPaymentModeModal() {
+    setPaymentModeModalOpen(true);
+    setPaymentProofError("");
+  }
+
+  function closePaymentModeModal() {
+    setPaymentModeModalOpen(false);
+  }
+
+  function selectCashPaymentMode() {
+    setEditPaymentMode("cash");
+    setEditPaymentCompleted(true);
+    setEditPaymentProofImage("");
+    setPaymentProofDraftImage("");
+    setPaymentProofError("");
+    setNotice("");
+    setPaymentModeModalOpen(false);
+    setPaymentProofModalOpen(false);
+  }
+
+  function selectOnlinePaymentMode() {
+    setEditPaymentMode("online");
+    setNotice("");
+    setPaymentModeModalOpen(false);
+    openPaymentProofModal();
   }
 
   function closePaymentProofModal() {
@@ -715,21 +774,26 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       return;
     }
     setEditPaymentProofImage(paymentProofDraftImage);
+    setEditPaymentMode("online");
     setEditPaymentCompleted(true);
     setPaymentProofModalOpen(false);
     setPaymentProofError("");
+    setNotice("");
   }
 
   function handlePaymentStatusToggle(nextChecked) {
     if (nextChecked) {
-      openPaymentProofModal();
+      openPaymentModeModal();
       return;
     }
     setEditPaymentCompleted(false);
+    setEditPaymentMode("");
     setEditPaymentProofImage("");
     setPaymentProofDraftImage("");
+    setPaymentModeModalOpen(false);
     setPaymentProofModalOpen(false);
     setPaymentProofError("");
+    setNotice("");
   }
 
   function openStatusPreview(event, image, tooltip) {
@@ -791,6 +855,14 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   }
 
   async function handleStatusIconClick(row, item) {
+    if (item.key === "notes") {
+      setNotesModal({
+        estimateNumber: String(row?.estimate_number || row?.estimateNumber || ""),
+        clientName: String(row?.client_name || row?.clientName || ""),
+        notes: String(row?.notes || row?.note || "").trim(),
+      });
+      return;
+    }
     if (item.previewImage) {
       openStatusPreviewModal(item.previewImage, item.tooltip);
       return;
@@ -1174,7 +1246,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       setPrompt(editableText);
       setEditMobile(String(estimate.mobile || ""));
       setEditClientName(String(estimate.client_name || ""));
+      setEditNotes(String(estimate.notes || ""));
       setEditPaymentCompleted(String(estimate.payment_status || "").toLowerCase() === "completed");
+      setEditPaymentMode(String(estimate.payment_mode || "").trim().toLowerCase());
       setEditJobCompleted(String(estimate.job_status || "").toLowerCase() === "completed");
       setEditDeliveryCompleted(String(estimate.delivery_status || "").toLowerCase() === "completed");
       setEditPaymentProofImage(String(estimate.payment_proof_image || ""));
@@ -1313,7 +1387,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
             quick_estimate_id: editingEstimate.id,
             mobile: editMobile,
             client_name: editClientName,
+            notes: editNotes,
             payment_status: editPaymentCompleted ? "completed" : "non_completed",
+            payment_mode: editPaymentCompleted ? editPaymentMode : "",
             job_status: editJobCompleted ? "completed" : "non_completed",
             delivery_status: editDeliveryCompleted ? "completed" : "non_completed",
             payment_proof_image: editPaymentCompleted ? editPaymentProofImage : "",
@@ -1334,7 +1410,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
               ...row,
               mobile: editMobile,
               client_name: editClientName,
+              notes: editNotes,
               payment_status: editPaymentCompleted ? "completed" : "non_completed",
+              payment_mode: editPaymentCompleted ? editPaymentMode : "",
               job_status: editJobCompleted ? "completed" : "non_completed",
               delivery_status: editDeliveryCompleted ? "completed" : "non_completed",
               payment_proof_image: editPaymentCompleted ? editPaymentProofImage : "",
@@ -1636,6 +1714,15 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                       disabled={sending}
                       aria-label="Edit client name"
                     />
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={editNotes}
+                      onChange={(event) => setEditNotes(event.target.value.slice(0, 120))}
+                      placeholder="Notes / advance amount / extra details"
+                      disabled={sending}
+                      aria-label="Edit notes"
+                    />
                   </div>
                   <div className="ba-site-admin-chat__status-grid">
                     <label className="form-check form-switch ba-site-admin-chat__status-switch">
@@ -1683,12 +1770,24 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                       <button
                         type="button"
                         className="btn btn-outline-light ba-site-admin-chat__proof-btn"
-                        onClick={openPaymentProofModal}
+                        onClick={openPaymentModeModal}
                         disabled={sending}
                       >
-                        {editPaymentProofImage ? "Change Payment Proof" : "Upload Payment Proof"}
+                        {editPaymentMode === "online" ? "Payment Mode: Online" : editPaymentMode === "cash" ? "Payment Mode: Cash" : "Choose Payment Mode"}
                       </button>
-                      {editPaymentProofImage ? <small>Payment proof attached.</small> : <small>Payment proof required.</small>}
+                      {editPaymentMode === "online" ? (
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn-outline-light ba-site-admin-chat__proof-btn"
+                            onClick={openPaymentProofModal}
+                            disabled={sending}
+                          >
+                            {editPaymentProofImage ? "Change Payment Proof" : "Upload Payment Proof"}
+                          </button>
+                          {editPaymentProofImage ? <small>Payment proof attached.</small> : <small>Payment proof required.</small>}
+                        </>
+                      ) : editPaymentMode === "cash" ? <small>Cash payment selected.</small> : <small>Select payment mode.</small>}
                     </div>
                   ) : null}
                 </>
@@ -2123,6 +2222,42 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
           </div>
         </div>
       ) : null}
+      {paymentModeModalOpen ? (
+        <div className="ba-site-admin-chat__modal-overlay" onClick={closePaymentModeModal}>
+          <div className="ba-site-admin-chat__modal ba-site-admin-chat__modal--compact" onClick={(event) => event.stopPropagation()}>
+            <div className="ba-site-admin-chat__modal-head">
+              <div>
+                <div className="ba-site-admin-chat__modal-title">Select Payment Mode</div>
+                <div className="ba-site-admin-chat__modal-subtitle">Payment status completed-ku cash illa online choose pannunga.</div>
+              </div>
+              <button
+                type="button"
+                className="ba-assistant__close d-inline-flex align-items-center justify-content-center"
+                aria-label="Close payment mode popup"
+                onClick={closePaymentModeModal}
+              >
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="ba-site-admin-chat__mode-actions">
+              <button
+                type="button"
+                className="btn btn-outline-light ba-site-admin-chat__proof-btn"
+                onClick={selectCashPaymentMode}
+              >
+                Cash
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary ba-site-admin-chat__proof-btn"
+                onClick={selectOnlinePaymentMode}
+              >
+                Online
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {paymentProofModalOpen ? (
         <div className="ba-site-admin-chat__modal-overlay" onClick={() => !paymentProofUploading && closePaymentProofModal()}>
           <div className="ba-site-admin-chat__modal ba-site-admin-chat__modal--proof" onClick={(event) => event.stopPropagation()}>
@@ -2318,7 +2453,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       ) : null}
       {historyOpen ? (
         <div className="ba-site-admin-chat__modal-overlay" onClick={() => setHistoryOpen(false)}>
-          <div className="ba-site-admin-chat__modal" onClick={(event) => event.stopPropagation()}>
+          <div className="ba-site-admin-chat__modal ba-site-admin-chat__history-modal" onClick={(event) => event.stopPropagation()}>
             <div className="ba-site-admin-chat__modal-head">
               <div>
                 <div className="ba-site-admin-chat__modal-title">Estimate History</div>
@@ -2366,6 +2501,31 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                   <span className="crm-inline-suggestions__item-main">No history found</span>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {notesModal ? (
+        <div className="ba-site-admin-chat__modal-overlay" onClick={() => setNotesModal(null)}>
+          <div className="ba-site-admin-chat__modal ba-site-admin-chat__modal--compact" onClick={(event) => event.stopPropagation()}>
+            <div className="ba-site-admin-chat__modal-head">
+              <div>
+                <div className="ba-site-admin-chat__modal-title">Estimate Notes</div>
+                <div className="ba-site-admin-chat__modal-subtitle">
+                  {notesModal.estimateNumber || "Quick Estimate"} {notesModal.clientName ? `- ${notesModal.clientName}` : ""}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="ba-assistant__close d-inline-flex align-items-center justify-content-center"
+                aria-label="Close notes popup"
+                onClick={() => setNotesModal(null)}
+              >
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="ba-site-admin-chat__history-note">
+              {notesModal.notes || "No notes added."}
             </div>
           </div>
         </div>

@@ -4,6 +4,7 @@ import { apiFetch } from "../lib/api.js";
 
 const STATUS_TABS = [
   { key: "today", label: "Today" },
+  { key: "yesterday", label: "Yesterday" },
   { key: "all", label: "All" },
   { key: "paid", label: "Paid" },
   { key: "unpaid", label: "Unpaid" },
@@ -11,6 +12,36 @@ const STATUS_TABS = [
   { key: "delivery_pending", label: "Delivery Pending" },
   { key: "cancelled", label: "Cancel" },
 ];
+
+const CONTACT_ESTIMATE_PAGE_SIZE = 5;
+
+function getPaymentModeLabel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "online") {
+    return "Online";
+  }
+  if (normalized === "cash") {
+    return "Cash";
+  }
+  return "";
+}
+
+function resolvePaymentStatusLabel(row) {
+  if (!isCompletedProgress(row?.payment_status)) {
+    return "Pending";
+  }
+  const paymentModeLabel = getPaymentModeLabel(row?.payment_mode);
+  return paymentModeLabel ? `Done (${paymentModeLabel})` : "Done";
+}
+
+function readImageFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Unable to read selected image."));
+    reader.readAsDataURL(file);
+  });
+}
 
 function SiteAdminHeaderTabs() {
   const location = useLocation();
@@ -67,6 +98,22 @@ function isTodayDate(value) {
     && date.getDate() === now.getDate();
 }
 
+function isYesterdayDate(value) {
+  if (!value) {
+    return false;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return false;
+  }
+  const yesterday = new Date();
+  yesterday.setHours(0, 0, 0, 0);
+  yesterday.setDate(yesterday.getDate() - 1);
+  return date.getFullYear() === yesterday.getFullYear()
+    && date.getMonth() === yesterday.getMonth()
+    && date.getDate() === yesterday.getDate();
+}
+
 function matchEstimateFilter(row, filterKey) {
   const paymentStatus = String(row?.payment_status || "").trim().toLowerCase();
   const jobStatus = String(row?.job_status || "").trim().toLowerCase();
@@ -87,10 +134,46 @@ function matchEstimateFilter(row, filterKey) {
   if (filterKey === "today") {
     return isTodayDate(row?.created_at);
   }
+  if (filterKey === "yesterday") {
+    return isYesterdayDate(row?.created_at);
+  }
   if (filterKey === "cancelled") {
     return ["cancelled", "canceled"].includes(estimateStatus);
   }
   return true;
+}
+
+function isCompletedProgress(value) {
+  return String(value || "").trim().toLowerCase() === "completed";
+}
+
+function buildContactEstimateStats(estimates) {
+  const safeRows = Array.isArray(estimates) ? estimates : [];
+  return {
+    paid: safeRows.filter((row) => isCompletedProgress(row?.payment_status)).length,
+    unpaid: safeRows.filter((row) => !isCompletedProgress(row?.payment_status)).length,
+    pendingJob: safeRows.filter((row) => !["completed", "done", "ready", "cancelled", "canceled"].includes(String(row?.job_status || "").trim().toLowerCase())).length,
+    deliveryPending: safeRows.filter((row) => !isCompletedProgress(row?.delivery_status)).length,
+    total: safeRows.length,
+  };
+}
+
+function formatCountLabel(value) {
+  return String(Math.max(0, Number(value) || 0)).padStart(2, "0");
+}
+
+function getDateOnlyValue(value) {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export default function BusinessAutopilotSiteAdminDataViewPage() {
@@ -105,10 +188,87 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [entityType, setEntityType] = useState("client");
   const [entityQuery, setEntityQuery] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [tableSearch, setTableSearch] = useState("");
   const [contactSaving, setContactSaving] = useState(false);
   const [editingContactId, setEditingContactId] = useState("");
   const [contactForm, setContactForm] = useState({ client_name: "", mobile: "" });
+  const [contactDetailsModal, setContactDetailsModal] = useState(null);
+  const [contactEstimateSearch, setContactEstimateSearch] = useState("");
+  const [contactEstimatePage, setContactEstimatePage] = useState(1);
+  const [contactEstimateStatusFilter, setContactEstimateStatusFilter] = useState("all");
+  const [paymentModeFilter, setPaymentModeFilter] = useState("all");
+  const [paymentModalRow, setPaymentModalRow] = useState(null);
+  const [paymentModalMode, setPaymentModalMode] = useState("");
+  const [paymentProofDraftImage, setPaymentProofDraftImage] = useState("");
+  const [paymentProofError, setPaymentProofError] = useState("");
+  const [paymentSaving, setPaymentSaving] = useState(false);
+  const [inlineTooltip, setInlineTooltip] = useState(null);
+
+  function openInlineTooltip(event, text) {
+    if (typeof window === "undefined" || !text) {
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const tooltipWidth = Math.min(220, Math.max(110, String(text).length * 7 + 20));
+    setInlineTooltip({
+      text,
+      top: Math.max(12, rect.top - 42),
+      left: Math.max(12, Math.min(window.innerWidth - tooltipWidth - 12, rect.left + (rect.width / 2) - (tooltipWidth / 2))),
+      width: tooltipWidth,
+    });
+  }
+
+  function closeInlineTooltip() {
+    setInlineTooltip(null);
+  }
+
+  async function loadPaymentProofFromFiles(files) {
+    try {
+      const imageFile = Array.from(files || []).find((item) => String(item?.type || "").startsWith("image/"));
+      if (!imageFile) {
+        setPaymentProofError("Please choose an image file only.");
+        return false;
+      }
+      const imageData = await readImageFileAsDataUrl(imageFile);
+      if (!imageData) {
+        setPaymentProofError("Unable to load selected image.");
+        return false;
+      }
+      setPaymentProofDraftImage(imageData);
+      setPaymentProofError("");
+      return true;
+    } catch (error) {
+      setPaymentProofError(error?.message || "Unable to read selected image.");
+      return false;
+    }
+  }
+
+  async function handlePaymentProofDrop(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    await loadPaymentProofFromFiles(event.dataTransfer?.files);
+  }
+
+  async function handlePaymentProofPaste(event) {
+    const items = event.clipboardData?.items || [];
+    const imageItem = Array.from(items).find((item) => String(item?.type || "").startsWith("image/"));
+    if (!imageItem) {
+      return;
+    }
+    event.preventDefault();
+    const file = imageItem.getAsFile();
+    if (!file) {
+      return;
+    }
+    await loadPaymentProofFromFiles([file]);
+  }
+
+  async function handlePaymentProofFileChange(event) {
+    await loadPaymentProofFromFiles(event.target.files);
+    event.target.value = "";
+  }
 
   useEffect(() => {
     let ignore = false;
@@ -172,6 +332,50 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
     setContactNotice("");
   }
 
+  function closeEditContact() {
+    if (contactSaving) {
+      return;
+    }
+    setEditingContactId("");
+    setContactForm({ client_name: "", mobile: "" });
+  }
+
+  function openPaymentModal(row) {
+    setPaymentModalRow(row);
+    setPaymentModalMode(String(row?.payment_mode || "").trim().toLowerCase() || "cash");
+    setPaymentProofDraftImage(String(row?.payment_proof_image || ""));
+    setPaymentProofError("");
+  }
+
+  function closePaymentModal(force = false) {
+    if (paymentSaving && !force) {
+      return;
+    }
+    setPaymentModalRow(null);
+    setPaymentModalMode("");
+    setPaymentProofDraftImage("");
+    setPaymentProofError("");
+  }
+
+  function closeContactDetailsModal() {
+    setContactDetailsModal(null);
+    setContactEstimateSearch("");
+    setContactEstimatePage(1);
+    setContactEstimateStatusFilter("all");
+  }
+
+  function openEstimateViewForContact(row) {
+    const clientName = String(row?.client_name || "").trim();
+    setViewMode("estimates");
+    setStatusFilter("all");
+    setEntityType("client");
+    setEntityQuery(clientName);
+    setTableSearch("");
+    setFromDate("");
+    setToDate("");
+    closeContactDetailsModal();
+  }
+
   async function saveContactEdit() {
     if (!editingContactId) {
       return;
@@ -221,7 +425,7 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
   const entityOptions = useMemo(() => {
     const values = new Map();
     rows.forEach((row) => {
-      const label = entityType === "employee"
+      const label = entityType === "user"
         ? String(row?.assigned_user_name || "").trim()
         : String(row?.client_name || "").trim();
       if (label) {
@@ -231,6 +435,21 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
     return Array.from(values.values()).sort((left, right) => left.localeCompare(right));
   }, [entityType, rows]);
 
+  const contactEstimateMap = useMemo(() => {
+    const nextMap = new Map();
+    rows.forEach((row) => {
+      const key = String(row?.customer_id || "").trim();
+      if (!key) {
+        return;
+      }
+      if (!nextMap.has(key)) {
+        nextMap.set(key, []);
+      }
+      nextMap.get(key).push(row);
+    });
+    return nextMap;
+  }, [rows]);
+
   const filteredRows = useMemo(() => {
     const entityFilter = entityQuery.trim().toLowerCase();
     const search = tableSearch.trim().toLowerCase();
@@ -238,8 +457,20 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
       if (!matchEstimateFilter(row, statusFilter)) {
         return false;
       }
+      const rowDate = getDateOnlyValue(row?.created_at);
+      if (fromDate && (!rowDate || rowDate < fromDate)) {
+        return false;
+      }
+      if (toDate && (!rowDate || rowDate > toDate)) {
+        return false;
+      }
+      if (statusFilter === "paid" && paymentModeFilter !== "all") {
+        if (String(row?.payment_mode || "").trim().toLowerCase() !== paymentModeFilter) {
+          return false;
+        }
+      }
       if (entityFilter) {
-        if (entityType === "employee") {
+        if (entityType === "user") {
           const employeeValue = String(row?.assigned_user_name || "").toLowerCase();
           if (!employeeValue.includes(entityFilter)) {
             return false;
@@ -265,14 +496,24 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
       ].map((value) => String(value || "").toLowerCase()).join(" ");
       return haystack.includes(search);
     });
-  }, [entityQuery, entityType, rows, statusFilter, tableSearch]);
+  }, [entityQuery, entityType, fromDate, paymentModeFilter, rows, statusFilter, tableSearch, toDate]);
+
+  const enrichedContacts = useMemo(() => contacts.map((row) => {
+    const linkedRows = contactEstimateMap.get(String(row?.id || "").trim()) || [];
+    return {
+      ...row,
+      linked_estimate_count: linkedRows.length || row?.linked_estimate_count || 0,
+      linked_estimate_stats: buildContactEstimateStats(linkedRows),
+      linked_estimates: linkedRows,
+    };
+  }), [contactEstimateMap, contacts]);
 
   const filteredContacts = useMemo(() => {
     const search = tableSearch.trim().toLowerCase();
     if (!search) {
-      return contacts;
+      return enrichedContacts;
     }
-    return contacts.filter((row) => {
+    return enrichedContacts.filter((row) => {
       const haystack = [
         row?.client_name,
         row?.mobile,
@@ -281,7 +522,110 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
       ].map((value) => String(value || "").toLowerCase()).join(" ");
       return haystack.includes(search);
     });
-  }, [contacts, tableSearch]);
+  }, [enrichedContacts, tableSearch]);
+
+  const filteredEstimateTotal = useMemo(() => (
+    filteredRows.reduce((sum, row) => {
+      const numeric = Number.parseFloat(String(row?.total_amount || row?.subtotal || "0").replace(/,/g, ""));
+      return sum + (Number.isFinite(numeric) ? numeric : 0);
+    }, 0)
+  ), [filteredRows]);
+
+  const filteredContactEstimates = useMemo(() => {
+    const estimates = Array.isArray(contactDetailsModal?.linked_estimates) ? contactDetailsModal.linked_estimates : [];
+    const search = contactEstimateSearch.trim().toLowerCase();
+    const statusFilteredRows = estimates.filter((row) => {
+      if (contactEstimateStatusFilter === "paid") {
+        return isCompletedProgress(row?.payment_status);
+      }
+      if (contactEstimateStatusFilter === "unpaid") {
+        return !isCompletedProgress(row?.payment_status);
+      }
+      if (contactEstimateStatusFilter === "pending_job") {
+        return !["completed", "done", "ready", "cancelled", "canceled"].includes(String(row?.job_status || "").trim().toLowerCase());
+      }
+      if (contactEstimateStatusFilter === "delivery_pending") {
+        return !isCompletedProgress(row?.delivery_status);
+      }
+      return true;
+    });
+    if (!search) {
+      return statusFilteredRows;
+    }
+    return statusFilteredRows.filter((row) => [
+      row?.estimate_number,
+      row?.client_name,
+      row?.mobile,
+      row?.assigned_user_name,
+      row?.status,
+      row?.payment_status,
+      row?.job_status,
+      row?.delivery_status,
+      row?.total_amount,
+    ].map((value) => String(value || "").toLowerCase()).join(" ").includes(search));
+  }, [contactDetailsModal, contactEstimateSearch, contactEstimateStatusFilter]);
+
+  const paginatedContactEstimates = useMemo(() => {
+    const startIndex = (contactEstimatePage - 1) * CONTACT_ESTIMATE_PAGE_SIZE;
+    return filteredContactEstimates.slice(startIndex, startIndex + CONTACT_ESTIMATE_PAGE_SIZE);
+  }, [contactEstimatePage, filteredContactEstimates]);
+
+  const contactEstimateTotalPages = Math.max(1, Math.ceil(filteredContactEstimates.length / CONTACT_ESTIMATE_PAGE_SIZE));
+
+  useEffect(() => {
+    if (contactEstimatePage > contactEstimateTotalPages) {
+      setContactEstimatePage(contactEstimateTotalPages);
+    }
+  }, [contactEstimatePage, contactEstimateTotalPages]);
+
+  useEffect(() => {
+    if (fromDate && toDate && toDate < fromDate) {
+      setToDate("");
+    }
+  }, [fromDate, toDate]);
+
+  useEffect(() => {
+    if (statusFilter !== "paid") {
+      setPaymentModeFilter("all");
+    }
+  }, [statusFilter]);
+
+  async function savePaymentUpdate() {
+    if (!paymentModalRow?.id || paymentSaving) {
+      return;
+    }
+    if (!paymentModalMode) {
+      setPaymentProofError("Please choose cash or online payment mode.");
+      return;
+    }
+    if (paymentModalMode === "online" && !paymentProofDraftImage) {
+      setPaymentProofError("Please upload the payment proof image.");
+      return;
+    }
+    setPaymentSaving(true);
+    setNotice("");
+    try {
+      const data = await apiFetch(`/api/business-autopilot/quick-estimates/${paymentModalRow.id}/`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          action: "payment",
+          payment_status: "completed",
+          payment_mode: paymentModalMode,
+          payment_proof_image: paymentModalMode === "online" ? paymentProofDraftImage : "",
+        }),
+      });
+      const updatedRow = data?.quick_estimate || null;
+      if (updatedRow?.id) {
+        setRows((prev) => prev.map((row) => (Number(row?.id) === Number(updatedRow.id) ? updatedRow : row)));
+      }
+      setNotice(String(data?.message || "Payment updated."));
+      closePaymentModal(true);
+    } catch (error) {
+      setPaymentProofError(error?.message || "Unable to update payment status.");
+    } finally {
+      setPaymentSaving(false);
+    }
+  }
 
   return (
     <div className="ba-assistant ba-assistant--page ba-site-admin-chat ba-site-admin-data-view">
@@ -297,15 +641,13 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
             >
               Contact Data
             </button>
-            {viewMode === "contacts" ? (
-              <button
-                type="button"
-                className="btn btn-outline-light ba-site-admin-chat__cta-btn"
-                onClick={openEstimateView}
-              >
-                Estimate Data
-              </button>
-            ) : null}
+            <button
+              type="button"
+              className={`btn ba-site-admin-chat__cta-btn ${viewMode === "estimates" ? "btn-primary" : "btn-outline-light"}`}
+              onClick={openEstimateView}
+            >
+              Estimate Data
+            </button>
             <button
               type="button"
               className="btn btn-outline-light ba-site-admin-chat__cta-btn"
@@ -341,12 +683,12 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
                       className="form-select ba-site-admin-data-view__type-select"
                       value={entityType}
                       onChange={(event) => {
-                        setEntityType(event.target.value === "employee" ? "employee" : "client");
+                        setEntityType(event.target.value === "user" ? "user" : "client");
                         setEntityQuery("");
                       }}
                     >
                       <option value="client">Client</option>
-                      <option value="employee">User</option>
+                      <option value="user">User</option>
                     </select>
                     <input
                       type="search"
@@ -354,17 +696,46 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
                       className="form-control ba-site-admin-data-view__entity-search"
                       value={entityQuery}
                       onChange={(event) => setEntityQuery(event.target.value)}
-                      placeholder={entityType === "employee" ? "Select user..." : "Select client..."}
+                      placeholder={entityType === "user" ? "Select user..." : "Select client..."}
+                    />
+                    <input
+                      type="date"
+                      className="form-control ba-site-admin-data-view__date-input"
+                      data-wz-date-enhance="off"
+                      value={fromDate}
+                      onChange={(event) => setFromDate(event.target.value)}
+                      placeholder="From Date"
+                      aria-label="From date"
+                      title="From Date"
+                    />
+                    <input
+                      type="date"
+                      className="form-control ba-site-admin-data-view__date-input"
+                      data-wz-date-enhance="off"
+                      value={toDate}
+                      onChange={(event) => setToDate(event.target.value)}
+                      min={fromDate || undefined}
+                      placeholder="To Date"
+                      aria-label="To date"
+                      title="To Date"
+                    />
+                    <input
+                      type="search"
+                      className="form-control ba-site-admin-data-view__search"
+                      value={tableSearch}
+                      onChange={(event) => setTableSearch(event.target.value)}
+                      placeholder="Search table..."
                     />
                   </>
-                ) : <div />}
-                <input
-                  type="search"
-                  className={`form-control ba-site-admin-data-view__search ${viewMode === "contacts" ? "ba-site-admin-data-view__search--contacts" : ""}`}
-                  value={tableSearch}
-                  onChange={(event) => setTableSearch(event.target.value)}
-                  placeholder={viewMode === "contacts" ? "Search contact table..." : "Search table..."}
-                />
+                ) : (
+                  <input
+                    type="search"
+                    className="form-control ba-site-admin-data-view__search ba-site-admin-data-view__search--contacts"
+                    value={tableSearch}
+                    onChange={(event) => setTableSearch(event.target.value)}
+                    placeholder="Search contact table..."
+                  />
+                )}
                 {viewMode === "estimates" ? (
                   <datalist id="ba-site-admin-data-view-options">
                     {entityOptions.map((option) => (
@@ -375,10 +746,37 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
               </div>
             </div>
 
-            <div className="ba-site-admin-chat__table-count">
-              {viewMode === "contacts"
-                ? `${filteredContacts.length} contact${filteredContacts.length === 1 ? "" : "s"}`
-                : `${filteredRows.length} estimate${filteredRows.length === 1 ? "" : "s"}`}
+            <div className={`ba-site-admin-chat__table-count ${viewMode === "estimates" ? "ba-site-admin-data-view__table-count-row" : ""}`}>
+              <span>
+                {viewMode === "contacts"
+                  ? `${filteredContacts.length} contact${filteredContacts.length === 1 ? "" : "s"}`
+                  : `${filteredRows.length} estimate${filteredRows.length === 1 ? "" : "s"} / Total : ${formatCurrencyText(filteredEstimateTotal)}`}
+              </span>
+              {viewMode === "estimates" && statusFilter === "paid" ? (
+                <div className="ba-site-admin-data-view__payment-mode-tabs" role="tablist" aria-label="Paid payment mode filters">
+                  <button
+                    type="button"
+                    className={`ba-site-admin-chat__table-tab ${paymentModeFilter === "all" ? "is-active" : ""}`}
+                    onClick={() => setPaymentModeFilter("all")}
+                  >
+                    All
+                  </button>
+                  <button
+                    type="button"
+                    className={`ba-site-admin-chat__table-tab ${paymentModeFilter === "cash" ? "is-active" : ""}`}
+                    onClick={() => setPaymentModeFilter("cash")}
+                  >
+                    Cash
+                  </button>
+                  <button
+                    type="button"
+                    className={`ba-site-admin-chat__table-tab ${paymentModeFilter === "online" ? "is-active" : ""}`}
+                    onClick={() => setPaymentModeFilter("online")}
+                  >
+                    Online
+                  </button>
+                </div>
+              ) : null}
             </div>
             {viewMode === "contacts"
               ? (contactNotice ? <div className="ba-assistant__setup-note">{contactNotice}</div> : null)
@@ -407,11 +805,90 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
                           <td>{index + 1}</td>
                           <td>{row.client_name || "-"}</td>
                           <td>{row.mobile || "-"}</td>
-                          <td>{row.linked_estimate_count || 0}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="ba-site-admin-data-view__linked-summary"
+                              onClick={() => {
+                                setContactDetailsModal(row);
+                                setContactEstimateSearch("");
+                                setContactEstimatePage(1);
+                              }}
+                            >
+                              <span className="ba-site-admin-data-view__linked-summary-row">
+                                <span
+                                  className="ba-site-admin-data-view__linked-stat is-paid"
+                                  aria-label={`Paid ${formatCountLabel(row?.linked_estimate_stats?.paid)}`}
+                                  onMouseEnter={(event) => openInlineTooltip(event, "Paid")}
+                                  onMouseLeave={closeInlineTooltip}
+                                  onFocus={(event) => openInlineTooltip(event, "Paid")}
+                                  onBlur={closeInlineTooltip}
+                                >
+                                  <i className="bi bi-cash-coin" aria-hidden="true" />
+                                  <span>{formatCountLabel(row?.linked_estimate_stats?.paid)}</span>
+                                </span>
+                                <span
+                                  className="ba-site-admin-data-view__linked-stat is-unpaid"
+                                  aria-label={`Unpaid ${formatCountLabel(row?.linked_estimate_stats?.unpaid)}`}
+                                  onMouseEnter={(event) => openInlineTooltip(event, "Unpaid")}
+                                  onMouseLeave={closeInlineTooltip}
+                                  onFocus={(event) => openInlineTooltip(event, "Unpaid")}
+                                  onBlur={closeInlineTooltip}
+                                >
+                                  <i className="bi bi-cash-coin" aria-hidden="true" />
+                                  <span>{formatCountLabel(row?.linked_estimate_stats?.unpaid)}</span>
+                                </span>
+                                <span
+                                  className="ba-site-admin-data-view__linked-stat is-pending-job"
+                                  aria-label={`Pending Job ${formatCountLabel(row?.linked_estimate_stats?.pendingJob)}`}
+                                  onMouseEnter={(event) => openInlineTooltip(event, "Pending Job")}
+                                  onMouseLeave={closeInlineTooltip}
+                                  onFocus={(event) => openInlineTooltip(event, "Pending Job")}
+                                  onBlur={closeInlineTooltip}
+                                >
+                                  <i className="bi bi-briefcase" aria-hidden="true" />
+                                  <span>{formatCountLabel(row?.linked_estimate_stats?.pendingJob)}</span>
+                                </span>
+                                <span
+                                  className="ba-site-admin-data-view__linked-stat is-delivery-pending"
+                                  aria-label={`Delivery Pending ${formatCountLabel(row?.linked_estimate_stats?.deliveryPending)}`}
+                                  onMouseEnter={(event) => openInlineTooltip(event, "Delivery Pending")}
+                                  onMouseLeave={closeInlineTooltip}
+                                  onFocus={(event) => openInlineTooltip(event, "Delivery Pending")}
+                                  onBlur={closeInlineTooltip}
+                                >
+                                  <i className="bi bi-truck" aria-hidden="true" />
+                                  <span>{formatCountLabel(row?.linked_estimate_stats?.deliveryPending)}</span>
+                                </span>
+                              </span>
+                            </button>
+                          </td>
                           <td>
                             <div className="ba-site-admin-data-view__contact-actions">
-                              <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => startEditContact(row)}>Edit</button>
-                              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => deleteContact(row)}>Delete</button>
+                              <button
+                                type="button"
+                                className="ba-site-admin-data-view__icon-btn is-edit"
+                                onClick={() => startEditContact(row)}
+                                aria-label="Edit contact"
+                                onMouseEnter={(event) => openInlineTooltip(event, "Edit contact")}
+                                onMouseLeave={closeInlineTooltip}
+                                onFocus={(event) => openInlineTooltip(event, "Edit contact")}
+                                onBlur={closeInlineTooltip}
+                              >
+                                <i className="bi bi-pencil" aria-hidden="true" />
+                              </button>
+                              <button
+                                type="button"
+                                className="ba-site-admin-data-view__icon-btn is-delete"
+                                onClick={() => deleteContact(row)}
+                                aria-label="Delete contact"
+                                onMouseEnter={(event) => openInlineTooltip(event, "Delete contact")}
+                                onMouseLeave={closeInlineTooltip}
+                                onFocus={(event) => openInlineTooltip(event, "Delete contact")}
+                                onBlur={closeInlineTooltip}
+                              >
+                                <i className="bi bi-trash" aria-hidden="true" />
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -458,7 +935,14 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
                             <div className="ba-site-admin-chat__estimate-meta">
                               <span>{String(row.status || "created").replace(/_/g, " ")}</span>
                               <small>
-                                Payment: {String(row.payment_status || "").toLowerCase() === "completed" ? "Done" : "Pending"} | Delivery: {String(row.delivery_status || "").toLowerCase() === "completed" ? "Done" : "Pending"}
+                                <button
+                                  type="button"
+                                  className="ba-site-admin-data-view__status-link"
+                                  onClick={() => openPaymentModal(row)}
+                                >
+                                  Payment: {resolvePaymentStatusLabel(row)}
+                                </button>
+                                {" "} | Delivery: {String(row.delivery_status || "").toLowerCase() === "completed" ? "Done" : "Pending"}
                               </small>
                             </div>
                           </td>
@@ -475,40 +959,342 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
               )}
             </div>
             {editingContactId ? (
-              <div className="ba-site-admin-data-view__contact-editor">
-                <div className="row g-3">
-                  <div className="col-12 col-md-6">
-                    <label className="form-label">Client Name</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={contactForm.client_name}
-                      onChange={(event) => setContactForm((prev) => ({ ...prev, client_name: event.target.value }))}
-                    />
+              <div className="ba-site-admin-chat__modal-overlay" onClick={closeEditContact}>
+                <div className="ba-site-admin-chat__modal ba-site-admin-data-view__edit-modal" onClick={(event) => event.stopPropagation()}>
+                  <div className="ba-site-admin-chat__modal-head">
+                    <div>
+                      <div className="ba-site-admin-chat__modal-title">Edit Contact</div>
+                      <div className="ba-site-admin-chat__modal-subtitle">
+                        Update contact name and mobile number.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="ba-assistant__close d-inline-flex align-items-center justify-content-center"
+                      aria-label="Close edit contact popup"
+                      onClick={closeEditContact}
+                    >
+                      <i className="bi bi-x-lg" aria-hidden="true" />
+                    </button>
                   </div>
-                  <div className="col-12 col-md-6">
-                    <label className="form-label">Mobile Number</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={contactForm.mobile}
-                      onChange={(event) => setContactForm((prev) => ({ ...prev, mobile: event.target.value }))}
-                    />
+                  <div className="ba-site-admin-data-view__contact-editor">
+                    <div className="row g-3">
+                      <div className="col-12 col-md-6">
+                        <label className="form-label">Client Name</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={contactForm.client_name}
+                          onChange={(event) => setContactForm((prev) => ({ ...prev, client_name: event.target.value }))}
+                        />
+                      </div>
+                      <div className="col-12 col-md-6">
+                        <label className="form-label">Mobile Number</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={contactForm.mobile}
+                          onChange={(event) => setContactForm((prev) => ({ ...prev, mobile: event.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <div className="ba-site-admin-data-view__contact-editor-actions">
+                      <button type="button" className="btn btn-outline-light ba-site-admin-chat__cta-btn" onClick={closeEditContact}>
+                        Cancel
+                      </button>
+                      <button type="button" className="btn btn-primary ba-site-admin-chat__cta-btn" disabled={contactSaving} onClick={saveContactEdit}>
+                        {contactSaving ? "Saving..." : "Save"}
+                      </button>
+                    </div>
                   </div>
                 </div>
-                <div className="ba-site-admin-data-view__contact-editor-actions">
-                  <button type="button" className="btn btn-outline-light ba-site-admin-chat__cta-btn" onClick={() => setEditingContactId("")}>
-                    Cancel
-                  </button>
-                  <button type="button" className="btn btn-primary ba-site-admin-chat__cta-btn" disabled={contactSaving} onClick={saveContactEdit}>
-                    {contactSaving ? "Saving..." : "Save"}
-                  </button>
+              </div>
+            ) : null}
+            {contactDetailsModal ? (
+              <div className="ba-site-admin-chat__modal-overlay" onClick={closeContactDetailsModal}>
+                <div className="ba-site-admin-chat__modal ba-site-admin-data-view__details-modal" onClick={(event) => event.stopPropagation()}>
+                  <div className="ba-site-admin-chat__modal-head">
+                    <div>
+                      <div className="ba-site-admin-chat__modal-title">Linked Estimate Details</div>
+                      <div className="ba-site-admin-chat__modal-subtitle">
+                        <button
+                          type="button"
+                          className="ba-site-admin-chat__inline-link"
+                          onClick={() => openEstimateViewForContact(contactDetailsModal)}
+                        >
+                          {contactDetailsModal.client_name || "-"} ({contactDetailsModal.mobile || "-"})
+                        </button>{" "}
+                        estimate records.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="ba-assistant__close d-inline-flex align-items-center justify-content-center"
+                      aria-label="Close linked estimate popup"
+                      onClick={closeContactDetailsModal}
+                    >
+                      <i className="bi bi-x-lg" aria-hidden="true" />
+                    </button>
+                  </div>
+                  <div className="ba-site-admin-data-view__details-toolbar">
+                    <div className="ba-site-admin-data-view__details-summary">
+                      <button
+                        type="button"
+                        className={`ba-site-admin-data-view__details-summary-link ${contactEstimateStatusFilter === "paid" ? "is-active" : ""}`}
+                        onClick={() => {
+                          setContactEstimateStatusFilter("paid");
+                          setContactEstimatePage(1);
+                        }}
+                      >
+                        Paid: {formatCountLabel(contactDetailsModal?.linked_estimate_stats?.paid)}
+                      </button>
+                      <button
+                        type="button"
+                        className={`ba-site-admin-data-view__details-summary-link ${contactEstimateStatusFilter === "unpaid" ? "is-active" : ""}`}
+                        onClick={() => {
+                          setContactEstimateStatusFilter("unpaid");
+                          setContactEstimatePage(1);
+                        }}
+                      >
+                        Unpaid: {formatCountLabel(contactDetailsModal?.linked_estimate_stats?.unpaid)}
+                      </button>
+                      <button
+                        type="button"
+                        className={`ba-site-admin-data-view__details-summary-link ${contactEstimateStatusFilter === "pending_job" ? "is-active" : ""}`}
+                        onClick={() => {
+                          setContactEstimateStatusFilter("pending_job");
+                          setContactEstimatePage(1);
+                        }}
+                      >
+                        Pending Job: {formatCountLabel(contactDetailsModal?.linked_estimate_stats?.pendingJob)}
+                      </button>
+                      <button
+                        type="button"
+                        className={`ba-site-admin-data-view__details-summary-link ${contactEstimateStatusFilter === "delivery_pending" ? "is-active" : ""}`}
+                        onClick={() => {
+                          setContactEstimateStatusFilter("delivery_pending");
+                          setContactEstimatePage(1);
+                        }}
+                      >
+                        Delivery Pending: {formatCountLabel(contactDetailsModal?.linked_estimate_stats?.deliveryPending)}
+                      </button>
+                    </div>
+                    <div className="ba-site-admin-chat__table-count ba-site-admin-data-view__details-count">
+                      <button
+                        type="button"
+                        className={`ba-site-admin-data-view__details-summary-link ${contactEstimateStatusFilter === "all" ? "is-active" : ""}`}
+                        onClick={() => {
+                          setContactEstimateStatusFilter("all");
+                          setContactEstimatePage(1);
+                        }}
+                      >
+                        {filteredContactEstimates.length} estimate{filteredContactEstimates.length === 1 ? "" : "s"}
+                      </button>
+                    </div>
+                    <input
+                      type="search"
+                      className="form-control"
+                      value={contactEstimateSearch}
+                      onChange={(event) => {
+                        setContactEstimateSearch(event.target.value);
+                        setContactEstimatePage(1);
+                      }}
+                      placeholder="Search estimate details..."
+                    />
+                  </div>
+                  <div className="ba-site-admin-chat__history-list">
+                    <div className="table-responsive ba-site-admin-chat__table-wrap">
+                      <table className="table align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>S.No</th>
+                            <th>Estimate</th>
+                            <th>Date</th>
+                            <th>Status</th>
+                            <th>Assigned User</th>
+                            <th className="text-end">Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {paginatedContactEstimates.length ? (
+                            paginatedContactEstimates.map((row, index) => (
+                              <tr key={row.id}>
+                                <td>{((contactEstimatePage - 1) * CONTACT_ESTIMATE_PAGE_SIZE) + index + 1}</td>
+                                <td>
+                                  <div className="ba-site-admin-chat__estimate-meta">
+                                    <strong>{row.estimate_number || "-"}</strong>
+                                    <small>{row.mobile || "-"}</small>
+                                  </div>
+                                </td>
+                                <td>{formatDateLabel(row.created_at)}</td>
+                                <td>
+                                  <div className="ba-site-admin-chat__estimate-meta">
+                                    <span>{String(row.status || "created").replace(/_/g, " ")}</span>
+                                    <small>
+                                      Payment: {resolvePaymentStatusLabel(row)} | Job: {["completed", "done", "ready"].includes(String(row?.job_status || "").trim().toLowerCase()) ? "Done" : "Pending"} | Delivery: {isCompletedProgress(row.delivery_status) ? "Done" : "Pending"}
+                                    </small>
+                                  </div>
+                                </td>
+                                <td>{row.assigned_user_name || "Unassigned"}</td>
+                                <td className="text-end fw-semibold">{formatCurrencyText(row.total_amount || row.subtotal)}</td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td colSpan={6} className="text-center py-4 text-secondary">No estimate data found for this client.</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    {filteredContactEstimates.length > CONTACT_ESTIMATE_PAGE_SIZE ? (
+                      <div className="ba-site-admin-chat__table-pagination">
+                        <button
+                          type="button"
+                          className="btn btn-outline-light ba-site-admin-chat__cta-btn"
+                          disabled={contactEstimatePage <= 1}
+                          onClick={() => setContactEstimatePage((prev) => Math.max(1, prev - 1))}
+                        >
+                          Previous
+                        </button>
+                        <span>Page {contactEstimatePage} of {contactEstimateTotalPages}</span>
+                        <button
+                          type="button"
+                          className="btn btn-outline-light ba-site-admin-chat__cta-btn"
+                          disabled={contactEstimatePage >= contactEstimateTotalPages}
+                          onClick={() => setContactEstimatePage((prev) => Math.min(contactEstimateTotalPages, prev + 1))}
+                        >
+                          Next
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+            {paymentModalRow ? (
+              <div className="ba-site-admin-chat__modal-overlay" onClick={closePaymentModal}>
+                <div className="ba-site-admin-chat__modal ba-site-admin-chat__modal--proof" onClick={(event) => event.stopPropagation()}>
+                  <div className="ba-site-admin-chat__modal-head">
+                    <div>
+                      <div className="ba-site-admin-chat__modal-title">Payment Status</div>
+                      <div className="ba-site-admin-chat__modal-subtitle">
+                        {paymentModalRow.estimate_number || "-"} - {paymentModalRow.client_name || "-"}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="ba-assistant__close d-inline-flex align-items-center justify-content-center"
+                      aria-label="Close payment status popup"
+                      onClick={closePaymentModal}
+                      disabled={paymentSaving}
+                    >
+                      <i className="bi bi-x-lg" aria-hidden="true" />
+                    </button>
+                  </div>
+                  <div className="ba-site-admin-data-view__payment-mode-picker">
+                    <button
+                      type="button"
+                      className={`ba-site-admin-chat__table-tab ${paymentModalMode === "cash" ? "is-active" : ""}`}
+                      onClick={() => {
+                        setPaymentModalMode("cash");
+                        setPaymentProofError("");
+                      }}
+                    >
+                      Cash
+                    </button>
+                    <button
+                      type="button"
+                      className={`ba-site-admin-chat__table-tab ${paymentModalMode === "online" ? "is-active" : ""}`}
+                      onClick={() => {
+                        setPaymentModalMode("online");
+                        setPaymentProofError("");
+                      }}
+                    >
+                      Online
+                    </button>
+                  </div>
+                  {paymentModalMode === "online" ? (
+                    <>
+                      <div
+                        className={`ba-site-admin-chat__proof-dropzone ${paymentProofDraftImage ? "has-image" : ""}`}
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = "copy";
+                        }}
+                        onDrop={handlePaymentProofDrop}
+                        onPaste={handlePaymentProofPaste}
+                        tabIndex={0}
+                        role="button"
+                        aria-label="Payment proof upload area"
+                      >
+                        {paymentProofDraftImage ? (
+                          <img src={paymentProofDraftImage} alt="Payment proof preview" className="ba-site-admin-chat__proof-preview" />
+                        ) : (
+                          <div className="ba-site-admin-chat__proof-placeholder">
+                            <i className="bi bi-image" aria-hidden="true" />
+                            <strong>Drop image here</strong>
+                            <span>Paste screenshot or choose image file</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="ba-site-admin-chat__proof-actions">
+                        <label className="btn btn-outline-light ba-site-admin-chat__proof-btn">
+                          <input type="file" accept="image/*" hidden onChange={handlePaymentProofFileChange} />
+                          Choose Image
+                        </label>
+                        {paymentProofDraftImage ? (
+                          <button
+                            type="button"
+                            className="btn btn-outline-light ba-site-admin-chat__proof-btn"
+                            onClick={() => setPaymentProofDraftImage("")}
+                            disabled={paymentSaving}
+                          >
+                            Remove
+                          </button>
+                        ) : null}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="ba-site-admin-data-view__payment-mode-note">
+                      Cash selected. Save pannina `Payment: Done (Cash)` nu update aagum.
+                    </div>
+                  )}
+                  {paymentProofError ? <div className="ba-assistant__setup-note">{paymentProofError}</div> : null}
+                  <div className="ba-site-admin-chat__modal-actions">
+                    <button
+                      type="button"
+                      className="btn btn-outline-light ba-site-admin-chat__modal-btn ba-site-admin-chat__cta-btn"
+                      onClick={closePaymentModal}
+                      disabled={paymentSaving}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary ba-site-admin-chat__modal-btn ba-site-admin-chat__cta-btn"
+                      onClick={savePaymentUpdate}
+                      disabled={paymentSaving}
+                    >
+                      {paymentSaving ? "Saving..." : "Save"}
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : null}
           </div>
         </div>
       </div>
+      {inlineTooltip?.text ? (
+        <div
+          className="ba-site-admin-chat__status-tooltip"
+          style={{ top: `${inlineTooltip.top}px`, left: `${inlineTooltip.left}px`, width: `${inlineTooltip.width}px` }}
+          role="tooltip"
+        >
+          {inlineTooltip.text}
+          <span className="ba-site-admin-chat__status-tooltip-arrow" aria-hidden="true" />
+        </div>
+      ) : null}
     </div>
   );
 }

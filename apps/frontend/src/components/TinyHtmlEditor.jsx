@@ -48,6 +48,15 @@ function wrapOverflowTextNode(textNode) {
   wrapper.appendChild(textNode);
 }
 
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function TinyHtmlEditor({
   label,
   value,
@@ -204,6 +213,57 @@ export default function TinyHtmlEditor({
 
   function focusEditor() {
     editorRef.current?.focus();
+  }
+
+  function insertImageAtCursor(src) {
+    const editor = editorRef.current;
+    if (!editor || !src) {
+      return;
+    }
+    focusEditor();
+    unwrapOverflowMarks(editor);
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount || !editor.contains(selection.anchorNode)) {
+      editor.innerHTML += `<p><img src="${src}" alt="Pasted image" style="display:block;max-width:96px;height:auto;margin:8px auto;" /></p>`;
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    const image = document.createElement("img");
+    image.src = src;
+    image.alt = "Pasted image";
+    image.style.display = "block";
+    image.style.maxWidth = "96px";
+    image.style.height = "auto";
+    image.style.margin = "8px auto";
+    range.insertNode(image);
+    range.setStartAfter(image);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  async function handlePaste(event) {
+    if (isCodeView) {
+      return;
+    }
+    const clipboardItems = Array.from(event.clipboardData?.items || []);
+    const imageItem = clipboardItems.find((item) => item.type?.startsWith("image/"));
+    if (!imageItem) {
+      return;
+    }
+    const file = imageItem.getAsFile();
+    if (!file) {
+      return;
+    }
+    event.preventDefault();
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      insertImageAtCursor(dataUrl);
+      emitChange();
+    } catch (error) {
+      console.error("Failed to paste image into editor", error);
+    }
   }
 
   function runCommand(command, commandValue = null) {
@@ -409,6 +469,7 @@ export default function TinyHtmlEditor({
             style={{ minHeight }}
             onInput={emitChange}
             onBlur={emitChange}
+            onPaste={handlePaste}
             aria-describedby={statusId}
           />
         )}

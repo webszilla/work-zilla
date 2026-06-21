@@ -203,6 +203,7 @@ class QuickEstimate(models.Model):
     estimate_number = models.CharField(max_length=32)
     mobile = models.CharField(max_length=30, db_index=True)
     client_name = models.CharField(max_length=180)
+    notes = models.TextField(blank=True, default="")
     email = models.EmailField(blank=True, default="")
     address = models.TextField(blank=True, default="")
     gst_number = models.CharField(max_length=32, blank=True, default="")
@@ -214,6 +215,7 @@ class QuickEstimate(models.Model):
     job_status = models.CharField(max_length=20, choices=PROGRESS_CHOICES, default=PROGRESS_NON_COMPLETED)
     delivery_status = models.CharField(max_length=20, choices=PROGRESS_CHOICES, default=PROGRESS_NON_COMPLETED)
     payment_proof_image = models.TextField(blank=True, default="")
+    payment_mode = models.CharField(max_length=20, blank=True, default="")
     payment_verified_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
