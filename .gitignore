@@ -67,6 +67,7 @@ apps/desktop_app/mac_helper/build/
 Thumbs.db
 Desktop.ini
 .DS_Store
+.expo/
 
 # Large release binaries (use Git LFS or Releases)
 apps/backend/static/downloads/WorkZillaAgent.dmg

@@ -29,6 +29,7 @@ module.exports = {
       "expo-router",
       "expo-secure-store",
       "expo-asset",
+      "expo-font",
       "expo-updates"
     ],
     experiments: {
