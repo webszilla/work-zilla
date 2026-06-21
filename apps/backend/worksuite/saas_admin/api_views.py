@@ -308,8 +308,12 @@ def _serialize_setup_payload():
                 "name": plan.name,
                 "product_slug": plan.product.slug if plan.product else "monitor",
                 "price": plan.price,
+                "actual_monthly_price": plan.actual_monthly_price,
+                "actual_yearly_price": plan.actual_yearly_price,
                 "monthly_price": plan.monthly_price,
                 "yearly_price": plan.yearly_price,
+                "actual_usd_monthly_price": plan.actual_usd_monthly_price,
+                "actual_usd_yearly_price": plan.actual_usd_yearly_price,
                 "usd_monthly_price": plan.usd_monthly_price,
                 "usd_yearly_price": plan.usd_yearly_price,
                 "addon_monthly_price": plan.addon_monthly_price,
@@ -353,6 +357,10 @@ def _serialize_setup_payload():
                 "yearly_price_inr": float(plan.yearly_price_inr or 0),
                 "monthly_price_usd": float(plan.monthly_price_usd or 0),
                 "yearly_price_usd": float(plan.yearly_price_usd or 0),
+                "actual_monthly_price_inr": float(plan.actual_monthly_price or 0),
+                "actual_yearly_price_inr": float(plan.actual_yearly_price or 0),
+                "actual_monthly_price_usd": float(plan.actual_usd_monthly_price or 0),
+                "actual_yearly_price_usd": float(plan.actual_usd_yearly_price or 0),
                 "max_users": plan.max_users,
                 "device_limit_per_user": plan.device_limit_per_user,
                 "storage_limit_gb": plan.storage_limit_gb,
@@ -3285,8 +3293,12 @@ def _plan_payload(plan):
         "name": plan.name,
         "product_slug": product_slug,
         "product_name": product.name if product else "Work Suite",
+        "actual_monthly_price": plan.actual_monthly_price,
+        "actual_yearly_price": plan.actual_yearly_price,
         "monthly_price": plan.monthly_price,
         "yearly_price": plan.yearly_price,
+        "actual_usd_monthly_price": plan.actual_usd_monthly_price,
+        "actual_usd_yearly_price": plan.actual_usd_yearly_price,
         "usd_monthly_price": plan.usd_monthly_price,
         "usd_yearly_price": plan.usd_yearly_price,
         "addon_monthly_price": plan.addon_monthly_price,
@@ -3425,10 +3437,18 @@ def _update_plan_from_payload(plan, data):
         set_float("monthly_price", data.get("monthly_price"))
     if "yearly_price" in data:
         set_float("yearly_price", data.get("yearly_price"))
+    if "actual_monthly_price" in data:
+        set_float("actual_monthly_price", data.get("actual_monthly_price"))
+    if "actual_yearly_price" in data:
+        set_float("actual_yearly_price", data.get("actual_yearly_price"))
     if "usd_monthly_price" in data:
         set_float("usd_monthly_price", data.get("usd_monthly_price"))
     if "usd_yearly_price" in data:
         set_float("usd_yearly_price", data.get("usd_yearly_price"))
+    if "actual_usd_monthly_price" in data:
+        set_float("actual_usd_monthly_price", data.get("actual_usd_monthly_price"))
+    if "actual_usd_yearly_price" in data:
+        set_float("actual_usd_yearly_price", data.get("actual_usd_yearly_price"))
     if "addon_monthly_price" in data:
         set_float("addon_monthly_price", data.get("addon_monthly_price"))
     if "addon_yearly_price" in data:
@@ -3442,7 +3462,9 @@ def _update_plan_from_payload(plan, data):
     if "addon_agent_yearly_price" in data:
         set_float("addon_agent_yearly_price", data.get("addon_agent_yearly_price"))
     derived_pairs = (
+        ("actual_monthly_price", "actual_yearly_price"),
         ("monthly_price", "yearly_price"),
+        ("actual_usd_monthly_price", "actual_usd_yearly_price"),
         ("usd_monthly_price", "usd_yearly_price"),
         ("addon_monthly_price", "addon_yearly_price"),
         ("addon_usd_monthly_price", "addon_usd_yearly_price"),
@@ -5970,6 +5992,10 @@ def storage_plan_upsert(request):
                     "id": plan.id,
                     "product_id": plan.product_id,
                     "name": plan.name,
+                    "actual_monthly_price_inr": float(plan.actual_monthly_price or 0),
+                    "actual_yearly_price_inr": float(plan.actual_yearly_price or 0),
+                    "actual_monthly_price_usd": float(plan.actual_usd_monthly_price or 0),
+                    "actual_yearly_price_usd": float(plan.actual_usd_yearly_price or 0),
                     "monthly_price_inr": float(plan.monthly_price_inr or 0),
                     "yearly_price_inr": float(plan.yearly_price_inr or 0),
                     "monthly_price_usd": float(plan.monthly_price_usd or 0),
@@ -6003,6 +6029,10 @@ def storage_plan_upsert(request):
             plan_id=payload.get("id"),
             product=product_id,
             name=(payload.get("name") or "").strip(),
+            actual_monthly_price=payload.get("actual_monthly_price_inr") or payload.get("actual_monthly_price") or 0,
+            actual_yearly_price=payload.get("actual_yearly_price_inr") or 0,
+            actual_usd_monthly_price=payload.get("actual_monthly_price_usd") or payload.get("actual_usd_monthly_price") or 0,
+            actual_usd_yearly_price=payload.get("actual_yearly_price_usd") or 0,
             monthly_price=payload.get("monthly_price") or 0,
             yearly_price=payload.get("yearly_price") or 0,
             usd_monthly_price=payload.get("usd_monthly_price") or 0,
@@ -6024,6 +6054,10 @@ def storage_plan_upsert(request):
         "id": plan.id,
         "product_id": plan.product_id,
         "name": plan.name,
+        "actual_monthly_price_inr": float(plan.actual_monthly_price or 0),
+        "actual_yearly_price_inr": float(plan.actual_yearly_price or 0),
+        "actual_monthly_price_usd": float(plan.actual_usd_monthly_price or 0),
+        "actual_yearly_price_usd": float(plan.actual_usd_yearly_price or 0),
         "monthly_price_inr": float(plan.monthly_price_inr or 0),
         "yearly_price_inr": float(plan.yearly_price_inr or 0),
         "monthly_price_usd": float(plan.monthly_price_usd or 0),

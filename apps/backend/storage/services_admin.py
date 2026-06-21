@@ -51,6 +51,10 @@ def upsert_plan(
     plan_id=None,
     product,
     name,
+    actual_monthly_price=0,
+    actual_yearly_price=0,
+    actual_usd_monthly_price=0,
+    actual_usd_yearly_price=0,
     monthly_price=0,
     yearly_price=0,
     usd_monthly_price=0,
@@ -74,10 +78,16 @@ def upsert_plan(
         plan = Plan.objects.filter(id=plan_id).first()
         if not plan:
             raise ValueError("plan_not_found")
+        actual_monthly_inr = actual_monthly_price or 0
+        actual_monthly_usd = actual_usd_monthly_price or 0
         monthly_inr = monthly_price_inr or monthly_price or 0
         monthly_usd = monthly_price_usd or usd_monthly_price or 0
         plan.product = product
         plan.name = name
+        plan.actual_monthly_price = actual_monthly_inr
+        plan.actual_yearly_price = _derive_yearly_price_from_monthly(actual_monthly_inr)
+        plan.actual_usd_monthly_price = actual_monthly_usd
+        plan.actual_usd_yearly_price = _derive_yearly_price_from_monthly(actual_monthly_usd)
         plan.monthly_price_inr = monthly_inr
         plan.yearly_price_inr = _derive_yearly_price_from_monthly(monthly_inr)
         plan.monthly_price_usd = monthly_usd
@@ -95,6 +105,10 @@ def upsert_plan(
         plan.save(update_fields=[
             "product",
             "name",
+            "actual_monthly_price",
+            "actual_yearly_price",
+            "actual_usd_monthly_price",
+            "actual_usd_yearly_price",
             "monthly_price",
             "yearly_price",
             "usd_monthly_price",
@@ -111,11 +125,17 @@ def upsert_plan(
             "is_active",
         ])
         return plan
+    actual_monthly_inr = actual_monthly_price or 0
+    actual_monthly_usd = actual_usd_monthly_price or 0
     monthly_inr = monthly_price_inr or monthly_price or 0
     monthly_usd = monthly_price_usd or usd_monthly_price or 0
     return Plan.objects.create(
         product=product,
         name=name,
+        actual_monthly_price=actual_monthly_inr,
+        actual_yearly_price=_derive_yearly_price_from_monthly(actual_monthly_inr),
+        actual_usd_monthly_price=actual_monthly_usd,
+        actual_usd_yearly_price=_derive_yearly_price_from_monthly(actual_monthly_usd),
         monthly_price_inr=monthly_inr,
         yearly_price_inr=_derive_yearly_price_from_monthly(monthly_inr),
         monthly_price_usd=monthly_usd,

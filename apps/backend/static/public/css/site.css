@@ -1374,6 +1374,17 @@ img {
   margin: 14px 0 4px;
 }
 
+.plan-price-original {
+  display: block;
+  width: 100%;
+  color: #94a3b8;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.1;
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+
 .erp-base-price {
   display: flex;
   flex-direction: column;

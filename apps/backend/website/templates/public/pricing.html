@@ -194,6 +194,7 @@
 
     function updatePrices() {
       document.querySelectorAll("[data-plan-card]").forEach((card) => {
+        const originalPriceTarget = card.querySelector("[data-original-price]");
         const priceTarget = card.querySelector("[data-price]");
         const suffixTarget = card.querySelector("[data-suffix]");
         const planId = card.getAttribute("data-plan-id");
@@ -208,6 +209,14 @@
         const value = pricingState.billing === "yearly"
           ? (pricingState.currency === "usd" ? plan.price_usdt_year : plan.price_inr_year)
           : (pricingState.currency === "usd" ? plan.price_usdt_month : plan.price_inr_month);
+        const actualValue = pricingState.billing === "yearly"
+          ? (pricingState.currency === "usd" ? plan.actual_price_usdt_year : plan.actual_price_inr_year)
+          : (pricingState.currency === "usd" ? plan.actual_price_usdt_month : plan.actual_price_inr_month);
+        if (originalPriceTarget) {
+          const showActualPrice = !isFree && Number(actualValue || 0) > Number(value || 0);
+          originalPriceTarget.textContent = showActualPrice ? formatPrice(actualValue, pricingState.currency) : "";
+          originalPriceTarget.style.display = showActualPrice ? "" : "none";
+        }
         priceTarget.textContent = isFree ? "0" : formatPrice(value, pricingState.currency);
         if (suffixTarget) {
           const extra = suffixTarget.dataset.extra || "";
@@ -1134,6 +1143,7 @@
                       ? escapeHtml(impositionPlanDescription(plan.name))
                 : "Visibility controls and activity insights built for teams."}</p>
           <div class="plan-price ${isBusinessAutopilot && !isFreePlan ? "erp-base-price" : ""}">
+            <span class="plan-price-original" data-original-price style="display:none;"></span>
             <span data-price>Custom</span>
             <span class="price-suffix-inline" data-suffix data-extra="${trialSuffix ? ` / ${trialSuffix}` : ""}"></span>
           </div>

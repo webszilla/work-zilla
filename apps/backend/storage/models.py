@@ -136,6 +136,10 @@ class Product(models.Model):
 class Plan(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="plans")
     name = models.CharField(max_length=120)
+    actual_monthly_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    actual_yearly_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    actual_usd_monthly_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    actual_usd_yearly_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     monthly_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     yearly_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     usd_monthly_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)

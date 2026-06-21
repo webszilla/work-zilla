@@ -1527,6 +1527,10 @@ export default function SaasAdminProductPage() {
       ? (plan
         ? {
             name: plan.name || "",
+            actual_monthly_price_inr: plan.actual_monthly_price_inr ?? plan.actual_monthly_price ?? "",
+            actual_yearly_price_inr: plan.actual_yearly_price_inr ?? plan.actual_yearly_price ?? "",
+            actual_monthly_price_usd: plan.actual_monthly_price_usd ?? plan.actual_usd_monthly_price ?? "",
+            actual_yearly_price_usd: plan.actual_yearly_price_usd ?? plan.actual_usd_yearly_price ?? "",
             monthly_price_inr: plan.monthly_price_inr ?? plan.monthly_price ?? "",
             yearly_price_inr: plan.yearly_price_inr ?? plan.yearly_price ?? "",
             monthly_price_usd: plan.monthly_price_usd ?? plan.usd_monthly_price ?? "",
@@ -1540,6 +1544,10 @@ export default function SaasAdminProductPage() {
           }
         : {
             name: "",
+            actual_monthly_price_inr: "",
+            actual_yearly_price_inr: "",
+            actual_monthly_price_usd: "",
+            actual_yearly_price_usd: "",
             monthly_price_inr: "",
             yearly_price_inr: "",
             monthly_price_usd: "",
@@ -1555,8 +1563,12 @@ export default function SaasAdminProductPage() {
       ? (plan
         ? {
             name: plan.name || "",
+            actual_monthly_price: plan.actual_monthly_price ?? "",
+            actual_yearly_price: plan.actual_yearly_price ?? "",
             monthly_price: plan.monthly_price ?? "",
             yearly_price: plan.yearly_price ?? "",
+            actual_usd_monthly_price: plan.actual_usd_monthly_price ?? "",
+            actual_usd_yearly_price: plan.actual_usd_yearly_price ?? "",
             usd_monthly_price: plan.usd_monthly_price ?? "",
             usd_yearly_price: plan.usd_yearly_price ?? "",
             addon_monthly_price: plan.addon_monthly_price ?? "",
@@ -1568,8 +1580,12 @@ export default function SaasAdminProductPage() {
           }
         : {
             name: "",
+            actual_monthly_price: "",
+            actual_yearly_price: "",
             monthly_price: "",
             yearly_price: "",
+            actual_usd_monthly_price: "",
+            actual_usd_yearly_price: "",
             usd_monthly_price: "",
             usd_yearly_price: "",
             addon_monthly_price: "",
@@ -1583,8 +1599,12 @@ export default function SaasAdminProductPage() {
       ? (plan
         ? {
             name: plan.name || "",
+            actual_monthly_price: plan.actual_monthly_price ?? "",
+            actual_yearly_price: plan.actual_yearly_price ?? "",
             monthly_price: plan.monthly_price ?? "",
             yearly_price: plan.yearly_price ?? "",
+            actual_usd_monthly_price: plan.actual_usd_monthly_price ?? "",
+            actual_usd_yearly_price: plan.actual_usd_yearly_price ?? "",
             usd_monthly_price: plan.usd_monthly_price ?? "",
             usd_yearly_price: plan.usd_yearly_price ?? "",
             company_count: features.company_count ?? 1,
@@ -1603,8 +1623,12 @@ export default function SaasAdminProductPage() {
           }
         : {
             name: "",
+            actual_monthly_price: "",
+            actual_yearly_price: "",
             monthly_price: "",
             yearly_price: "",
+            actual_usd_monthly_price: "",
+            actual_usd_yearly_price: "",
             usd_monthly_price: "",
             usd_yearly_price: "",
             company_count: 1,
@@ -1625,8 +1649,12 @@ export default function SaasAdminProductPage() {
       ? (plan
         ? {
             name: plan.name || "",
+            actual_monthly_price: plan.actual_monthly_price ?? "",
+            actual_yearly_price: plan.actual_yearly_price ?? "",
             monthly_price: plan.monthly_price ?? "",
             yearly_price: plan.yearly_price ?? "",
+            actual_usd_monthly_price: plan.actual_usd_monthly_price ?? "",
+            actual_usd_yearly_price: plan.actual_usd_yearly_price ?? "",
             usd_monthly_price: plan.usd_monthly_price ?? "",
             usd_yearly_price: plan.usd_yearly_price ?? "",
             addon_monthly_price: plan.addon_monthly_price ?? "",
@@ -1646,8 +1674,12 @@ export default function SaasAdminProductPage() {
           }
         : {
             name: "",
+            actual_monthly_price: "",
+            actual_yearly_price: "",
             monthly_price: "",
             yearly_price: "",
+            actual_usd_monthly_price: "",
+            actual_usd_yearly_price: "",
             usd_monthly_price: "",
             usd_yearly_price: "",
             addon_monthly_price: "",
@@ -1667,8 +1699,12 @@ export default function SaasAdminProductPage() {
       ? (plan
         ? {
             name: plan.name || "",
+            actual_monthly_price: plan.actual_monthly_price ?? "",
+            actual_yearly_price: plan.actual_yearly_price ?? "",
             monthly_price: plan.monthly_price ?? "",
             yearly_price: plan.yearly_price ?? "",
+            actual_usd_monthly_price: plan.actual_usd_monthly_price ?? "",
+            actual_usd_yearly_price: plan.actual_usd_yearly_price ?? "",
             usd_monthly_price: plan.usd_monthly_price ?? "",
             usd_yearly_price: plan.usd_yearly_price ?? "",
             addon_monthly_price: plan.addon_monthly_price ?? "",
@@ -1683,8 +1719,12 @@ export default function SaasAdminProductPage() {
           }
         : {
             name: "",
+            actual_monthly_price: "",
+            actual_yearly_price: "",
             monthly_price: "",
             yearly_price: "",
+            actual_usd_monthly_price: "",
+            actual_usd_yearly_price: "",
             usd_monthly_price: "",
             usd_yearly_price: "",
             addon_monthly_price: "",
@@ -1799,6 +1839,8 @@ export default function SaasAdminProductPage() {
     try {
       if (isStorageProduct) {
         const trimmedName = (planModal.form.name || "").trim();
+        const derivedActualYearlyPriceInr = deriveYearlyPrice(planModal.form.actual_monthly_price_inr);
+        const derivedActualYearlyPriceUsd = deriveYearlyPrice(planModal.form.actual_monthly_price_usd);
         const derivedYearlyPriceInr = deriveYearlyPrice(planModal.form.monthly_price_inr);
         const derivedYearlyPriceUsd = deriveYearlyPrice(planModal.form.monthly_price_usd);
         const requiredFields = [
@@ -1829,6 +1871,10 @@ export default function SaasAdminProductPage() {
         const payload = {
           id: planModal.mode === "edit" ? planModal.planId : undefined,
           name: trimmedName,
+          actual_monthly_price_inr: planModal.form.actual_monthly_price_inr === "" ? 0 : planModal.form.actual_monthly_price_inr,
+          actual_yearly_price_inr: derivedActualYearlyPriceInr === "" ? 0 : derivedActualYearlyPriceInr,
+          actual_monthly_price_usd: planModal.form.actual_monthly_price_usd === "" ? 0 : planModal.form.actual_monthly_price_usd,
+          actual_yearly_price_usd: derivedActualYearlyPriceUsd === "" ? 0 : derivedActualYearlyPriceUsd,
           monthly_price_inr: planModal.form.monthly_price_inr,
           yearly_price_inr: derivedYearlyPriceInr,
           monthly_price_usd: planModal.form.monthly_price_usd,
@@ -1850,6 +1896,8 @@ export default function SaasAdminProductPage() {
       }
       if (isDigitalAutomationProduct) {
         const trimmedName = (planModal.form.name || "").trim();
+        const derivedActualYearlyPrice = deriveYearlyPrice(planModal.form.actual_monthly_price);
+        const derivedActualUsdYearlyPrice = deriveYearlyPrice(planModal.form.actual_usd_monthly_price);
         const derivedYearlyPrice = deriveYearlyPrice(planModal.form.monthly_price);
         const derivedUsdYearlyPrice = deriveYearlyPrice(planModal.form.usd_monthly_price);
         const requiredFields = [
@@ -1902,8 +1950,12 @@ export default function SaasAdminProductPage() {
           name: trimmedName,
           product_slug: slug,
           duration_months: 1,
+          actual_monthly_price: planModal.form.actual_monthly_price === "" ? 0 : planModal.form.actual_monthly_price,
+          actual_yearly_price: derivedActualYearlyPrice === "" ? 0 : derivedActualYearlyPrice,
           monthly_price: planModal.form.monthly_price,
           yearly_price: derivedYearlyPrice,
+          actual_usd_monthly_price: planModal.form.actual_usd_monthly_price === "" ? 0 : planModal.form.actual_usd_monthly_price,
+          actual_usd_yearly_price: derivedActualUsdYearlyPrice === "" ? 0 : derivedActualUsdYearlyPrice,
           usd_monthly_price: planModal.form.usd_monthly_price,
           usd_yearly_price: derivedUsdYearlyPrice,
           addon_monthly_price: 0,
@@ -2042,14 +2094,20 @@ export default function SaasAdminProductPage() {
         features.business_autopilot_user_types = normalizeBusinessAutopilotUserTypes(planModal.form.business_autopilot_user_types);
       }
       const derivedYearlyPrice = deriveYearlyPrice(planModal.form.monthly_price);
+      const derivedActualYearlyPrice = deriveYearlyPrice(planModal.form.actual_monthly_price);
+      const derivedActualUsdYearlyPrice = deriveYearlyPrice(planModal.form.actual_usd_monthly_price);
       const derivedUsdYearlyPrice = deriveYearlyPrice(planModal.form.usd_monthly_price);
       const derivedAddonYearlyPrice = deriveYearlyPrice(planModal.form.addon_monthly_price);
       const derivedAddonUsdYearlyPrice = deriveYearlyPrice(planModal.form.addon_usd_monthly_price);
       const payload = {
         name: trimmedName,
         product_slug: slug,
+        actual_monthly_price: planModal.form.actual_monthly_price === "" ? 0 : planModal.form.actual_monthly_price,
+        actual_yearly_price: derivedActualYearlyPrice === "" ? 0 : derivedActualYearlyPrice,
         monthly_price: planModal.form.monthly_price,
         yearly_price: derivedYearlyPrice,
+        actual_usd_monthly_price: planModal.form.actual_usd_monthly_price === "" ? 0 : planModal.form.actual_usd_monthly_price,
+        actual_usd_yearly_price: derivedActualUsdYearlyPrice === "" ? 0 : derivedActualUsdYearlyPrice,
         usd_monthly_price: planModal.form.usd_monthly_price,
         usd_yearly_price: derivedUsdYearlyPrice,
         addon_monthly_price: planModal.form.addon_monthly_price,
@@ -5119,7 +5177,32 @@ export default function SaasAdminProductPage() {
                   {getFieldError("name")}
                 </div>
                 <div className="modal-form-field">
-                  <label className="form-label">Monthly Price (INR)</label>
+                  <label className="form-label">Actual Price (INR)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="form-control"
+                    value={planModal.form.actual_monthly_price_inr ?? ""}
+                    onChange={(event) =>
+                      setPlanModal((prev) => ({
+                        ...prev,
+                        form: { ...prev.form, actual_monthly_price_inr: event.target.value }
+                      }))
+                    }
+                  />
+                </div>
+                <div className="modal-form-field">
+                  <label className="form-label">Actual Yearly Price (INR)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="form-control"
+                    value={deriveYearlyPrice(planModal.form.actual_monthly_price_inr)}
+                    readOnly
+                  />
+                </div>
+                <div className="modal-form-field">
+                  <label className="form-label">Offer Price (INR)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -5146,7 +5229,32 @@ export default function SaasAdminProductPage() {
                   {getFieldError("yearly_price_inr")}
                 </div>
                 <div className="modal-form-field">
-                  <label className="form-label">Monthly Price (USD)</label>
+                  <label className="form-label">Actual Price (USD)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="form-control"
+                    value={planModal.form.actual_monthly_price_usd ?? ""}
+                    onChange={(event) =>
+                      setPlanModal((prev) => ({
+                        ...prev,
+                        form: { ...prev.form, actual_monthly_price_usd: event.target.value }
+                      }))
+                    }
+                  />
+                </div>
+                <div className="modal-form-field">
+                  <label className="form-label">Actual Yearly Price (USD)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="form-control"
+                    value={deriveYearlyPrice(planModal.form.actual_monthly_price_usd)}
+                    readOnly
+                  />
+                </div>
+                <div className="modal-form-field">
+                  <label className="form-label">Offer Price (USD)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -5448,7 +5556,32 @@ export default function SaasAdminProductPage() {
                     {getFieldError("name")}
                   </div>
                   <div className="modal-form-field">
-                    <label className="form-label">Monthly Price (INR)</label>
+                    <label className="form-label">Actual Price (INR)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="form-control"
+                      value={planModal.form.actual_monthly_price ?? ""}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, actual_monthly_price: event.target.value }
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">Actual Yearly Price (INR)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="form-control"
+                      value={deriveYearlyPrice(planModal.form.actual_monthly_price)}
+                      readOnly
+                    />
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">Offer Price (INR)</label>
                     <input
                       type="number"
                       step="0.01"
@@ -5475,7 +5608,32 @@ export default function SaasAdminProductPage() {
                     {getFieldError("yearly_price")}
                   </div>
                   <div className="modal-form-field">
-                    <label className="form-label">Monthly Price (USD)</label>
+                    <label className="form-label">Actual Price (USD)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="form-control"
+                      value={planModal.form.actual_usd_monthly_price ?? ""}
+                      onChange={(event) =>
+                        setPlanModal((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, actual_usd_monthly_price: event.target.value }
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">Actual Yearly Price (USD)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="form-control"
+                      value={deriveYearlyPrice(planModal.form.actual_usd_monthly_price)}
+                      readOnly
+                    />
+                  </div>
+                  <div className="modal-form-field">
+                    <label className="form-label">Offer Price (USD)</label>
                     <input
                       type="number"
                       step="0.01"
@@ -5713,7 +5871,27 @@ export default function SaasAdminProductPage() {
               {!isDigitalAutomationProduct ? (
               <>
               <div className="modal-form-field">
-                <label className="form-label">Monthly Price (INR)</label>
+                <label className="form-label">Actual Price (INR)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="form-control"
+                  value={planModal.form.actual_monthly_price ?? ""}
+                  onChange={(event) => setPlanModal((prev) => ({ ...prev, form: { ...prev.form, actual_monthly_price: event.target.value } }))}
+                />
+              </div>
+              <div className="modal-form-field">
+                <label className="form-label">Actual Yearly Price (INR)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="form-control"
+                  value={deriveYearlyPrice(planModal.form.actual_monthly_price)}
+                  readOnly
+                />
+              </div>
+              <div className="modal-form-field">
+                <label className="form-label">Offer Price (INR)</label>
                 <input
                   type="number"
                   step="0.01"
@@ -5735,7 +5913,27 @@ export default function SaasAdminProductPage() {
                 {getFieldError("yearly_price")}
               </div>
               <div className="modal-form-field">
-                <label className="form-label">Monthly Price (USD)</label>
+                <label className="form-label">Actual Price (USD)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="form-control"
+                  value={planModal.form.actual_usd_monthly_price ?? ""}
+                  onChange={(event) => setPlanModal((prev) => ({ ...prev, form: { ...prev.form, actual_usd_monthly_price: event.target.value } }))}
+                />
+              </div>
+              <div className="modal-form-field">
+                <label className="form-label">Actual Yearly Price (USD)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="form-control"
+                  value={deriveYearlyPrice(planModal.form.actual_usd_monthly_price)}
+                  readOnly
+                />
+              </div>
+              <div className="modal-form-field">
+                <label className="form-label">Offer Price (USD)</label>
                 <input
                   type="number"
                   step="0.01"
