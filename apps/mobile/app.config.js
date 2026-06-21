@@ -39,7 +39,10 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.workzilla.mobile",
-      buildNumber: String(intEnv("IOS_BUILD_NUMBER", 1))
+      buildNumber: String(intEnv("IOS_BUILD_NUMBER", 1)),
+      infoPlist: {
+        ITSAppUsesNonExemptEncryption: false
+      }
     },
     android: {
       package: "com.workzilla.mobile",

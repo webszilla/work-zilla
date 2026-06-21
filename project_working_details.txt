@@ -72,6 +72,38 @@ D) Mobile app (Expo) device/emulator preview
   - press `a` for Android emulator
   - or scan Expo QR in Expo Go
 
+E) Mobile app release / update method (Codex short note)
+- Mobile app is Expo + EAS based.
+- EAS project:
+  - account: `@webszilla`
+  - project: `work-zilla-mobile`
+  - project id: `c33ca2bf-0314-41ad-854a-de2c5b92c32f`
+- Native install flow:
+  - user installs Android APK / AAB or iOS build once
+  - after that, JS/UI updates can go through Expo Updates without reinstall if app version / runtimeVersion is unchanged
+- Important rule:
+  - JS/UI/API-only changes -> prefer EAS Update
+  - native dependency / Expo package / permission / app config changes -> new binary build required
+- Before mobile build troubleshooting:
+  - always run `cd apps/mobile && npm install`
+  - then run `cd apps/mobile && npm run typecheck`
+  - then run `cd apps/mobile && npx expo-doctor`
+- Current build scripts use `npx eas ...` from `apps/mobile/package.json`
+- Required mobile env for builds:
+  - `EXPO_PUBLIC_API_BASE_URL=https://getworkzilla.com`
+  - `EXPO_PUBLIC_UPDATE_CHANNEL=production`
+  - optional local overrides: `ANDROID_VERSION_CODE`, `IOS_BUILD_NUMBER`
+- Android build command:
+  - `cd apps/mobile && EXPO_PUBLIC_API_BASE_URL=https://getworkzilla.com EXPO_PUBLIC_UPDATE_CHANNEL=production ANDROID_VERSION_CODE=<next> npx eas-cli build --platform android --profile preview`
+- iOS build command:
+  - `cd apps/mobile && EXPO_PUBLIC_API_BASE_URL=https://getworkzilla.com EXPO_PUBLIC_UPDATE_CHANNEL=production IOS_BUILD_NUMBER=<next> npx eas-cli build --platform ios --profile preview`
+- iOS note:
+  - Apple Developer login/signing may still be required for internal distribution build creation
+- Expo login check:
+  - `cd apps/mobile && npx eas-cli whoami`
+- Build history check:
+  - `cd apps/mobile && npx eas-cli build:list --limit 5`
+
 CODEX RUN NOTE
 - If user says: `run the mobile app in browser preview`
   - first read this file
