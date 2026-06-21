@@ -216,8 +216,15 @@
           const showActualPrice = !isFree && Number(actualValue || 0) > Number(value || 0);
           originalPriceTarget.textContent = showActualPrice ? formatPrice(actualValue, pricingState.currency) : "";
           originalPriceTarget.style.display = showActualPrice ? "" : "none";
+          originalPriceTarget.style.color = "#dc2626";
+          originalPriceTarget.style.textDecoration = "line-through";
+          originalPriceTarget.style.textDecorationColor = "#dc2626";
+          originalPriceTarget.style.textDecorationThickness = "2px";
+          originalPriceTarget.style.fontWeight = "700";
         }
         priceTarget.textContent = isFree ? "0" : formatPrice(value, pricingState.currency);
+        priceTarget.style.color = isFree ? "" : "#16a34a";
+        priceTarget.style.fontWeight = "800";
         if (suffixTarget) {
           const extra = suffixTarget.dataset.extra || "";
           if (isFree) {
