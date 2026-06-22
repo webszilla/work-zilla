@@ -5,7 +5,7 @@ from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 
-from .models import User
+from .models import Organization, User
 
 
 class EmailAuthenticationForm(AuthenticationForm):
@@ -37,6 +37,12 @@ class SignupForm(forms.Form):
         if User.objects.filter(email=email).exists():
             raise ValidationError("An account with this email already exists.")
         return email
+
+    def clean_company_name(self) -> str:
+        company_name = self.cleaned_data["company_name"].strip()
+        if Organization.objects.filter(name__iexact=company_name).exists():
+            raise ValidationError("An account with this company name already exists.")
+        return company_name
 
     def clean_phone_number(self) -> str:
         phone_number = self.cleaned_data["phone_number"].strip()

@@ -5,7 +5,7 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.tokens import default_token_generator
 from django.middleware.csrf import get_token
 from django.db import models
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
@@ -44,6 +44,17 @@ def _build_core_company_key(username, user_id):
         candidate = f"{normalized}-{user_id}-{suffix}"
         suffix += 1
     return candidate
+
+
+def _signup_duplicate_company_response():
+    return Response(
+        {
+            "error": "validation_failed",
+            "field_errors": {"company_name": ["An account with this company name already exists."]},
+            "non_field_errors": [],
+        },
+        status=400,
+    )
 
 
 @api_view(["POST"])
@@ -150,26 +161,31 @@ def api_signup(request):
     password = form.cleaned_data["password1"]
     phone_number = form.cleaned_data["phone_number"]
 
-    with transaction.atomic():
-        organization = User.organization.field.related_model.objects.create(name=company_name)
-        user = User.objects.create_user(
-            username=username,
-            email=email,
-            password=password,
-            organization=organization,
-        )
-        user.first_name = first_name
-        user.last_name = last_name
-        user.save(update_fields=["first_name", "last_name"])
-        core_org = CoreOrganization.objects.create(
-            name=company_name,
-            company_key=_build_core_company_key(username, user.id),
-            owner=user,
-        )
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        profile.phone_number = phone_number
-        profile.organization = core_org
-        profile.save(update_fields=["phone_number", "organization"])
+    try:
+        with transaction.atomic():
+            organization = User.organization.field.related_model.objects.create(name=company_name)
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                password=password,
+                organization=organization,
+            )
+            user.first_name = first_name
+            user.last_name = last_name
+            user.save(update_fields=["first_name", "last_name"])
+            core_org = CoreOrganization.objects.create(
+                name=company_name,
+                company_key=_build_core_company_key(username, user.id),
+                owner=user,
+            )
+            profile, _ = UserProfile.objects.get_or_create(user=user)
+            profile.phone_number = phone_number
+            profile.organization = core_org
+            profile.save(update_fields=["phone_number", "organization"])
+    except IntegrityError:
+        if User.organization.field.related_model.objects.filter(name__iexact=company_name).exists():
+            return _signup_duplicate_company_response()
+        raise
 
     send_templated_email(
         user.email,

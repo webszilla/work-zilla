@@ -8,7 +8,7 @@ from django.contrib.auth.tokens import default_token_generator
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.core.cache import cache
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.contrib import messages
 from django.contrib.messages import get_messages
 from django.http import JsonResponse
@@ -390,26 +390,37 @@ def signup_view(request):
     password = form.cleaned_data["password1"]
     phone_number = form.cleaned_data["phone_number"]
 
-    with transaction.atomic():
-        organization = Organization.objects.create(name=company_name)
-        user = User.objects.create_user(
-            username=username,
-            email=email,
-            password=password,
-            organization=organization,
-        )
-        user.first_name = first_name
-        user.last_name = last_name
-        user.save(update_fields=["first_name", "last_name"])
-        core_org = CoreOrganization.objects.create(
-            name=company_name,
-            company_key=_build_core_company_key(username, user.id),
-            owner=user,
-        )
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        profile.phone_number = phone_number
-        profile.organization = core_org
-        profile.save(update_fields=["phone_number", "organization"])
+    try:
+        with transaction.atomic():
+            organization = Organization.objects.create(name=company_name)
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                password=password,
+                organization=organization,
+            )
+            user.first_name = first_name
+            user.last_name = last_name
+            user.save(update_fields=["first_name", "last_name"])
+            core_org = CoreOrganization.objects.create(
+                name=company_name,
+                company_key=_build_core_company_key(username, user.id),
+                owner=user,
+            )
+            profile, _ = UserProfile.objects.get_or_create(user=user)
+            profile.phone_number = phone_number
+            profile.organization = core_org
+            profile.save(update_fields=["phone_number", "organization"])
+    except IntegrityError:
+        if Organization.objects.filter(name__iexact=company_name).exists():
+            form.add_error("company_name", "An account with this company name already exists.")
+            captcha_question = _build_signup_captcha(request)
+            return render(
+                request,
+                "sites/signup.html",
+                {"form": form, "captcha_question": captcha_question, "next": next_url},
+            )
+        raise
     send_templated_email(
         user.email,
         "Welcome to Work Zilla",
