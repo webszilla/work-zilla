@@ -66,6 +66,7 @@ from core.models import (
     SocialPostDispatchLog,
 )
 from saas_admin.models import OpenAISettings, Product
+from apps.backend.products.models import Product as PublicProduct
 from dashboard import views as dashboard_views
 from core.referral_utils import ensure_referral_code, ensure_dealer_referral_code
 from core.email_utils import send_templated_email
@@ -267,6 +268,72 @@ def _resolve_product_label(slug, product_map):
             or "Work Suite"
         )
     return product_map.get(normalized) or _title_case(normalized)
+
+
+def _normalize_saas_slug_to_public(value):
+    slug = str(value or "").strip().lower()
+    if slug in {"work-suite", "worksuite"}:
+        return "worksuite"
+    if slug == "online-storage":
+        return "storage"
+    if slug in {"business-autopilot", "business-autopilot-erp"}:
+        return "business-autopilot"
+    if slug in {"imposition", "imposition software"}:
+        return "imposition-software"
+    return slug
+
+
+def _build_dashboard_products_payload():
+    saas_rows = (
+        Product.objects
+        .filter(status="active")
+        .order_by("sort_order", "name")
+        .values("slug", "name", "description", "icon", "status", "features")
+    )
+
+    ordered_slugs = []
+    seen = set()
+    for row in saas_rows:
+        public_slug = _normalize_saas_slug_to_public(row.get("slug"))
+        internal_slug = _normalize_product_slug(public_slug, default="")
+        if not internal_slug or internal_slug in {"ai-chat-widget", "digital-card", "monitor"}:
+            continue
+        if internal_slug in seen:
+            continue
+        seen.add(internal_slug)
+        ordered_slugs.append(internal_slug)
+
+    public_product_map = {
+        item.slug: item
+        for item in PublicProduct.objects.filter(is_active=True, slug__in=ordered_slugs)
+    }
+    saas_by_internal_slug = {}
+    for row in saas_rows:
+        public_slug = _normalize_saas_slug_to_public(row.get("slug"))
+        internal_slug = _normalize_product_slug(public_slug, default="")
+        if internal_slug in seen and internal_slug not in saas_by_internal_slug:
+            saas_by_internal_slug[internal_slug] = row
+
+    products_payload = []
+    for slug in ordered_slugs:
+        public_product = public_product_map.get(slug)
+        if not public_product:
+            continue
+        row = saas_by_internal_slug.get(slug) or {}
+        features = [
+            chunk.strip()
+            for chunk in re.split(r"[\n,;/]+", row.get("features") or "")
+            if chunk.strip()
+        ]
+        products_payload.append({
+            "slug": slug,
+            "name": _resolve_product_label(slug, {slug: public_product.name}),
+            "description": row.get("description") or public_product.description or "",
+            "icon": row.get("icon") or "bi-box",
+            "status": row.get("status") or "coming_soon",
+            "features": features,
+        })
+    return products_payload
 
 
 def _ticket_product_options_for_user(user):
@@ -3240,23 +3307,7 @@ def dashboard_summary(request):
             "status": active_sub.status,
         }
 
-    products_payload = []
-    for product in Product.objects.all().order_by("sort_order", "name"):
-        features = []
-        if product.features:
-            features = [
-                chunk.strip()
-                for chunk in re.split(r"[\n,;/]+", product.features)
-                if chunk.strip()
-            ]
-        products_payload.append({
-            "slug": product.slug,
-            "name": product.name,
-            "description": product.description or "",
-            "icon": product.icon or "bi-box",
-            "status": product.status,
-            "features": features,
-        })
+    products_payload = _build_dashboard_products_payload()
 
     return JsonResponse({
         "org": {
