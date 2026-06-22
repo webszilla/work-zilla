@@ -2799,8 +2799,8 @@ html[data-theme="dark"] .ba-site-admin-chat__action-btn--history {
 }
 
 .ba-site-admin-chat__composer-actions--editing {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
   justify-content: flex-end;
   gap: 10px;
@@ -2817,8 +2817,10 @@ html[data-theme="dark"] .ba-site-admin-chat__action-btn--history {
   width: 100% !important;
   flex: 0 0 auto;
   min-width: 0;
+  min-height: 46px;
   align-self: stretch;
   justify-content: center;
+  box-sizing: border-box;
 }
 
 .ba-assistant__send-btn {
