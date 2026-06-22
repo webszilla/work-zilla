@@ -64,3 +64,16 @@ class SignupFlowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "An account with this company name already exists.")
         self.assertEqual(User.objects.count(), 0)
+
+    def test_csrf_endpoint_disables_cache_and_sets_cookie(self):
+        response = self.client.get("/api/auth/csrf")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("csrftoken", response.cookies)
+        self.assertEqual(
+            response["Cache-Control"],
+            "no-store, no-cache, must-revalidate, max-age=0, private",
+        )
+        self.assertEqual(response["CDN-Cache-Control"], "no-store")
+        self.assertEqual(response["Surrogate-Control"], "no-store")
+        self.assertEqual(response["Vary"], "Cookie, Origin")

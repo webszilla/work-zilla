@@ -10,6 +10,7 @@ from django.utils import timezone
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.cache import never_cache
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -27,9 +28,17 @@ from core.session_security import apply_request_session_timeout, log_user_login_
 @api_view(["GET"])
 @permission_classes([AllowAny])
 @ensure_csrf_cookie
+@never_cache
 def csrf_token(request):
     token = get_token(request)
-    return Response({"csrfToken": token})
+    response = Response({"csrfToken": token})
+    response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0, private"
+    response["Pragma"] = "no-cache"
+    response["Expires"] = "0"
+    response["CDN-Cache-Control"] = "no-store"
+    response["Surrogate-Control"] = "no-store"
+    response["Vary"] = "Cookie, Origin"
+    return response
 
 
 def _build_core_company_key(username, user_id):
