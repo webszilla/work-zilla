@@ -262,6 +262,8 @@ function formatDateTimeLabel(value) {
   }).format(date);
 }
 
+const QUICK_ESTIMATES_COLLECTION_API = "/api/business-autopilot/quick-estimates/";
+
 function getEstimateCreatedByLabel(row) {
   const candidates = [
     row?.created_by_name,
@@ -1126,10 +1128,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setAssignSearchOpen(false);
     setNotice("");
     try {
-      const data = await apiFetch(`/api/business-autopilot/quick-estimates/${estimateId}/`, {
-        method: "PATCH",
+      const data = await apiFetch(QUICK_ESTIMATES_COLLECTION_API, {
+        method: "POST",
         body: JSON.stringify({
           __action: "PATCH",
+          quick_estimate_id: estimateId,
           action: "assign",
           assigned_user_id: Number(userRow?.id) || null,
           assigned_membership_id: Number(userRow?.membership_id) || null,
@@ -1298,8 +1301,8 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setSending(true);
     setNotice("");
     try {
-      const data = await apiFetch(`/api/business-autopilot/quick-estimates/${estimateId}/`, {
-        method: "DELETE",
+      const data = await apiFetch(QUICK_ESTIMATES_COLLECTION_API, {
+        method: "POST",
         body: JSON.stringify({ __action: "DELETE", quick_estimate_id: estimateId, reason }),
       });
       if (data?.quick_estimate) {
@@ -1328,9 +1331,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setSending(true);
     setNotice("");
     try {
-      const data = await apiFetch(`/api/business-autopilot/quick-estimates/${row.id}/`, {
-        method: "PATCH",
-        body: JSON.stringify({ __action: "PATCH", action: "reopen" }),
+      const data = await apiFetch(QUICK_ESTIMATES_COLLECTION_API, {
+        method: "POST",
+        body: JSON.stringify({ __action: "PATCH", quick_estimate_id: row.id, action: "reopen" }),
       });
       if (data?.quick_estimate) {
         upsertEstimateRow(data.quick_estimate);
@@ -1383,8 +1386,8 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setSending(true);
     try {
       const data = useEditFlow
-        ? await apiFetch(`/api/business-autopilot/quick-estimates/${editingEstimate.id}/`, {
-          method: "PATCH",
+        ? await apiFetch(QUICK_ESTIMATES_COLLECTION_API, {
+          method: "POST",
           body: JSON.stringify({
             __action: "PATCH",
             quick_estimate_id: editingEstimate.id,

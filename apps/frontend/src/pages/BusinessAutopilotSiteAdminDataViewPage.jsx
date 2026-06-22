@@ -14,6 +14,7 @@ const STATUS_TABS = [
 ];
 
 const CONTACT_ESTIMATE_PAGE_SIZE = 5;
+const QUICK_ESTIMATES_COLLECTION_API = "/api/business-autopilot/quick-estimates/";
 
 function getPaymentModeLabel(value) {
   const normalized = String(value || "").trim().toLowerCase();
@@ -609,10 +610,11 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
     setPaymentSaving(true);
     setNotice("");
     try {
-      const data = await apiFetch(`/api/business-autopilot/quick-estimates/${paymentModalRow.id}/`, {
-        method: "PATCH",
+      const data = await apiFetch(QUICK_ESTIMATES_COLLECTION_API, {
+        method: "POST",
         body: JSON.stringify({
           __action: "PATCH",
+          quick_estimate_id: paymentModalRow.id,
           action: "payment",
           payment_status: "completed",
           payment_mode: paymentModalMode,
