@@ -991,6 +991,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       const data = await apiFetch("/api/business-autopilot/quick-estimate-settings/", {
         method: "PATCH",
         body: JSON.stringify({
+          __action: "PATCH",
           headerText: qeHeaderText,
           templateSize: qeTemplateSize,
           paymentProofRetentionDays: qePaymentProofRetentionDays,
@@ -1128,6 +1129,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       const data = await apiFetch(`/api/business-autopilot/quick-estimates/${estimateId}/`, {
         method: "PATCH",
         body: JSON.stringify({
+          __action: "PATCH",
           action: "assign",
           assigned_user_id: Number(userRow?.id) || null,
           assigned_membership_id: Number(userRow?.membership_id) || null,
@@ -1298,7 +1300,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     try {
       const data = await apiFetch(`/api/business-autopilot/quick-estimates/${estimateId}/`, {
         method: "DELETE",
-        body: JSON.stringify({ quick_estimate_id: estimateId, reason }),
+        body: JSON.stringify({ __action: "DELETE", quick_estimate_id: estimateId, reason }),
       });
       if (data?.quick_estimate) {
         upsertEstimateRow(data.quick_estimate);
@@ -1328,7 +1330,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     try {
       const data = await apiFetch(`/api/business-autopilot/quick-estimates/${row.id}/`, {
         method: "PATCH",
-        body: JSON.stringify({ action: "reopen" }),
+        body: JSON.stringify({ __action: "PATCH", action: "reopen" }),
       });
       if (data?.quick_estimate) {
         upsertEstimateRow(data.quick_estimate);
@@ -1384,6 +1386,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
         ? await apiFetch(`/api/business-autopilot/quick-estimates/${editingEstimate.id}/`, {
           method: "PATCH",
           body: JSON.stringify({
+            __action: "PATCH",
             quick_estimate_id: editingEstimate.id,
             mobile: editMobile,
             client_name: editClientName,

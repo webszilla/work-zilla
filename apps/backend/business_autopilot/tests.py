@@ -2523,6 +2523,31 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         self.assertEqual(str(estimate.total_amount), "2000.00")
         self.assertIn("QE-0001", payload["thermal_preview_html"])
 
+    def test_quick_estimate_detail_post_with_body_action_patch_updates_item_list(self):
+        created = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={
+                "message": "9092833701\nGuru\nBusiness Card 500 nos Rs.1050",
+            },
+            content_type="application/json",
+        )
+        estimate_id = created.json()["quick_estimate_id"]
+
+        response = self.client.post(
+            f"/api/business-autopilot/quick-estimates/{estimate_id}/",
+            data=json.dumps({
+                "__action": "PATCH",
+                "item_text": "1. Business Card 500 nos Rs.1050\n2. Letterhead 100 nos Rs.950",
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        estimate = QuickEstimate.objects.get(organization=self.org, id=estimate_id)
+        items = list(estimate.items.order_by("id"))
+        self.assertEqual(len(items), 2)
+        self.assertEqual(str(estimate.total_amount), "2000.00")
+
     def test_quick_estimate_detail_patch_updates_mobile_and_client_in_same_customer_row(self):
         created = self.client.post(
             "/api/business-autopilot/site-admin/chat",
@@ -2603,6 +2628,30 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         response = self.client.patch(
             f"/api/business-autopilot/quick-estimate-contacts/{estimate.customer_id}/",
             data=json.dumps({"client_name": "Guru Updated", "mobile": "9876543210"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        estimate.refresh_from_db()
+        self.assertEqual(estimate.client_name, "Guru Updated")
+        self.assertEqual(estimate.mobile, "9876543210")
+
+    def test_quick_estimate_contact_post_with_body_action_patch_updates_linked_estimate_client_data(self):
+        created = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "9092833701\nGuru\nBusiness Card 500 nos Rs.1050"},
+            content_type="application/json",
+        )
+        estimate_id = created.json()["quick_estimate_id"]
+        estimate = QuickEstimate.objects.get(id=estimate_id)
+
+        response = self.client.post(
+            f"/api/business-autopilot/quick-estimate-contacts/{estimate.customer_id}/",
+            data=json.dumps({
+                "__action": "PATCH",
+                "client_name": "Guru Updated",
+                "mobile": "9876543210",
+            }),
             content_type="application/json",
         )
 

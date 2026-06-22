@@ -9699,7 +9699,7 @@ def site_admin_chat(request):
     return JsonResponse(_site_admin_quick_estimate_response(estimate, reply, whatsapp_share_pending=False))
 
 
-@require_http_methods(["GET", "PATCH", "DELETE"])
+@require_http_methods(["GET", "POST", "PATCH", "DELETE"])
 def quick_estimate_contacts(request, contact_id: str = ""):
     if not request.user.is_authenticated:
         return JsonResponse({"authenticated": False}, status=401)
@@ -9707,9 +9707,23 @@ def quick_estimate_contacts(request, contact_id: str = ""):
     if not org:
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
+    resolved_method = request.method
+    payload = None
+    if request.method == "POST":
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
+        override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
+        body_action = str(payload.get("action") or payload.get("__action") or "").strip().upper()
+        if body_action in {"PATCH", "DELETE"}:
+            resolved_method = body_action
+        elif override_method in {"PATCH", "DELETE"}:
+            resolved_method = override_method
+
     _sync_quick_estimate_contacts_from_estimates(org, request.user)
     workspace, data, contacts, rows = _quick_estimate_contact_rows_with_counts(org)
-    if request.method == "GET":
+    if resolved_method == "GET":
         if contact_id:
             payload = next((row for row in rows if row["id"] == str(contact_id or "").strip()), None)
             if not payload:
@@ -9717,10 +9731,11 @@ def quick_estimate_contacts(request, contact_id: str = ""):
             return JsonResponse({"contact": payload})
         return JsonResponse({"contacts": rows})
 
-    try:
-        payload = json.loads(request.body.decode("utf-8") or "{}")
-    except json.JSONDecodeError:
-        return JsonResponse({"detail": "invalid_json"}, status=400)
+    if payload is None:
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
 
     normalized_contact_id = str(contact_id or payload.get("contact_id") or payload.get("id") or "").strip()
     target_row = next(
@@ -9730,7 +9745,7 @@ def quick_estimate_contacts(request, contact_id: str = ""):
     if not target_row:
         return JsonResponse({"detail": "quick_estimate_contact_not_found"}, status=404)
 
-    if request.method == "DELETE":
+    if resolved_method == "DELETE":
         contacts[:] = [row for row in contacts if not (isinstance(row, dict) and str(row.get("id") or "").strip() == normalized_contact_id)]
         data["quickEstimateContacts"] = contacts
         workspace.data = data
@@ -10166,9 +10181,17 @@ def quick_estimate_settings(request):
         return JsonResponse({"detail": "organization_not_found"}, status=404)
 
     resolved_method = request.method
+    payload = None
     if request.method == "POST":
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
         override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
-        if override_method == "PATCH":
+        body_action = str(payload.get("action") or payload.get("__action") or "").strip().upper()
+        if body_action == "PATCH":
+            resolved_method = "PATCH"
+        elif override_method == "PATCH":
             resolved_method = "PATCH"
 
     workspace = _get_accounts_workspace(org)
@@ -10176,10 +10199,11 @@ def quick_estimate_settings(request):
     if resolved_method == "GET":
         return JsonResponse({"settings": _get_quick_estimate_settings(org)})
 
-    try:
-        payload = json.loads(request.body.decode("utf-8") or "{}")
-    except json.JSONDecodeError:
-        return JsonResponse({"detail": "invalid_json"}, status=400)
+    if payload is None:
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "invalid_json"}, status=400)
 
     header_text = _normalize_quick_estimate_header_html(payload.get("headerText") or payload.get("header_text"))
     template_size = str(payload.get("templateSize") or payload.get("template_size") or "4in").strip().lower()

@@ -385,7 +385,10 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
     try {
       await apiFetch(`/api/business-autopilot/quick-estimate-contacts/${editingContactId}/`, {
         method: "PATCH",
-        body: JSON.stringify(contactForm),
+        body: JSON.stringify({
+          __action: "PATCH",
+          ...contactForm,
+        }),
       });
       setEditingContactId("");
       setContactForm({ client_name: "", mobile: "" });
@@ -411,6 +414,7 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
     try {
       await apiFetch(`/api/business-autopilot/quick-estimate-contacts/${row.id}/`, {
         method: "DELETE",
+        body: JSON.stringify({ __action: "DELETE" }),
       });
       if (editingContactId === String(row.id)) {
         setEditingContactId("");
@@ -608,6 +612,7 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
       const data = await apiFetch(`/api/business-autopilot/quick-estimates/${paymentModalRow.id}/`, {
         method: "PATCH",
         body: JSON.stringify({
+          __action: "PATCH",
           action: "payment",
           payment_status: "completed",
           payment_mode: paymentModalMode,
