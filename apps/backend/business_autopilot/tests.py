@@ -2548,6 +2548,34 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         self.assertEqual(len(items), 2)
         self.assertEqual(str(estimate.total_amount), "2000.00")
 
+    def test_quick_estimate_collection_post_with_body_action_patch_updates_item_list(self):
+        created = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={
+                "message": "9092833701\nGuru\nBusiness Card 500 nos Rs.1050",
+            },
+            content_type="application/json",
+        )
+        estimate_id = created.json()["quick_estimate_id"]
+
+        response = self.client.post(
+            "/api/business-autopilot/quick-estimates/",
+            data=json.dumps({
+                "__action": "PATCH",
+                "quick_estimate_id": estimate_id,
+                "mobile": "9092833701",
+                "client_name": "Guru",
+                "item_text": "1. Business Card 500 nos Rs.1050\n2. Letterhead 100 nos Rs.950",
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        estimate = QuickEstimate.objects.get(organization=self.org, id=estimate_id)
+        items = list(estimate.items.order_by("id"))
+        self.assertEqual(len(items), 2)
+        self.assertEqual(str(estimate.total_amount), "2000.00")
+
     def test_quick_estimate_detail_patch_updates_mobile_and_client_in_same_customer_row(self):
         created = self.client.post(
             "/api/business-autopilot/site-admin/chat",
@@ -2699,6 +2727,33 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         state = SiteAdminChatState.objects.get(organization=self.org, user=self.admin)
         self.assertIsNone(state.last_quick_estimate)
         self.assertFalse(state.awaiting_whatsapp_share)
+
+    def test_quick_estimate_collection_post_with_payment_action_marks_cash_payment_done(self):
+        created = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={
+                "message": "9092833701\nGuru\nBusiness Card 500 nos Rs.1050",
+            },
+            content_type="application/json",
+        )
+        estimate_id = created.json()["quick_estimate_id"]
+
+        response = self.client.post(
+            "/api/business-autopilot/quick-estimates/",
+            data=json.dumps({
+                "__action": "PATCH",
+                "quick_estimate_id": estimate_id,
+                "action": "payment",
+                "payment_status": "completed",
+                "payment_mode": "cash",
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        estimate = QuickEstimate.objects.get(organization=self.org, id=estimate_id)
+        self.assertEqual(estimate.payment_status, QuickEstimate.PROGRESS_COMPLETED)
+        self.assertEqual(estimate.payment_mode, "cash")
 
     def test_quick_estimate_list_includes_creator_and_assignment_details(self):
         assignee = User.objects.create_user(

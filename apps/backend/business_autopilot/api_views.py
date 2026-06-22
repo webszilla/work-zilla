@@ -9715,7 +9715,7 @@ def quick_estimate_contacts(request, contact_id: str = ""):
         except json.JSONDecodeError:
             return JsonResponse({"detail": "invalid_json"}, status=400)
         override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
-        body_action = str(payload.get("action") or payload.get("__action") or "").strip().upper()
+        body_action = str(payload.get("__action") or payload.get("action") or "").strip().upper()
         if body_action in {"PATCH", "DELETE"}:
             resolved_method = body_action
         elif override_method in {"PATCH", "DELETE"}:
@@ -9824,7 +9824,7 @@ def quick_estimates(request, estimate_id: int = None):
         except json.JSONDecodeError:
             return JsonResponse({"detail": "invalid_json"}, status=400)
         override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
-        body_action = str(payload.get("action") or payload.get("__action") or "").strip().upper()
+        body_action = str(payload.get("__action") or payload.get("action") or "").strip().upper()
         if body_action in {"PATCH", "DELETE"}:
             resolved_method = body_action
         elif override_method in {"PATCH", "DELETE"}:
@@ -9854,7 +9854,7 @@ def quick_estimates(request, estimate_id: int = None):
                 payload = json.loads(request.body.decode("utf-8") or "{}")
             except json.JSONDecodeError:
                 return JsonResponse({"detail": "invalid_json"}, status=400)
-        estimate_id = _to_int(payload.get("quick_estimate_id") or payload.get("estimate_id") or payload.get("id"))
+        estimate_id = _coerce_positive_int(payload.get("quick_estimate_id") or payload.get("estimate_id") or payload.get("id"))
 
     row = qs.filter(id=estimate_id).first()
     if not row:
