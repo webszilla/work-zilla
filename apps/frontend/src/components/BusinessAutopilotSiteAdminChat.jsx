@@ -488,6 +488,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   const [prompt, setPrompt] = useState("");
   const [editMobile, setEditMobile] = useState("");
   const [editClientName, setEditClientName] = useState("");
+  const [editMobileSearchOpen, setEditMobileSearchOpen] = useState(false);
   const [editNotes, setEditNotes] = useState("");
   const [editPaymentCompleted, setEditPaymentCompleted] = useState(false);
   const [editPaymentMode, setEditPaymentMode] = useState("");
@@ -673,6 +674,8 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setPrompt("");
     setEditMobile("");
     setEditClientName("");
+    setEditNotes("");
+    setEditMobileSearchOpen(false);
     setEditPaymentCompleted(false);
     setEditJobCompleted(false);
     setEditDeliveryCompleted(false);
@@ -982,9 +985,51 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     return selectableUsers.filter((row) => (
       [row?.name, row?.email, row?.phone_number, row?.employeeId]
         .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(search))
+      .some((value) => String(value).toLowerCase().includes(search))
     ));
   }, [assignQuery, orgUsers]);
+
+  const quickEstimateContactOptions = useMemo(() => {
+    const contactMap = new Map();
+    estimateRows.forEach((row) => {
+      const mobile = String(row?.mobile || "").replace(/\D/g, "").slice(0, 10);
+      const clientName = String(row?.client_name || row?.clientName || "").trim();
+      if (!mobile) {
+        return;
+      }
+      if (!contactMap.has(mobile)) {
+        contactMap.set(mobile, {
+          mobile,
+          clientName,
+          estimateNumber: String(row?.estimate_number || row?.estimateNumber || "").trim(),
+        });
+        return;
+      }
+      const current = contactMap.get(mobile);
+      if (!current.clientName && clientName) {
+        current.clientName = clientName;
+      }
+      if (!current.estimateNumber) {
+        current.estimateNumber = String(row?.estimate_number || row?.estimateNumber || "").trim();
+      }
+    });
+    return Array.from(contactMap.values());
+  }, [estimateRows]);
+
+  const filteredEditMobileOptions = useMemo(() => {
+    const search = String(editMobile || "").replace(/\D/g, "").slice(0, 10);
+    if (!search) {
+      return quickEstimateContactOptions.slice(0, 8);
+    }
+    return quickEstimateContactOptions
+      .filter((option) => option.mobile.includes(search))
+      .slice(0, 8);
+  }, [editMobile, quickEstimateContactOptions]);
+
+  const hasExactEditMobileMatch = useMemo(
+    () => quickEstimateContactOptions.some((option) => option.mobile === String(editMobile || "").replace(/\D/g, "").slice(0, 10)),
+    [editMobile, quickEstimateContactOptions],
+  );
 
   async function handleSaveQeSettings() {
     setSettingsSaving(true);
@@ -1251,6 +1296,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       setPrompt(editableText);
       setEditMobile(String(estimate.mobile || ""));
       setEditClientName(String(estimate.client_name || ""));
+      setEditMobileSearchOpen(false);
       setEditNotes(String(estimate.notes || ""));
       setEditPaymentCompleted(String(estimate.payment_status || "").toLowerCase() === "completed");
       setEditPaymentMode(String(estimate.payment_mode || "").trim().toLowerCase());
@@ -1457,6 +1503,15 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   function handleSubmit(event) {
     event.preventDefault();
     sendMessage();
+  }
+
+  function handleSelectEditMobileOption(option) {
+    const nextMobile = String(option?.mobile || "").replace(/\D/g, "").slice(0, 10);
+    setEditMobile(nextMobile);
+    if (String(option?.clientName || "").trim()) {
+      setEditClientName(String(option.clientName).trim());
+    }
+    setEditMobileSearchOpen(false);
   }
 
   function handleQuickChip(action) {
@@ -1701,16 +1756,71 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
               {editingEstimate ? (
                 <>
                   <div className="ba-site-admin-chat__edit-grid">
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={editMobile}
-                      onChange={(event) => setEditMobile(event.target.value.replace(/\D/g, "").slice(0, 10))}
-                      placeholder="Mobile number"
-                      disabled={sending}
-                      inputMode="numeric"
-                      aria-label="Edit mobile number"
-                    />
+                    <div className="crm-inline-suggestions-wrap">
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={editMobile}
+                        onFocus={() => setEditMobileSearchOpen(true)}
+                        onClick={() => setEditMobileSearchOpen(true)}
+                        onBlur={() => window.setTimeout(() => setEditMobileSearchOpen(false), 120)}
+                        onChange={(event) => {
+                          setEditMobile(event.target.value.replace(/\D/g, "").slice(0, 10));
+                          setEditMobileSearchOpen(true);
+                        }}
+                        placeholder="Mobile number"
+                        disabled={sending}
+                        inputMode="numeric"
+                        aria-label="Edit mobile number"
+                      />
+                      {editMobileSearchOpen ? (
+                        <div className="crm-inline-suggestions">
+                          <div className="crm-inline-suggestions__group">
+                            <div className="crm-inline-suggestions__title">Mobile Suggestions</div>
+                            {editMobile && !hasExactEditMobileMatch ? (
+                              <button
+                                type="button"
+                                className="crm-inline-suggestions__item"
+                                onMouseDown={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  handleSelectEditMobileOption({ mobile: editMobile, clientName: "" });
+                                }}
+                                disabled={sending}
+                              >
+                                <span className="crm-inline-suggestions__item-main">{editMobile}</span>
+                                <span className="crm-inline-suggestions__item-sub">Use custom number</span>
+                              </button>
+                            ) : null}
+                            {filteredEditMobileOptions.length ? (
+                              filteredEditMobileOptions.map((option) => (
+                                <button
+                                  key={`edit-mobile-${option.mobile}`}
+                                  type="button"
+                                  className={`crm-inline-suggestions__item ${option.mobile === editMobile ? "is-selected" : ""}`}
+                                  onMouseDown={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    handleSelectEditMobileOption(option);
+                                  }}
+                                  disabled={sending}
+                                >
+                                  <span className="crm-inline-suggestions__item-main">{option.mobile}</span>
+                                  <span className="crm-inline-suggestions__item-sub">
+                                    {option.clientName || "Client name not available"}
+                                  </span>
+                                </button>
+                              ))
+                            ) : (
+                              <div className="crm-inline-suggestions__item">
+                                <span className="crm-inline-suggestions__item-main">No old mobile found</span>
+                                <span className="crm-inline-suggestions__item-sub">Continue with the typed custom number.</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
                     <input
                       type="text"
                       className="form-control"
@@ -1822,7 +1932,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                 <div className={`ba-assistant__composer-actions ${editingEstimate ? "ba-site-admin-chat__composer-actions--editing" : ""}`}>
                   <button
                     type="submit"
-                    className="btn btn-primary ba-assistant__send-btn ba-site-admin-chat__cta-btn"
+                    className={`btn btn-primary ba-assistant__send-btn ba-site-admin-chat__cta-btn ${editingEstimate ? "ba-site-admin-chat__send-btn--editing" : ""}`.trim()}
                     disabled={sending || !estimateModuleActive}
                   >
                     {editingEstimate ? "Save" : "Send"}

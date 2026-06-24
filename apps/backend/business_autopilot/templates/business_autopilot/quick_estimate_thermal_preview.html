@@ -134,6 +134,16 @@
       margin-top: 7px;
       padding-top: 7px;
     }
+    .notes-box {
+      margin-top: 7px;
+      padding-top: 6px;
+      border-top: 1px dashed var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.3;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
     .total-row {
       display: flex;
       justify-content: space-between;
@@ -207,6 +217,10 @@
         <span>Rs {{ formatted_total }}</span>
       </div>
     </div>
+
+    {% if estimate.notes %}
+      <div class="notes-box">{{ estimate.notes }}</div>
+    {% endif %}
 
     <div class="thank-you">
       Thank you.

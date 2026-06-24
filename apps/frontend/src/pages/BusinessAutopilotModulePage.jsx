@@ -3849,6 +3849,17 @@ function normalizeCrmAccessLevel(value) {
   return "No Access";
 }
 
+function normalizeBusinessAutopilotUserType(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "crm_user" || raw === "crm" || raw === "crmuser") {
+    return "crm_user";
+  }
+  if (raw === "hrm_user" || raw === "hrm" || raw === "hrmuser" || raw === "hr") {
+    return "hrm_user";
+  }
+  return "full_access_user";
+}
+
 function getBusinessAutopilotSectionAccessLevel(accessRecord, sectionKey, fallback = "No Access") {
   const sections = accessRecord?.sections || {};
   if (sectionKey === "subscriptions") {
@@ -3894,7 +3905,10 @@ function useBusinessAutopilotDeleteAccess(sectionKey) {
         const roleAccessMap = (roleAccessData?.role_access_map && typeof roleAccessData.role_access_map === "object" && !Array.isArray(roleAccessData.role_access_map))
           ? roleAccessData.role_access_map
           : readCrmRoleAccessMapFromStorage();
-        const accessRecord = resolveCrmRoleAccessRecord(roleAccessMap, profileRole, employeeRole);
+        const currentUserType = normalizeBusinessAutopilotUserType(
+          matchedUser?.user_type || authData?.profile?.user_type || authData?.user?.user_type || ""
+        );
+        const accessRecord = resolveCrmRoleAccessRecord(roleAccessMap, profileRole, employeeRole, currentUserType);
         const isAdmin = [
           "company_admin",
           "org_admin",
@@ -3942,24 +3956,35 @@ function readCrmRoleAccessMapFromStorage() {
   }
 }
 
-function resolveCrmRoleAccessRecord(roleAccessMap, profileRole, employeeRole) {
+function resolveCrmRoleAccessRecord(roleAccessMap, profileRole, employeeRole, userType = "full_access_user") {
   const safeMap = roleAccessMap && typeof roleAccessMap === "object" ? roleAccessMap : {};
   const normalizedProfileRole = normalizeCrmRoleToken(profileRole);
   const normalizedEmployeeRole = normalizeCrmRoleToken(employeeRole);
+  const normalizedUserType = normalizeBusinessAutopilotUserType(userType);
   const entries = Object.entries(safeMap).filter(([, value]) => value && typeof value === "object");
 
   if (normalizedEmployeeRole) {
     for (const [key, value] of entries) {
-      const [scope, rawRole] = String(key || "").split(":", 2);
-      if (scope === "employee_role" && normalizeCrmRoleToken(rawRole) === normalizedEmployeeRole) {
+      const [roleKey, rawUserType = ""] = String(key || "").split("__", 2);
+      const [scope, rawRole] = String(roleKey || "").split(":", 2);
+      if (
+        scope === "employee_role"
+        && normalizeCrmRoleToken(rawRole) === normalizedEmployeeRole
+        && (!rawUserType || normalizeBusinessAutopilotUserType(rawUserType) === normalizedUserType)
+      ) {
         return value;
       }
     }
   }
   if (normalizedProfileRole) {
     for (const [key, value] of entries) {
-      const [scope, rawRole] = String(key || "").split(":", 2);
-      if (scope === "system" && normalizeCrmRoleToken(rawRole) === normalizedProfileRole) {
+      const [roleKey, rawUserType = ""] = String(key || "").split("__", 2);
+      const [scope, rawRole] = String(roleKey || "").split(":", 2);
+      if (
+        scope === "system"
+        && normalizeCrmRoleToken(rawRole) === normalizedProfileRole
+        && (!rawUserType || normalizeBusinessAutopilotUserType(rawUserType) === normalizedUserType)
+      ) {
         return value;
       }
     }
@@ -4811,6 +4836,7 @@ function normalizeCrmDirectoryEntry(row = {}) {
     department: String(row.department || "").trim(),
     employeeRole: String(row.employee_role || row.employeeRole || row.designation || "").trim(),
     email: String(row.email || row.sourceUserEmail || "").trim(),
+    userType: normalizeBusinessAutopilotUserType(row.user_type || row.userType || ""),
   };
 }
 
@@ -9455,6 +9481,7 @@ function CrmOnePageModule() {
     [crmDirectoryPool, normalizedCurrentUserEmail, normalizedCurrentUserName]
   );
   const normalizedCurrentUserMembershipRole = normalizeCrmRoleToken(currentUserDirectoryEntry?.role || "");
+  const normalizedCurrentUserType = normalizeBusinessAutopilotUserType(currentUserDirectoryEntry?.userType || "");
   const isCrmAdmin = Boolean(canManageCrmUsers)
     || normalizedCurrentUserRole === "company_admin"
     || normalizedCurrentUserRole === "org_admin"
@@ -9463,8 +9490,8 @@ function CrmOnePageModule() {
   const normalizedCurrentUserDepartment = String(currentUserDirectoryEntry?.department || "").trim().toLowerCase();
   const normalizedCurrentUserEmployeeRole = String(currentUserDirectoryEntry?.employeeRole || currentUserEmployeeRole || "").trim().toLowerCase();
   const crmRoleAccessRecord = useMemo(
-    () => resolveCrmRoleAccessRecord(crmRoleAccessMap, currentUserRole, currentUserEmployeeRole),
-    [crmRoleAccessMap, currentUserRole, currentUserEmployeeRole]
+    () => resolveCrmRoleAccessRecord(crmRoleAccessMap, currentUserRole, currentUserEmployeeRole, normalizedCurrentUserType),
+    [crmRoleAccessMap, currentUserRole, currentUserEmployeeRole, normalizedCurrentUserType]
   );
   const crmSectionAccessLevel = normalizeCrmAccessLevel(
     crmRoleAccessRecord?.sections?.crm || (normalizedCurrentUserRole === "org_user" ? "View" : "No Access")
@@ -24679,9 +24706,15 @@ export function HrManagementModule({
   const currentHrEmployeeEmail = String(currentUserDirectoryEntry?.email || effectiveCurrentUserEmail || "").trim().toLowerCase();
   const currentUserRoleToken = normalizeCrmRoleToken(effectiveCurrentUserRole);
   const currentUserEmployeeRoleToken = normalizeCrmRoleToken(effectiveCurrentUserEmployeeRole);
+  const currentUserTypeToken = normalizeBusinessAutopilotUserType(currentUserDirectoryEntry?.userType || "");
   const hrRoleAccessRecord = useMemo(
-    () => resolveCrmRoleAccessRecord(effectiveRoleAccessMap, effectiveCurrentUserRole, effectiveCurrentUserEmployeeRole),
-    [effectiveCurrentUserEmployeeRole, effectiveCurrentUserRole, effectiveRoleAccessMap]
+    () => resolveCrmRoleAccessRecord(
+      effectiveRoleAccessMap,
+      effectiveCurrentUserRole,
+      effectiveCurrentUserEmployeeRole,
+      currentUserTypeToken
+    ),
+    [currentUserTypeToken, effectiveCurrentUserEmployeeRole, effectiveCurrentUserRole, effectiveRoleAccessMap]
   );
   const isHrAdmin = ["company_admin", "org_admin", "owner", "superadmin", "super_admin"].includes(currentUserRoleToken);
   const isHrPayrollManager = currentUserEmployeeRoleToken === "hr_manager" || currentUserEmployeeRoleToken === "hr";

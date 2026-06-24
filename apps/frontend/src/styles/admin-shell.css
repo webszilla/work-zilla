@@ -2794,33 +2794,49 @@ html[data-theme="dark"] .ba-site-admin-chat__action-btn--history {
 }
 
 .ba-site-admin-chat__composer-row--editing {
-  grid-template-columns: minmax(0, 1fr) minmax(132px, 164px);
+  grid-template-columns: minmax(0, 1fr) minmax(164px, 164px);
   align-items: end;
 }
 
 .ba-site-admin-chat__composer-actions--editing {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   align-items: stretch;
   justify-content: flex-end;
   gap: 10px;
-  width: 100%;
+  width: 164px;
   min-width: 0;
   max-width: 164px;
-  margin-left: auto;
+  justify-self: end;
 }
 
 .ba-site-admin-chat__composer-actions--editing > .btn,
 .ba-site-admin-chat__composer-actions--editing .ba-assistant__send-btn,
 .ba-site-admin-chat__composer-actions--editing .ba-site-admin-chat__composer-cancel {
-  display: inline-flex;
+  display: flex;
   width: 100% !important;
+  max-width: none;
   flex: 0 0 auto;
-  min-width: 0;
+  min-width: 164px;
+  height: 46px;
   min-height: 46px;
+  max-height: 46px;
   align-self: stretch;
   justify-content: center;
   box-sizing: border-box;
+}
+
+.ba-site-admin-chat__send-btn--editing {
+  width: 164px !important;
+  min-width: 164px !important;
+  max-width: 164px !important;
+  height: 46px !important;
+  min-height: 46px !important;
+  max-height: 46px !important;
+  flex: 0 0 auto !important;
+  align-self: stretch;
+  position: relative;
+  z-index: 1;
 }
 
 .ba-assistant__send-btn {
@@ -3517,8 +3533,9 @@ html[data-theme="light"] .ba-assistant__user-avatar-fallback {
   }
 
   .ba-site-admin-chat__composer-actions--editing {
+    width: 100%;
     max-width: none;
-    margin-left: 0;
+    justify-self: stretch;
   }
 
   .ba-site-admin-chat__workspace {
