@@ -209,7 +209,18 @@ function getBusinessAutopilotSectionKey(pathname) {
   return "";
 }
 
-function resolveBusinessAutopilotAccessRecord(roleAccessMap, profileRole, employeeRole) {
+function normalizeBusinessAutopilotUserType(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "crm_user" || raw === "crm" || raw === "crmuser") {
+    return "crm_user";
+  }
+  if (raw === "hrm_user" || raw === "hrm" || raw === "hrmuser" || raw === "hr") {
+    return "hrm_user";
+  }
+  return "full_access_user";
+}
+
+function resolveBusinessAutopilotAccessRecord(roleAccessMap, profileRole, employeeRole, userType = "full_access_user") {
   const safeMap = roleAccessMap && typeof roleAccessMap === "object" ? roleAccessMap : {};
   const normalizeRoleToken = (value) =>
     String(value || "")
@@ -218,20 +229,31 @@ function resolveBusinessAutopilotAccessRecord(roleAccessMap, profileRole, employ
       .replace(/[\s-]+/g, "_");
   const normalizedProfileRole = normalizeRoleToken(profileRole);
   const normalizedEmployeeRole = normalizeRoleToken(employeeRole);
+  const normalizedUserType = normalizeBusinessAutopilotUserType(userType);
 
   const entries = Object.entries(safeMap).filter(([, value]) => value && typeof value === "object");
   if (normalizedEmployeeRole) {
     for (const [key, value] of entries) {
-      const [scope, rawRole] = String(key || "").split(":", 2);
-      if (scope === "employee_role" && normalizeRoleToken(rawRole) === normalizedEmployeeRole) {
+      const [roleKey, rawUserType = ""] = String(key || "").split("__", 2);
+      const [scope, rawRole] = String(roleKey || "").split(":", 2);
+      if (
+        scope === "employee_role"
+        && normalizeRoleToken(rawRole) === normalizedEmployeeRole
+        && (!rawUserType || normalizeBusinessAutopilotUserType(rawUserType) === normalizedUserType)
+      ) {
         return value;
       }
     }
   }
   if (normalizedProfileRole) {
     for (const [key, value] of entries) {
-      const [scope, rawRole] = String(key || "").split(":", 2);
-      if (scope === "system" && normalizeRoleToken(rawRole) === normalizedProfileRole) {
+      const [roleKey, rawUserType = ""] = String(key || "").split("__", 2);
+      const [scope, rawRole] = String(roleKey || "").split(":", 2);
+      if (
+        scope === "system"
+        && normalizeRoleToken(rawRole) === normalizedProfileRole
+        && (!rawUserType || normalizeBusinessAutopilotUserType(rawUserType) === normalizedUserType)
+      ) {
         return value;
       }
     }
@@ -900,7 +922,8 @@ function AppShell({ state, productPrefix, productSlug }) {
         const nextAccessRecord = resolveBusinessAutopilotAccessRecord(
           roleAccessMap,
           state.profile?.access_role || state.profile?.role,
-          matchedUser?.employee_role || state.user?.employee_role || ""
+          matchedUser?.employee_role || state.user?.employee_role || "",
+          matchedUser?.user_type || state.user?.user_type || state.profile?.user_type || ""
         );
         setAutopilotAccessRecord(nextAccessRecord);
       } catch {
