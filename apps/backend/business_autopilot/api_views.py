@@ -4243,6 +4243,7 @@ def _default_accounts_workspace():
         "quickEstimateSettings": {
             "headerText": "",
             "templateSize": "4in",
+            "paymentProofRetentionDays": "45",
         },
     }
 
@@ -4383,9 +4384,15 @@ def _normalize_accounts_workspace(payload):
         template_size = str(quick_estimate_settings.get("templateSize") or "4in").strip().lower()
         if template_size not in {"3in", "4in"}:
             template_size = "4in"
+        payment_proof_retention_days = str(
+            quick_estimate_settings.get("paymentProofRetentionDays") or "45"
+        ).strip()
+        if payment_proof_retention_days not in {"45", "60"}:
+            payment_proof_retention_days = "45"
         base["quickEstimateSettings"] = {
             "headerText": _normalize_quick_estimate_header_html(quick_estimate_settings.get("headerText")),
             "templateSize": template_size,
+            "paymentProofRetentionDays": payment_proof_retention_days,
         }
     return base
 
@@ -4405,9 +4412,15 @@ def _merge_accounts_workspace(existing_payload, incoming_payload):
         template_size = str(incoming_payload.get("quickEstimateSettings", {}).get("templateSize") or "4in").strip().lower()
         if template_size not in {"3in", "4in"}:
             template_size = "4in"
+        payment_proof_retention_days = str(
+            incoming_payload.get("quickEstimateSettings", {}).get("paymentProofRetentionDays") or "45"
+        ).strip()
+        if payment_proof_retention_days not in {"45", "60"}:
+            payment_proof_retention_days = "45"
         merged["quickEstimateSettings"] = {
             "headerText": _normalize_quick_estimate_header_html(incoming_payload.get("quickEstimateSettings", {}).get("headerText")),
             "templateSize": template_size,
+            "paymentProofRetentionDays": payment_proof_retention_days,
         }
     return _normalize_accounts_workspace(merged)
 
