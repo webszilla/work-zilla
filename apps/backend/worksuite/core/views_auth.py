@@ -32,6 +32,21 @@ from apps.backend.business_autopilot.models import OrganizationUser as BusinessA
 
 User = get_user_model()
 
+BUSINESS_AUTOPILOT_USER_TYPE_ALLOWED_MODULES = {
+    "crm_user": ["dashboard", "inbox", "crm", "users", "profile"],
+    "hrm_user": ["dashboard", "hr", "users", "profile"],
+    "full_access_user": ["dashboard", "inbox", "crm", "hr", "projects", "accounts", "subscriptions", "ticketing", "stocks", "users", "billing", "plans", "profile"],
+}
+
+
+def _normalize_business_autopilot_user_type_key(value):
+    raw = str(value or "").strip().lower()
+    if raw in {"crm_user", "crm", "crmuser"}:
+        return "crm_user"
+    if raw in {"hrm_user", "hrm", "hrmuser", "hr"}:
+        return "hrm_user"
+    return "full_access_user"
+
 def company_signup(request):
     if request.method == "POST":
         name = request.POST.get("name") or request.POST.get("company")
@@ -444,6 +459,12 @@ def auth_me(request):
             .only("role", "employee_role", "user_type")
             .first()
         )
+    business_autopilot_allowed_sections = BUSINESS_AUTOPILOT_USER_TYPE_ALLOWED_MODULES.get(
+        _normalize_business_autopilot_user_type_key(
+            getattr(business_autopilot_membership, "user_type", "")
+        ),
+        BUSINESS_AUTOPILOT_USER_TYPE_ALLOWED_MODULES["full_access_user"],
+    )
 
     profile_payload = None
     if profile:
@@ -455,6 +476,7 @@ def auth_me(request):
             "membership_role": getattr(business_autopilot_membership, "role", "") or "",
             "employee_role": getattr(business_autopilot_membership, "employee_role", "") or "",
             "user_type": getattr(business_autopilot_membership, "user_type", "") or "",
+            "business_autopilot_allowed_sections": list(business_autopilot_allowed_sections),
         }
 
     dealer_payload = None
@@ -651,6 +673,7 @@ def auth_me(request):
                 "membership_role": getattr(business_autopilot_membership, "role", "") or "",
                 "employee_role": getattr(business_autopilot_membership, "employee_role", "") or "",
                 "user_type": getattr(business_autopilot_membership, "user_type", "") or "",
+                "business_autopilot_allowed_sections": list(business_autopilot_allowed_sections),
             },
             "profile": profile_payload,
             "access_role": access_role,

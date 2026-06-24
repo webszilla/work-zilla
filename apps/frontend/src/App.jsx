@@ -330,6 +330,62 @@ function hasBusinessAutopilotSectionFullAccess(accessRecord, sectionKey, isAdmin
   return normalizeBusinessAutopilotAccessLevel(rawValue) === "Full Access";
 }
 
+function normalizeBusinessAutopilotAllowedSections(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return Array.from(new Set(
+    value
+      .map((item) => String(item || "").trim().toLowerCase())
+      .filter(Boolean)
+  ));
+}
+
+function createBusinessAutopilotFallbackAccessRecord(allowedSections = []) {
+  const normalizedAllowedSections = normalizeBusinessAutopilotAllowedSections(allowedSections);
+  if (!normalizedAllowedSections.length) {
+    return null;
+  }
+  const sectionKeys = [
+    "dashboard",
+    "inbox",
+    "crm",
+    "hr",
+    "projects",
+    "accounts",
+    "subscriptions",
+    "ticketing",
+    "stocks",
+    "users",
+    "billing",
+    "plans",
+    "profile",
+  ];
+  return {
+    sections: Object.fromEntries(
+      sectionKeys.map((sectionKey) => [
+        sectionKey,
+        normalizedAllowedSections.includes(sectionKey) ? "Full Access" : "No Access",
+      ])
+    ),
+    user_sub_sections: {
+      employee: {
+        enabled: normalizedAllowedSections.includes("users"),
+        access_level: normalizedAllowedSections.includes("users") ? "Full Access" : "No Access",
+      },
+      clients: {
+        enabled: normalizedAllowedSections.includes("users"),
+        access_level: normalizedAllowedSections.includes("users") ? "Full Access" : "No Access",
+      },
+      vendors: {
+        enabled: normalizedAllowedSections.includes("users"),
+        access_level: normalizedAllowedSections.includes("users") ? "Full Access" : "No Access",
+      },
+    },
+    can_delete: true,
+  };
+}
+
 function hasBusinessAutopilotDefaultProfileAccess(isBusinessAutopilot, profileRole, isAdmin) {
   if (!isBusinessAutopilot || isAdmin) {
     return false;
@@ -918,6 +974,12 @@ function AppShell({ state, productPrefix, productSlug }) {
         const matchedUser = (Array.isArray(usersDirectory) ? usersDirectory : []).find(
           (row) => String(row?.email || "").trim().toLowerCase() === currentEmail
         );
+        const fallbackAllowedSections = normalizeBusinessAutopilotAllowedSections(
+          matchedUser?.business_autopilot_allowed_sections
+          || state.profile?.business_autopilot_allowed_sections
+          || state.user?.business_autopilot_allowed_sections
+          || []
+        );
         setAutopilotMembershipRole(
           String(
             matchedUser?.role
@@ -932,7 +994,7 @@ function AppShell({ state, productPrefix, productSlug }) {
           matchedUser?.employee_role || state.user?.employee_role || "",
           matchedUser?.user_type || state.user?.user_type || state.profile?.user_type || ""
         );
-        setAutopilotAccessRecord(nextAccessRecord);
+        setAutopilotAccessRecord(nextAccessRecord || createBusinessAutopilotFallbackAccessRecord(fallbackAllowedSections));
       } catch {
         if (!active) {
           return;
