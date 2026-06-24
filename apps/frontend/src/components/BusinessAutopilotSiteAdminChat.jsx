@@ -1036,7 +1036,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setNotice("");
     try {
       const data = await apiFetch("/api/business-autopilot/quick-estimate-settings/", {
-        method: "PATCH",
+        method: "POST",
         body: JSON.stringify({
           __action: "PATCH",
           headerText: qeHeaderText,
