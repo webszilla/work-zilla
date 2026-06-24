@@ -28,6 +28,7 @@ from apps.backend.retention.models import RetentionStatus
 from apps.backend.retention.models import RetentionStatus, TenantRetentionStatus
 from core.access_control import check_product_access, get_access_role, get_user_organization, iter_accessible_product_slugs
 from core.access_control import normalize_product_slug
+from apps.backend.business_autopilot.models import OrganizationUser as BusinessAutopilotOrganizationUser
 
 User = get_user_model()
 
@@ -396,6 +397,7 @@ def auth_me(request):
     org_payload = None
     org_timezone = "UTC"
     org_settings = None
+    business_autopilot_membership = None
     if org:
         org_settings, _ = OrganizationSettings.objects.get_or_create(organization=org)
         org_timezone = normalize_timezone(org_settings.org_timezone, fallback="UTC")
@@ -431,6 +433,17 @@ def auth_me(request):
             "name": org.name,
             "company_key": org.company_key,
         }
+        business_autopilot_membership = (
+            BusinessAutopilotOrganizationUser.objects
+            .filter(
+                organization=org,
+                user=user,
+                is_deleted=False,
+                status=BusinessAutopilotOrganizationUser.STATUS_ACTIVE,
+            )
+            .only("role", "employee_role", "user_type")
+            .first()
+        )
 
     profile_payload = None
     if profile:
@@ -439,6 +452,9 @@ def auth_me(request):
             "access_role": profile.access_role,
             "phone_number": profile.phone_number or "",
             "organization": org_payload,
+            "membership_role": getattr(business_autopilot_membership, "role", "") or "",
+            "employee_role": getattr(business_autopilot_membership, "employee_role", "") or "",
+            "user_type": getattr(business_autopilot_membership, "user_type", "") or "",
         }
 
     dealer_payload = None
@@ -632,6 +648,9 @@ def auth_me(request):
                 "first_name": user.first_name,
                 "last_name": user.last_name,
                 "is_superuser": user.is_superuser,
+                "membership_role": getattr(business_autopilot_membership, "role", "") or "",
+                "employee_role": getattr(business_autopilot_membership, "employee_role", "") or "",
+                "user_type": getattr(business_autopilot_membership, "user_type", "") or "",
             },
             "profile": profile_payload,
             "access_role": access_role,

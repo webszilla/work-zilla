@@ -918,7 +918,14 @@ function AppShell({ state, productPrefix, productSlug }) {
         const matchedUser = (Array.isArray(usersDirectory) ? usersDirectory : []).find(
           (row) => String(row?.email || "").trim().toLowerCase() === currentEmail
         );
-        setAutopilotMembershipRole(String(matchedUser?.role || "").trim());
+        setAutopilotMembershipRole(
+          String(
+            matchedUser?.role
+            || state.profile?.membership_role
+            || state.user?.membership_role
+            || ""
+          ).trim()
+        );
         const nextAccessRecord = resolveBusinessAutopilotAccessRecord(
           roleAccessMap,
           state.profile?.access_role || state.profile?.role,
