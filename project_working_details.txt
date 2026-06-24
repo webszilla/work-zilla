@@ -175,10 +175,10 @@ VERIFY (AFTER DEPLOY)
 - `pgrep -af "core_platform.wsgi:application"`
 
 ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
-- Published at (UTC): `2026-06-21T04:41:55Z`
-- Local SHA: `b765fcd9bba3d49de757aec79f2a3a85268049c4`
-- GitHub main SHA: `b765fcd9bba3d49de757aec79f2a3a85268049c4`
-- Server SHA: `b765fcd9bba3d49de757aec79f2a3a85268049c4`
+- Published at (UTC): `2026-06-24T02:43:02Z`
+- Local SHA: `35ada57fed9080978c7a7909e480670f4b9ac4ec`
+- GitHub main SHA: `35ada57fed9080978c7a7909e480670f4b9ac4ec`
+- Server SHA: `35ada57fed9080978c7a7909e480670f4b9ac4ec`
 - Deploy method: `git-pull`
 - Gunicorn: listening on `:8000` (`yes`)
 - Verified URLs:
@@ -188,7 +188,16 @@ ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
   - `/downloads/windows-agent/` -> `404`
   - `/downloads/mac-agent/` -> `404`
 
-LATEST WORK LOG (2026-06-15)
+LATEST WORK LOG (2026-06-24)
+- Business Autopilot Site Admin estimate fixes deployed:
+  - edit mobile field now shows old mobile suggestions with client name and also supports custom numbers
+  - quick estimate edit Save and Cancel buttons aligned to a consistent fixed size
+  - normal Send button layout preserved without overlap in composer mode
+  - estimate preview now shows notes above `Thank you.` while PDF output stays unchanged
+- Business Autopilot role access fix deployed:
+  - newly created users can now access dashboard/module pages based on role access records that include `user_type` suffixes
+  - frontend CRM/HR permission resolution now matches role + employee role + user type consistently
+PREVIOUS WORK LOG (2026-06-15)
 - Business Autopilot Site Admin quick estimate workflow deployed:
   - separate Site Admin full-page route and header tab switching
   - externalized Site Admin AI instruction registry for Business Autopilot
