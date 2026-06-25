@@ -2697,6 +2697,55 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         self.assertEqual(str(customers[0].get("phone") or ""), "9876543210")
         self.assertEqual(str(customers[0].get("clientName") or ""), "Guru Prakash")
 
+    def test_quick_estimate_detail_patch_merges_duplicate_customer_rows_for_same_mobile(self):
+        created = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={
+                "message": "9094433222\nVarnika Vasthra\nBoard Printing Rs.650",
+            },
+            content_type="application/json",
+        )
+        estimate_id = created.json()["quick_estimate_id"]
+        estimate = QuickEstimate.objects.get(organization=self.org, id=estimate_id)
+        original_customer_id = estimate.customer_id
+        workspace = AccountsWorkspace.objects.get(organization=self.org)
+        workspace.data["customers"].append(
+            {
+                "id": "cust_duplicate_1",
+                "companyName": "Guru",
+                "clientName": "Guru",
+                "name": "Guru",
+                "phoneCountryCode": "+91",
+                "phone": "9094433222",
+                "phoneList": [{"countryCode": "+91", "number": "9094433222"}],
+                "email": "",
+                "additionalEmails": [],
+                "emailList": [],
+                "billingAddress": "",
+                "shippingAddress": "",
+                "gstin": "",
+            }
+        )
+        workspace.save(update_fields=["data", "updated_at"])
+
+        response = self.client.patch(
+            f"/api/business-autopilot/quick-estimates/{estimate_id}/",
+            data=json.dumps({
+                "mobile": "9094433222",
+                "client_name": "Varnika Vasthra",
+                "item_text": "1. 300Gsm Matt Board Two Rs.650\n2. 3in Dia Art Sticker Rs.100",
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        estimate.refresh_from_db()
+        self.assertEqual(estimate.customer_id, original_customer_id)
+        workspace.refresh_from_db()
+        customers = workspace.data.get("customers") or []
+        self.assertEqual(len([row for row in customers if str(row.get("phone") or "") == "9094433222"]), 1)
+        self.assertFalse(any(str(row.get("id") or "") == "cust_duplicate_1" for row in customers))
+
     def test_quick_estimate_contact_list_returns_workspace_customers(self):
         self.client.post(
             "/api/business-autopilot/site-admin/chat",

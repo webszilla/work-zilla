@@ -5045,8 +5045,46 @@ def _site_admin_update_customer_for_estimate(org, user, estimate, *, mobile="", 
         None,
     )
     if conflicting_row is not None:
-        conflict_name = _get_accounts_customer_display_name(conflicting_row) or target_mobile
-        raise ValueError(f"Mobile number {target_mobile} already exists for {conflict_name}.")
+        existing_row_id = str(existing_row.get("id") or "").strip()
+        conflicting_row_id = str(conflicting_row.get("id") or "").strip()
+        if _site_admin_customer_phone_matches(existing_row, target_mobile):
+            changed = False
+            for field in ("clientName", "companyName", "name", "email", "billingAddress", "shippingAddress", "gstin"):
+                if not str(existing_row.get(field) or "").strip() and str(conflicting_row.get(field) or "").strip():
+                    existing_row[field] = conflicting_row.get(field)
+                    changed = True
+            email_list = existing_row.get("emailList") if isinstance(existing_row.get("emailList"), list) else []
+            for value in conflicting_row.get("emailList") or []:
+                normalized_value = _normalize_site_admin_email(value)
+                if normalized_value and normalized_value not in {_normalize_site_admin_email(item) for item in email_list}:
+                    email_list.append(normalized_value)
+                    changed = True
+            if email_list:
+                existing_row["emailList"] = email_list
+            phone_list = existing_row.get("phoneList") if isinstance(existing_row.get("phoneList"), list) else []
+            for item in conflicting_row.get("phoneList") or []:
+                if not isinstance(item, dict):
+                    continue
+                if not any(_site_admin_mobile_matches(candidate.get("number"), item.get("number")) for candidate in phone_list if isinstance(candidate, dict)):
+                    phone_list.append(item)
+                    changed = True
+            if phone_list:
+                existing_row["phoneList"] = phone_list
+            customers[:] = [
+                row for row in customers
+                if not (isinstance(row, dict) and str(row.get("id") or "").strip() == conflicting_row_id)
+            ]
+            if conflicting_row_id and existing_row_id:
+                QuickEstimate.objects.filter(organization=org, customer_id=conflicting_row_id).update(customer_id=existing_row_id)
+            if changed:
+                existing_row["updatedAt"] = timezone.now().isoformat()
+            data["customers"] = customers
+            workspace.data = data
+            workspace.updated_by = user
+            workspace.save(update_fields=["data", "updated_by", "updated_at"])
+        else:
+            conflict_name = _get_accounts_customer_display_name(conflicting_row) or target_mobile
+            raise ValueError(f"Mobile number {target_mobile} already exists for {conflict_name}.")
 
     changed = False
     if target_client_name:
