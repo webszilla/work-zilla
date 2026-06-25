@@ -300,6 +300,19 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
   }
 
   useEffect(() => {
+    if (!paymentModalRow || paymentModalMode !== "online" || typeof window === "undefined") {
+      return undefined;
+    }
+    const handleWindowPaste = (event) => {
+      handlePaymentProofPaste(event);
+    };
+    window.addEventListener("paste", handleWindowPaste);
+    return () => {
+      window.removeEventListener("paste", handleWindowPaste);
+    };
+  }, [paymentModalMode, paymentModalRow]);
+
+  useEffect(() => {
     let ignore = false;
     async function load() {
       setLoading(true);

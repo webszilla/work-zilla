@@ -727,6 +727,19 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setEstimatePage(1);
   }, [estimateSearch, estimateFilter, estimateUserFilter]);
 
+  useEffect(() => {
+    if (!paymentProofModalOpen || typeof window === "undefined") {
+      return undefined;
+    }
+    const handleWindowPaste = (event) => {
+      handlePaymentProofPaste(event);
+    };
+    window.addEventListener("paste", handleWindowPaste);
+    return () => {
+      window.removeEventListener("paste", handleWindowPaste);
+    };
+  }, [paymentProofModalOpen]);
+
   function appendAssistantMessage(data, fallbackText) {
     setMessages((prev) => [...prev, buildAssistantChatMessage(data, fallbackText)]);
   }
