@@ -2482,6 +2482,60 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         estimate = QuickEstimate.objects.get(organization=self.org, estimate_number="QE-0001")
         self.assertEqual(estimate.status, QuickEstimate.STATUS_SHARED)
 
+    def test_site_admin_qe_international_mobile_preserves_country_code(self):
+        response = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={
+                "message": "+14252214350\nDeepali\nFlex Banner Printing Rs.3300",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        estimate = QuickEstimate.objects.get(organization=self.org, estimate_number="QE-0001")
+        self.assertEqual(estimate.mobile, "14252214350")
+        self.assertEqual(estimate.client_name, "Deepali")
+        workspace = AccountsWorkspace.objects.get(organization=self.org)
+        customers = workspace.data.get("customers") or []
+        self.assertEqual(customers[0].get("phone"), "14252214350")
+        self.assertEqual(customers[0].get("phoneCountryCode"), "+1")
+        self.assertEqual(customers[0].get("phoneList"), [{"countryCode": "+1", "number": "14252214350"}])
+        whatsapp_response = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "yes"},
+            content_type="application/json",
+        )
+        estimate.refresh_from_db()
+        self.assertEqual(estimate.status, QuickEstimate.STATUS_SHARED)
+        self.assertIn("https://wa.me/14252214350?text=", whatsapp_response.json()["whatsapp_url"])
+
+    def test_quick_estimate_contact_delete_hides_linked_contact_until_recreated(self):
+        self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={
+                "message": "9092833701\nGuru\nBusiness Card Printing Rs.1050",
+            },
+            content_type="application/json",
+        )
+
+        list_response = self.client.get("/api/business-autopilot/quick-estimate-contacts/")
+        self.assertEqual(list_response.status_code, 200)
+        contact = list_response.json()["contacts"][0]
+
+        delete_response = self.client.post(
+            f"/api/business-autopilot/quick-estimate-contacts/{contact['id']}/",
+            data=json.dumps({"__action": "DELETE"}),
+            content_type="application/json",
+        )
+        self.assertEqual(delete_response.status_code, 200)
+
+        refreshed_response = self.client.get("/api/business-autopilot/quick-estimate-contacts/")
+        self.assertEqual(refreshed_response.status_code, 200)
+        self.assertEqual(refreshed_response.json()["contacts"], [])
+        workspace = AccountsWorkspace.objects.get(organization=self.org)
+        self.assertIn(contact["id"], workspace.data.get("quickEstimateDeletedContactIds") or [])
+
     def test_quick_estimate_numbers_restart_per_organization(self):
         other_user = User.objects.create_user(
             username="other@workzilla.test",

@@ -256,6 +256,14 @@ PREVIOUS WORK LOG (2026-06-13)
   - chatbot name
   - male / female voice preference
   - wake word configuration support
+- Quick Estimate contact and mobile handling fixes:
+  - fixed contact delete so removed contacts do not reappear from linked estimates
+  - preserved international numbers like `+1...` instead of trimming to India-only 10 digits
+  - updated WhatsApp share link generation to use full international number
+  - updated contact/customer phone country code storage from detected number prefix
+  - relaxed estimate edit mobile validation to allow valid international numbers
+  - added backend regression tests for international mobile handling and contact delete behavior
+
 - Voice / chat improvements:
   - push-to-talk helpers
   - wake-word detector hooks

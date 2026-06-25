@@ -4599,10 +4599,59 @@ def _get_accounts_workspace(org):
 
 
 def _normalize_site_admin_mobile(value):
-    digits = re.sub(r"\D+", "", str(value or ""))
-    if len(digits) >= 10:
-        return digits[-10:]
+    raw = str(value or "").strip()
+    digits = re.sub(r"\D+", "", raw)
+    if not digits:
+        return ""
+    if raw.startswith("+"):
+        return digits[:15]
+    if 10 <= len(digits) <= 15:
+        return digits[:15]
     return digits
+
+
+def _site_admin_mobile_matches(left, right):
+    left_digits = _normalize_site_admin_mobile(left)
+    right_digits = _normalize_site_admin_mobile(right)
+    if not left_digits or not right_digits:
+        return False
+    if left_digits == right_digits:
+        return True
+    india_variants = {
+        left_digits,
+        left_digits[-10:] if len(left_digits) > 10 and left_digits.startswith("91") else "",
+        f"91{left_digits}" if len(left_digits) == 10 else "",
+        right_digits,
+        right_digits[-10:] if len(right_digits) > 10 and right_digits.startswith("91") else "",
+        f"91{right_digits}" if len(right_digits) == 10 else "",
+    }
+    return left_digits in india_variants and right_digits in india_variants
+
+
+def _site_admin_format_mobile_display(value):
+    digits = _normalize_site_admin_mobile(value)
+    if not digits:
+        return ""
+    return digits if len(digits) == 10 else f"+{digits}"
+
+
+def _site_admin_whatsapp_mobile(value):
+    digits = _normalize_site_admin_mobile(value)
+    if not digits:
+        return ""
+    return f"91{digits}" if len(digits) == 10 else digits
+
+
+def _site_admin_mobile_country_code(value):
+    digits = _normalize_site_admin_mobile(value)
+    if not digits:
+        return "+91"
+    if len(digits) == 10:
+        return "+91"
+    if len(digits) == 11 and digits.startswith("1"):
+        return "+1"
+    prefix = digits[:-10] if len(digits) > 10 else ""
+    return f"+{prefix}" if prefix else "+91"
 
 
 def _normalize_site_admin_email(value):
@@ -4635,12 +4684,10 @@ def _site_admin_detect_quick_estimate_intent(message):
 
 def _site_admin_find_mobile(text):
     content = str(text or "")
-    candidates = re.findall(r"(?:\+?91[\s-]*)?[6-9]\d[\d\s-]{8,12}", content)
-    if not candidates:
-        candidates = re.findall(r"(?:\+?91[\s-]*)?\d[\d\s-]{8,12}", content)
+    candidates = re.findall(r"\+?\d[\d\s\-]{8,18}", content)
     for candidate in candidates:
         normalized = _normalize_site_admin_mobile(candidate)
-        if len(normalized) == 10:
+        if 10 <= len(normalized) <= 15:
             return normalized
     return ""
 
@@ -4865,7 +4912,7 @@ def _site_admin_customer_phone_matches(row, mobile):
         *(item.get("number") for item in (row.get("phoneList") or []) if isinstance(item, dict)),
         *(item.get("number") for item in (row.get("additionalPhones") or []) if isinstance(item, dict)),
     ]
-    return any(_normalize_site_admin_mobile(value) == target for value in candidates)
+    return any(_site_admin_mobile_matches(value, target) for value in candidates)
 
 
 def _site_admin_get_or_create_customer(org, user, *, mobile, client_name="", email="", address="", gst_number=""):
@@ -4882,6 +4929,7 @@ def _site_admin_get_or_create_customer(org, user, *, mobile, client_name="", ema
         None,
     )
     changed = False
+    phone_country_code = _site_admin_mobile_country_code(normalized_mobile)
     if existing_row is None:
         customer_id = f"cust_{secrets.token_hex(6)}"
         existing_row = {
@@ -4890,10 +4938,10 @@ def _site_admin_get_or_create_customer(org, user, *, mobile, client_name="", ema
             "clientName": client_name[:180],
             "name": client_name[:180],
             "gstin": gst_number[:32],
-            "phoneCountryCode": "+91",
+            "phoneCountryCode": phone_country_code,
             "phone": normalized_mobile,
             "additionalPhones": [],
-            "phoneList": [{"countryCode": "+91", "number": normalized_mobile}],
+            "phoneList": [{"countryCode": phone_country_code, "number": normalized_mobile}],
             "email": normalized_email,
             "additionalEmails": [],
             "emailList": [normalized_email] if normalized_email else [],
@@ -4936,7 +4984,7 @@ def _site_admin_get_or_create_customer(org, user, *, mobile, client_name="", ema
             changed = True
         if not _site_admin_customer_phone_matches(existing_row, normalized_mobile):
             phone_list = existing_row.get("phoneList") if isinstance(existing_row.get("phoneList"), list) else []
-            phone_list.append({"countryCode": "+91", "number": normalized_mobile})
+            phone_list.append({"countryCode": phone_country_code, "number": normalized_mobile})
             existing_row["phoneList"] = phone_list
             changed = True
         existing_row["updatedAt"] = timezone.now().isoformat()
@@ -5016,12 +5064,13 @@ def _site_admin_update_customer_for_estimate(org, user, estimate, *, mobile="", 
         if _normalize_site_admin_mobile(existing_row.get("phone")) != target_mobile:
             existing_row["phone"] = target_mobile
             changed = True
-        if str(existing_row.get("phoneCountryCode") or "").strip() != "+91":
-            existing_row["phoneCountryCode"] = "+91"
+        target_phone_country_code = _site_admin_mobile_country_code(target_mobile)
+        if str(existing_row.get("phoneCountryCode") or "").strip() != target_phone_country_code:
+            existing_row["phoneCountryCode"] = target_phone_country_code
             changed = True
         phone_list = existing_row.get("phoneList") if isinstance(existing_row.get("phoneList"), list) else []
-        if not any(_normalize_site_admin_mobile(item.get("number")) == target_mobile for item in phone_list if isinstance(item, dict)):
-            phone_list.append({"countryCode": "+91", "number": target_mobile})
+        if not any(_site_admin_mobile_matches(item.get("number"), target_mobile) for item in phone_list if isinstance(item, dict)):
+            phone_list.append({"countryCode": target_phone_country_code, "number": target_mobile})
             existing_row["phoneList"] = phone_list
             changed = True
 
@@ -5039,6 +5088,18 @@ def _get_quick_estimate_contact_store(data):
     return rows if isinstance(rows, list) else []
 
 
+def _get_deleted_quick_estimate_contact_ids(data):
+    rows = data.get("quickEstimateDeletedContactIds")
+    if not isinstance(rows, list):
+        return []
+    deleted_ids = []
+    for item in rows:
+        contact_id = str(item or "").strip()
+        if contact_id and contact_id not in deleted_ids:
+            deleted_ids.append(contact_id)
+    return deleted_ids
+
+
 def _upsert_quick_estimate_contact(
     org,
     user,
@@ -5053,6 +5114,7 @@ def _upsert_quick_estimate_contact(
     workspace = _get_accounts_workspace(org)
     data = _normalize_accounts_workspace(workspace.data)
     contacts = _get_quick_estimate_contact_store(data)
+    deleted_contact_ids = _get_deleted_quick_estimate_contact_ids(data)
     normalized_mobile = _normalize_site_admin_mobile(mobile)
     normalized_name = str(client_name or "").strip()[:180]
     normalized_email = _normalize_site_admin_email(email)
@@ -5063,7 +5125,7 @@ def _upsert_quick_estimate_contact(
     if target_id:
         row = next((item for item in contacts if isinstance(item, dict) and str(item.get("id") or "").strip() == target_id), None)
     if row is None and normalized_mobile:
-        row = next((item for item in contacts if isinstance(item, dict) and _normalize_site_admin_mobile(item.get("phone")) == normalized_mobile), None)
+        row = next((item for item in contacts if isinstance(item, dict) and _site_admin_mobile_matches(item.get("phone"), normalized_mobile)), None)
     if row is None:
         target_id = target_id or f"qe_contact_{secrets.token_hex(6)}"
         row = {"id": target_id, "createdAt": timezone.now().isoformat()}
@@ -5076,6 +5138,9 @@ def _upsert_quick_estimate_contact(
     row["gstin"] = normalized_gst
     row["updatedAt"] = timezone.now().isoformat()
     data["quickEstimateContacts"] = contacts
+    if row["id"] in deleted_contact_ids:
+        deleted_contact_ids = [item for item in deleted_contact_ids if item != row["id"]]
+    data["quickEstimateDeletedContactIds"] = deleted_contact_ids
     workspace.data = data
     workspace.updated_by = user
     workspace.save(update_fields=["data", "updated_by", "updated_at"])
@@ -5156,7 +5221,10 @@ def _build_quick_estimate_whatsapp_url(row):
         "",
         "Thank you.",
     ])
-    return f"https://wa.me/91{row.mobile}?text={quote(message)}"
+    whatsapp_mobile = _site_admin_whatsapp_mobile(getattr(row, "mobile", ""))
+    if not whatsapp_mobile:
+        return ""
+    return f"https://wa.me/{whatsapp_mobile}?text={quote(message)}"
 
 
 def _get_public_site_base_url():
@@ -5636,7 +5704,7 @@ def _record_quick_estimate_history(estimate, *, action="updated", actor=None, no
 def _serialize_quick_estimate_contact(row, *, linked_estimate_count=0):
     if not isinstance(row, dict):
         row = {}
-    phone = _normalize_site_admin_mobile(row.get("phone"))
+    phone = _site_admin_format_mobile_display(row.get("phone"))
     client_name = str(row.get("clientName") or row.get("companyName") or row.get("name") or "").strip()
     return {
         "id": str(row.get("id") or "").strip(),
@@ -5666,11 +5734,12 @@ def _quick_estimate_contact_rows_with_counts(org):
         if key:
             estimate_counts[key] = estimate_counts.get(key, 0) + 1
     rows = []
+    deleted_contact_ids = set(_get_deleted_quick_estimate_contact_ids(data))
     for row in contacts:
         if not isinstance(row, dict):
             continue
         contact_id = str(row.get("id") or "").strip()
-        if not contact_id:
+        if not contact_id or contact_id in deleted_contact_ids:
             continue
         rows.append(_serialize_quick_estimate_contact(row, linked_estimate_count=estimate_counts.get(contact_id, 0)))
     rows.sort(key=lambda item: (str(item.get("client_name") or "").lower(), str(item.get("mobile") or "")))
@@ -5681,6 +5750,7 @@ def _sync_quick_estimate_contacts_from_estimates(org, user=None):
     workspace = _get_accounts_workspace(org)
     data = _normalize_accounts_workspace(workspace.data)
     contacts = _get_quick_estimate_contact_store(data)
+    deleted_contact_ids = set(_get_deleted_quick_estimate_contact_ids(data))
     known_ids = {
         str(row.get("id") or "").strip()
         for row in contacts
@@ -5695,7 +5765,7 @@ def _sync_quick_estimate_contacts_from_estimates(org, user=None):
     )
     for estimate in estimates:
         contact_id = str(getattr(estimate, "customer_id", "") or "").strip()
-        if not contact_id or contact_id in known_ids:
+        if not contact_id or contact_id in known_ids or contact_id in deleted_contact_ids:
             continue
         normalized_mobile = _normalize_site_admin_mobile(getattr(estimate, "mobile", ""))
         normalized_name = str(getattr(estimate, "client_name", "") or "").strip()[:180]
@@ -5726,6 +5796,8 @@ def _ensure_quick_estimate_contact_name_mobile(*, mobile="", client_name="", req
     normalized_name = str(client_name or "").strip()
     if not normalized_mobile:
         raise ValueError("Please enter the mobile number.")
+    if not 10 <= len(normalized_mobile) <= 15:
+        raise ValueError("Please enter a valid mobile number.")
     if require_client_name and not normalized_name:
         raise ValueError("Please enter the client name.")
     return normalized_mobile, normalized_name[:180]
@@ -9815,6 +9887,10 @@ def quick_estimate_contacts(request, contact_id: str = ""):
     if resolved_method == "DELETE":
         contacts[:] = [row for row in contacts if not (isinstance(row, dict) and str(row.get("id") or "").strip() == normalized_contact_id)]
         data["quickEstimateContacts"] = contacts
+        deleted_contact_ids = _get_deleted_quick_estimate_contact_ids(data)
+        if normalized_contact_id not in deleted_contact_ids:
+            deleted_contact_ids.append(normalized_contact_id)
+        data["quickEstimateDeletedContactIds"] = deleted_contact_ids
         workspace.data = data
         workspace.updated_by = request.user
         workspace.save(update_fields=["data", "updated_by", "updated_at"])
@@ -9834,7 +9910,7 @@ def quick_estimate_contacts(request, contact_id: str = ""):
             row for row in contacts
             if isinstance(row, dict)
             and row is not target_row
-            and _normalize_site_admin_mobile(row.get("phone")) == normalized_mobile
+            and _site_admin_mobile_matches(row.get("phone"), normalized_mobile)
         ),
         None,
     )
@@ -9849,6 +9925,7 @@ def quick_estimate_contacts(request, contact_id: str = ""):
     normalized_gst = str(payload.get("gst_number") or payload.get("gstin") or target_row.get("gstin") or "").strip()[:32]
     target_row["clientName"] = normalized_name
     target_row["phone"] = normalized_mobile
+    target_row["phoneCountryCode"] = _site_admin_mobile_country_code(normalized_mobile)
     target_row["email"] = normalized_email
     target_row["address"] = normalized_address
     target_row["gstin"] = normalized_gst
@@ -10211,8 +10288,8 @@ def quick_estimates(request, estimate_id: int = None):
         or getattr(row, "payment_proof_image", "")
         or ""
     ).strip()
-    if len(next_mobile) != 10:
-        return JsonResponse({"detail": "invalid_mobile", "message": "Please share a valid 10-digit mobile number."}, status=400)
+    if not 10 <= len(next_mobile) <= 15:
+        return JsonResponse({"detail": "invalid_mobile", "message": "Please share a valid mobile number."}, status=400)
     if not next_client_name:
         return JsonResponse({"detail": "client_name_required", "message": "Please share the client name."}, status=400)
     if next_payment_status == QuickEstimate.PROGRESS_COMPLETED and next_payment_mode not in {"cash", "online"}:
