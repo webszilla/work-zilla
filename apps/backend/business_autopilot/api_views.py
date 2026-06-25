@@ -4850,6 +4850,12 @@ def _site_admin_parse_message_fields(message):
     return parsed
 
 
+def _site_admin_message_is_only_mobile(message, mobile=""):
+    normalized_mobile = _normalize_site_admin_mobile(mobile or message)
+    compact_message = re.sub(r"\s+", "", str(message or "").strip())
+    return bool(normalized_mobile and compact_message == normalized_mobile)
+
+
 def _site_admin_customer_phone_matches(row, mobile):
     target = _normalize_site_admin_mobile(mobile)
     if not target:
@@ -9251,13 +9257,23 @@ def _site_admin_merge_quick_estimate_fields(state, message):
     parsed = _site_admin_parse_message_fields(message)
     current_step = str(state.current_step or "").strip()
     raw_message = " ".join(str(message or "").strip().split())
+    previous_mobile = str(collected.get("mobile") or "").strip()
+    incoming_mobile = ""
 
     if parsed.get("mobile"):
-        collected["mobile"] = parsed["mobile"]
+        incoming_mobile = parsed["mobile"]
     elif current_step == "mobile":
         explicit_mobile = _normalize_site_admin_mobile(raw_message)
         if len(explicit_mobile) == 10:
-            collected["mobile"] = explicit_mobile
+            incoming_mobile = explicit_mobile
+
+    if incoming_mobile:
+        if incoming_mobile != previous_mobile:
+            # Fresh mobile input starts a new client/item collection path.
+            for key in ("client_name", "email", "address", "gst_number", "customer_id", "item_text", "amount"):
+                collected.pop(key, None)
+            collected["existing_client"] = False
+        collected["mobile"] = incoming_mobile
 
     if collected.get("mobile"):
         existing_customer = _site_admin_existing_customer_by_mobile(state.organization, collected["mobile"])
@@ -9289,7 +9305,12 @@ def _site_admin_merge_quick_estimate_fields(state, message):
             collected["client_name"] = name_candidate
 
     item_text_candidate = str(parsed.get("item_text") or "").strip()
-    if current_step == "item_text" and raw_message and not item_text_candidate:
+    if (
+        current_step == "item_text"
+        and raw_message
+        and not item_text_candidate
+        and not _site_admin_message_is_only_mobile(raw_message, collected.get("mobile"))
+    ):
         item_text_candidate = raw_message
     client_name_ready = bool(collected.get("existing_client")) or bool(str(collected.get("client_name") or "").strip())
     if (

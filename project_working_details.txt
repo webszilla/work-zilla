@@ -189,6 +189,9 @@ ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
   - `/downloads/mac-agent/` -> `404`
 
 LATEST WORK LOG (2026-06-25)
+- Business Autopilot Site Admin quick estimate mobile-only parsing fixed:
+  - mobile-only follow-up messages no longer get stored as item description or amount
+  - when a fresh mobile is sent mid-flow, stale client/item/amount fields are cleared before continuing
 - Business Autopilot Site Admin payment proof upload save fixed for CDN/live:
   - quick estimate edit save now sends new payment proof uploads as multipart FormData instead of large base64 JSON
   - backend converts uploaded proof file into the existing data-url storage format

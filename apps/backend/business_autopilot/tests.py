@@ -2401,6 +2401,38 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         self.assertEqual(state.intent, "quick_estimate")
         self.assertEqual(state.current_step, "client_name")
 
+    def test_site_admin_qe_mobile_only_during_item_step_does_not_become_item_or_amount(self):
+        self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "QE"},
+            content_type="application/json",
+        )
+        self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "9094433222"},
+            content_type="application/json",
+        )
+        self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "Guru"},
+            content_type="application/json",
+        )
+
+        response = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "9094433222"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["action"], "collecting_quick_estimate")
+        self.assertEqual(response.json()["reply"], "Please share the client name.")
+        self.assertFalse(QuickEstimate.objects.filter(organization=self.org, mobile="9094433222").exists())
+        state = SiteAdminChatState.objects.get(organization=self.org, user=self.admin)
+        self.assertEqual(state.current_step, "client_name")
+        self.assertEqual(str((state.collected_data or {}).get("mobile") or ""), "9094433222")
+        self.assertEqual(str((state.collected_data or {}).get("item_text") or ""), "")
+
     def test_site_admin_qe_does_not_use_greeting_as_client_name(self):
         self.client.post(
             "/api/business-autopilot/site-admin/chat",
