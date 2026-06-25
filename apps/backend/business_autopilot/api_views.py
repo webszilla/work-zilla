@@ -2864,6 +2864,18 @@ def _get_org_membership(user: User, org: Organization):
     )
 
 
+def _get_org_profile_role(user: User, org: Organization = None):
+    if not user or not user.is_authenticated:
+        return ""
+    profiles = UserProfile.objects.filter(user=user)
+    if org:
+        scoped = profiles.filter(organization=org).only("role").first()
+        if scoped:
+            return _normalize_admin_role(getattr(scoped, "role", ""))
+    profile = profiles.only("role").first()
+    return _normalize_admin_role(getattr(profile, "role", "")) if profile else ""
+
+
 def _can_manage_payroll(user: User, org: Organization = None):
     if not user or not user.is_authenticated:
         return False
@@ -10896,9 +10908,10 @@ def _crm_is_admin(user: User, org: Organization):
         return False
     if user.is_superuser or user.is_staff:
         return True
-    profile = UserProfile.objects.filter(user=user).only("role").first()
-    profile_role = _normalize_admin_role(getattr(profile, "role", ""))
+    profile_role = _get_org_profile_role(user, org)
     if profile_role in {"company_admin", "org_admin", "owner", "superadmin", "super_admin"}:
+        return True
+    if org and getattr(org, "owner_id", None) == getattr(user, "id", None):
         return True
     membership = _get_org_membership(user, org)
     membership_role = _normalize_admin_role(getattr(membership, "role", "")) if membership else ""

@@ -2745,6 +2745,33 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         row = next(item for item in response.json()["quick_estimates"] if item["id"] == estimate.id)
         self.assertTrue(row["can_delete_cancelled"])
 
+    def test_quick_estimate_list_marks_cancelled_delete_allowed_for_org_admin_with_other_org_profile_first(self):
+        other_org = Organization.objects.create(
+            name="Beta Prints",
+            company_key="BETAPRINTS2",
+            owner=self.admin,
+        )
+        UserProfile.objects.create(
+            user=self.admin,
+            organization=other_org,
+            role="org_user",
+        )
+        estimate = QuickEstimate.objects.create(
+            organization=self.org,
+            estimate_sequence=2,
+            estimate_number="QE-0002",
+            mobile="9092833702",
+            client_name="Arun",
+            status=QuickEstimate.STATUS_CANCELLED,
+            created_by=self.admin,
+        )
+
+        response = self.client.get("/api/business-autopilot/quick-estimates/")
+
+        self.assertEqual(response.status_code, 200)
+        row = next(item for item in response.json()["quick_estimates"] if item["id"] == estimate.id)
+        self.assertTrue(row["can_delete_cancelled"])
+
     def test_quick_estimate_delete_cancelled_row_forbidden_for_org_user(self):
         created = self.client.post(
             "/api/business-autopilot/site-admin/chat",
