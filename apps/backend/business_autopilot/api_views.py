@@ -10041,10 +10041,13 @@ def quick_estimates(request, estimate_id: int = None):
     resolved_method = request.method
     payload = None
     if request.method == "POST":
-        try:
-            payload = json.loads(request.body.decode("utf-8") or "{}")
-        except json.JSONDecodeError:
-            return JsonResponse({"detail": "invalid_json"}, status=400)
+        if request.content_type and request.content_type.startswith("multipart/form-data"):
+            payload = request.POST.dict()
+        else:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
         override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
         body_action = str(payload.get("__action") or payload.get("action") or "").strip().upper()
         if body_action in {"PATCH", "DELETE"}:
