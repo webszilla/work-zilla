@@ -9899,7 +9899,7 @@ def quick_estimates(request, estimate_id: int = None):
                 return JsonResponse({"detail": "invalid_json"}, status=400)
 
     patch_action = str(payload.get("action") or payload.get("__action") or "").strip().lower()
-    if resolved_method == "DELETE":
+    if resolved_method == "DELETE" and patch_action not in {"delete", "cancel"}:
         patch_action = "cancel"
 
     if patch_action == "delete":

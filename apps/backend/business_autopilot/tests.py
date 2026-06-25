@@ -2815,6 +2815,39 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         self.assertEqual(response.json()["detail"], "quick_estimate_delete_forbidden")
         self.assertTrue(QuickEstimate.objects.filter(organization=self.org, id=estimate_id).exists())
 
+    def test_quick_estimate_delete_cancelled_row_removes_row_for_org_admin(self):
+        created = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "9092833701\nGuru\nBusiness Card 500 nos Rs.1050"},
+            content_type="application/json",
+        )
+        estimate_id = created.json()["quick_estimate_id"]
+        estimate = QuickEstimate.objects.get(id=estimate_id)
+        estimate.status = QuickEstimate.STATUS_CANCELLED
+        estimate.save(update_fields=["status", "updated_at"])
+        SiteAdminChatState.objects.filter(organization=self.org, user=self.admin).update(
+            last_quick_estimate=estimate,
+            awaiting_whatsapp_share=True,
+        )
+
+        response = self.client.post(
+            "/api/business-autopilot/quick-estimates/",
+            data=json.dumps({
+                "__action": "DELETE",
+                "quick_estimate_id": estimate_id,
+                "action": "delete",
+                "reason": "Customer cancelled",
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["deleted_estimate_id"], estimate_id)
+        self.assertFalse(QuickEstimate.objects.filter(organization=self.org, id=estimate_id).exists())
+        state = SiteAdminChatState.objects.get(organization=self.org, user=self.admin)
+        self.assertIsNone(state.last_quick_estimate)
+        self.assertFalse(state.awaiting_whatsapp_share)
+
     def test_quick_estimate_collection_post_with_payment_action_marks_cash_payment_done(self):
         created = self.client.post(
             "/api/business-autopilot/site-admin/chat",

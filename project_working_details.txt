@@ -189,6 +189,9 @@ ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
   - `/downloads/mac-agent/` -> `404`
 
 LATEST WORK LOG (2026-06-25)
+- Business Autopilot Site Admin cancelled estimate hard-delete flow fixed:
+  - POST override delete requests now preserve explicit `action: delete`
+  - cancelled estimate delete now removes the row instead of re-running cancel logic
 - Business Autopilot Site Admin cancelled estimate delete permission hotfix deployed:
   - delete permission now resolves user profile role against the current organization
   - org admins with multiple organization profiles now still get delete access in cancelled estimate rows
