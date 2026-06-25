@@ -9924,10 +9924,13 @@ def quick_estimate_contacts(request, contact_id: str = ""):
     resolved_method = request.method
     payload = None
     if request.method == "POST":
-        try:
-            payload = json.loads(request.body.decode("utf-8") or "{}")
-        except json.JSONDecodeError:
-            return JsonResponse({"detail": "invalid_json"}, status=400)
+        if request.content_type and request.content_type.startswith("multipart/form-data"):
+            payload = request.POST.dict()
+        else:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
         override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
         body_action = str(payload.get("__action") or payload.get("action") or "").strip().upper()
         if body_action in {"PATCH", "DELETE"}:
@@ -10091,15 +10094,26 @@ def quick_estimates(request, estimate_id: int = None):
             except json.JSONDecodeError:
                 return JsonResponse({"detail": "invalid_json"}, status=400)
     if request.content_type and request.content_type.startswith("multipart/form-data"):
-        uploaded_payment_proof = (
-            request.FILES.get("payment_proof_file")
-            or request.FILES.get("paymentProofFile")
-            or request.FILES.get("payment_proof_image")
-        )
-        uploaded_payment_proof_data_url = _ba_uploaded_image_to_data_url(uploaded_payment_proof)
-        if uploaded_payment_proof_data_url:
-            payload["payment_proof_image"] = uploaded_payment_proof_data_url
-            payload["payment_proof_images"] = [uploaded_payment_proof_data_url]
+        uploaded_payment_proofs = [
+            *request.FILES.getlist("payment_proof_files"),
+            *request.FILES.getlist("paymentProofFiles"),
+        ]
+        if not uploaded_payment_proofs:
+            single_uploaded_payment_proof = (
+                request.FILES.get("payment_proof_file")
+                or request.FILES.get("paymentProofFile")
+                or request.FILES.get("payment_proof_image")
+            )
+            if single_uploaded_payment_proof:
+                uploaded_payment_proofs = [single_uploaded_payment_proof]
+        uploaded_payment_proof_data_urls = [
+            data_url
+            for data_url in (_ba_uploaded_image_to_data_url(item) for item in uploaded_payment_proofs)
+            if data_url
+        ]
+        if uploaded_payment_proof_data_urls:
+            payload["payment_proof_image"] = uploaded_payment_proof_data_urls[0]
+            payload["payment_proof_images"] = uploaded_payment_proof_data_urls
 
     patch_action = str(payload.get("action") or payload.get("__action") or "").strip().lower()
     if resolved_method == "DELETE" and patch_action not in {"delete", "cancel"}:

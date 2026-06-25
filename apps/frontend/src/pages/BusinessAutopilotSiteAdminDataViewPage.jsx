@@ -44,6 +44,22 @@ function readImageFileAsDataUrl(file) {
   });
 }
 
+function dataUrlToFile(dataUrl, filename = "payment-proof.png") {
+  const text = String(dataUrl || "");
+  const match = text.match(/^data:([^;,]+);base64,(.+)$/);
+  if (!match) {
+    return null;
+  }
+  const mimeType = match[1] || "image/png";
+  const binary = atob(match[2] || "");
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  const extension = mimeType.split("/")[1] || "png";
+  return new File([bytes], filename.endsWith(`.${extension}`) ? filename : `${filename}.${extension}`, { type: mimeType });
+}
+
 async function readImageFilesAsDataUrls(files) {
   const imageFiles = Array.from(files || []).filter((file) => String(file?.type || "").startsWith("image/"));
   if (!imageFiles.length) {
@@ -622,7 +638,25 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
     setPaymentSaving(true);
     setNotice("");
     try {
-      const data = await apiFetch(QUICK_ESTIMATES_COLLECTION_API, {
+      const shouldUseMultipart = paymentModalMode === "online" && paymentProofDraftImages.length > 0;
+      const data = await apiFetch(QUICK_ESTIMATES_COLLECTION_API, shouldUseMultipart ? (() => {
+        const formData = new FormData();
+        formData.append("__action", "PATCH");
+        formData.append("quick_estimate_id", String(paymentModalRow.id || ""));
+        formData.append("action", "payment");
+        formData.append("payment_status", "completed");
+        formData.append("payment_mode", paymentModalMode);
+        paymentProofDraftImages.forEach((image, index) => {
+          const file = dataUrlToFile(image, `payment-proof-${index + 1}`);
+          if (file) {
+            formData.append("payment_proof_files", file);
+          }
+        });
+        return {
+          method: "POST",
+          body: formData,
+        };
+      })() : {
         method: "POST",
         body: JSON.stringify({
           __action: "PATCH",
@@ -630,8 +664,8 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
           action: "payment",
           payment_status: "completed",
           payment_mode: paymentModalMode,
-          payment_proof_image: paymentModalMode === "online" ? (paymentProofDraftImages[0] || "") : "",
-          payment_proof_images: paymentModalMode === "online" ? paymentProofDraftImages : [],
+          payment_proof_image: "",
+          payment_proof_images: [],
         }),
       });
       const updatedRow = data?.quick_estimate || null;

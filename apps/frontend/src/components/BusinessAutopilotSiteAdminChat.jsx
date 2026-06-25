@@ -474,6 +474,22 @@ function readFileAsDataUrl(file) {
   });
 }
 
+function dataUrlToFile(dataUrl, filename = "payment-proof.png") {
+  const text = String(dataUrl || "");
+  const match = text.match(/^data:([^;,]+);base64,(.+)$/);
+  if (!match) {
+    return null;
+  }
+  const mimeType = match[1] || "image/png";
+  const binary = atob(match[2] || "");
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  const extension = mimeType.split("/")[1] || "png";
+  return new File([bytes], filename.endsWith(`.${extension}`) ? filename : `${filename}.${extension}`, { type: mimeType });
+}
+
 function buildQuickEstimateEditPayload({
   editingEstimate,
   editMobile,
@@ -1515,10 +1531,32 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
         })
         : null;
       const data = useEditFlow
-        ? await apiFetch(QUICK_ESTIMATES_COLLECTION_API, {
-          method: "POST",
-          body: JSON.stringify(editPayload),
-        })
+        ? await apiFetch(QUICK_ESTIMATES_COLLECTION_API, (() => {
+          const shouldUseMultipart = editPaymentCompleted && editPaymentMode === "online" && Array.isArray(editPaymentProofImages) && editPaymentProofImages.length > 0;
+          if (!shouldUseMultipart) {
+            return {
+              method: "POST",
+              body: JSON.stringify(editPayload),
+            };
+          }
+          const formData = new FormData();
+          Object.entries(editPayload).forEach(([key, value]) => {
+            if (key === "payment_proof_images") {
+              return;
+            }
+            formData.append(key, value ?? "");
+          });
+          editPaymentProofImages.forEach((image, index) => {
+            const file = dataUrlToFile(image, `payment-proof-${index + 1}`);
+            if (file) {
+              formData.append("payment_proof_files", file);
+            }
+          });
+          return {
+            method: "POST",
+            body: formData,
+          };
+        })())
         : await apiFetch("/api/business-autopilot/site-admin/chat", {
           method: "POST",
           body: JSON.stringify({ message: text }),

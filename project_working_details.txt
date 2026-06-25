@@ -262,6 +262,7 @@ PREVIOUS WORK LOG (2026-06-13)
   - popup shows bottom table list for all selected proof images
   - each proof row now has delete option and clear-all support
   - applied in both Site Admin chat edit flow and Data View payment popup
+  - CDN/WAF note: payment proof save/update must use `multipart/form-data`; large base64 JSON payloads can trigger `403` when CDN protection is enabled
 
 - Quick Estimate contact and mobile handling fixes:
   - fixed contact delete so removed contacts do not reappear from linked estimates
