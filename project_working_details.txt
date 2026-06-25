@@ -189,6 +189,9 @@ ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
   - `/downloads/mac-agent/` -> `404`
 
 LATEST WORK LOG (2026-06-25)
+- Business Autopilot Site Admin cancelled estimate action visibility hotfix deployed:
+  - frontend cancelled-state check now supports both `cancelled` and `canceled`
+  - ORG admin delete icon now appears reliably in cancelled estimate rows
 - Business Autopilot Site Admin cancelled estimate delete control deployed:
   - cancelled quick estimate rows now show a separate delete action
   - delete option is exposed only for ORG admin/company admin accounts

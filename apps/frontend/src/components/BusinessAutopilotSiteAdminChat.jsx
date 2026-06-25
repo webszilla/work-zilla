@@ -298,7 +298,7 @@ function canDeleteCancelledEstimate(row) {
 }
 
 function isCancelledEstimateRow(row) {
-  return String(row?.status || "").toLowerCase() === "cancelled";
+  return ["cancelled", "canceled"].includes(String(row?.status || "").toLowerCase());
 }
 
 function countPlainTextFromHtml(value) {
@@ -2072,7 +2072,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                             {(safeEstimatePage - 1) * TABLE_PAGE_SIZE + index + 1}
                           </td>
                           <td>
-                            <div className={`ba-site-admin-chat__estimate-meta ${String(row.status || "").toLowerCase() === "cancelled" ? "is-cancelled" : ""}`}>
+                            <div className={`ba-site-admin-chat__estimate-meta ${isCancelledEstimateRow(row) ? "is-cancelled" : ""}`}>
                               <button
                                 type="button"
                                 className="ba-site-admin-chat__estimate-download"
@@ -2185,7 +2185,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                               >
                                 <i className="bi bi-clock-history" aria-hidden="true" />
                               </button>
-                              {String(row.status || "").toLowerCase() === "cancelled" ? (
+                              {isCancelledEstimateRow(row) ? (
                                 <>
                                   <button
                                     type="button"
