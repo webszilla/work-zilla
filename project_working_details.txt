@@ -256,6 +256,13 @@ PREVIOUS WORK LOG (2026-06-13)
   - chatbot name
   - male / female voice preference
   - wake word configuration support
+- Quick Estimate multi payment-proof support:
+  - payment proof popup now accepts multiple uploaded, dropped, or pasted images
+  - online payment proof images are stored as a list while keeping old single-image data compatible
+  - popup shows bottom table list for all selected proof images
+  - each proof row now has delete option and clear-all support
+  - applied in both Site Admin chat edit flow and Data View payment popup
+
 - Quick Estimate contact and mobile handling fixes:
   - fixed contact delete so removed contacts do not reappear from linked estimates
   - preserved international numbers like `+1...` instead of trimming to India-only 10 digits

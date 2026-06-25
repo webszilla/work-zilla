@@ -483,7 +483,7 @@ function buildQuickEstimateEditPayload({
   editPaymentMode,
   editJobCompleted,
   editDeliveryCompleted,
-  editPaymentProofImage,
+  editPaymentProofImages,
   text,
 }) {
   return {
@@ -496,18 +496,27 @@ function buildQuickEstimateEditPayload({
     payment_mode: editPaymentCompleted ? editPaymentMode : "",
     job_status: editJobCompleted ? "completed" : "non_completed",
     delivery_status: editDeliveryCompleted ? "completed" : "non_completed",
-    payment_proof_image: editPaymentCompleted ? editPaymentProofImage : "",
+    payment_proof_image: editPaymentCompleted ? (editPaymentProofImages?.[0] || "") : "",
+    payment_proof_images: editPaymentCompleted ? (Array.isArray(editPaymentProofImages) ? editPaymentProofImages : []) : [],
     item_text: text,
   };
 }
 
-async function extractFirstImageDataUrl(fileList) {
-  const files = Array.from(fileList || []);
-  const imageFile = files.find((file) => String(file?.type || "").startsWith("image/"));
-  if (!imageFile) {
-    return "";
+async function extractImageDataUrls(fileList) {
+  const files = Array.from(fileList || []).filter((file) => String(file?.type || "").startsWith("image/"));
+  if (!files.length) {
+    return [];
   }
-  return readFileAsDataUrl(imageFile);
+  return Promise.all(files.map((file) => readFileAsDataUrl(file)));
+}
+
+function normalizePaymentProofImages(row) {
+  const rawList = Array.isArray(row?.payment_proof_images) ? row.payment_proof_images : [];
+  if (rawList.length) {
+    return rawList.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+  const single = String(row?.payment_proof_image || "").trim();
+  return single ? [single] : [];
 }
 
 export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
@@ -529,11 +538,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   const [editPaymentMode, setEditPaymentMode] = useState("");
   const [editJobCompleted, setEditJobCompleted] = useState(false);
   const [editDeliveryCompleted, setEditDeliveryCompleted] = useState(false);
-  const [editPaymentProofImage, setEditPaymentProofImage] = useState("");
+  const [editPaymentProofImages, setEditPaymentProofImages] = useState([]);
   const [editPaymentProofFile, setEditPaymentProofFile] = useState(null);
   const [paymentModeModalOpen, setPaymentModeModalOpen] = useState(false);
   const [paymentProofModalOpen, setPaymentProofModalOpen] = useState(false);
-  const [paymentProofDraftImage, setPaymentProofDraftImage] = useState("");
+  const [paymentProofDraftImages, setPaymentProofDraftImages] = useState([]);
   const [paymentProofDraftFile, setPaymentProofDraftFile] = useState(null);
   const [paymentProofError, setPaymentProofError] = useState("");
   const [paymentProofUploading, setPaymentProofUploading] = useState(false);
@@ -716,10 +725,10 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setEditPaymentCompleted(false);
     setEditJobCompleted(false);
     setEditDeliveryCompleted(false);
-    setEditPaymentProofImage("");
+    setEditPaymentProofImages([]);
     setEditPaymentProofFile(null);
     setPaymentProofModalOpen(false);
-    setPaymentProofDraftImage("");
+    setPaymentProofDraftImages([]);
     setPaymentProofDraftFile(null);
     setPaymentProofError("");
     setPaymentProofUploading(false);
@@ -734,12 +743,12 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       setPaymentProofError("");
       const files = Array.from(fileList || []);
       const imageFile = files.find((file) => String(file?.type || "").startsWith("image/")) || null;
-      const dataUrl = await extractFirstImageDataUrl(files);
-      if (!dataUrl) {
+      const dataUrls = await extractImageDataUrls(files);
+      if (!dataUrls.length) {
         setPaymentProofError("Please upload an image file only.");
         return false;
       }
-      setPaymentProofDraftImage(dataUrl);
+      setPaymentProofDraftImages((prev) => [...prev, ...dataUrls]);
       setPaymentProofDraftFile(imageFile);
       return true;
     } catch (error) {
@@ -777,7 +786,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
 
   function openPaymentProofModal() {
     setEditPaymentMode("online");
-    setPaymentProofDraftImage(editPaymentProofImage || "");
+    setPaymentProofDraftImages(Array.isArray(editPaymentProofImages) ? editPaymentProofImages : []);
     setPaymentProofDraftFile(null);
     setPaymentProofError("");
     setPaymentProofModalOpen(true);
@@ -795,9 +804,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   function selectCashPaymentMode() {
     setEditPaymentMode("cash");
     setEditPaymentCompleted(true);
-    setEditPaymentProofImage("");
+    setEditPaymentProofImages([]);
     setEditPaymentProofFile(null);
-    setPaymentProofDraftImage("");
+    setPaymentProofDraftImages([]);
     setPaymentProofDraftFile(null);
     setPaymentProofError("");
     setNotice("");
@@ -814,17 +823,17 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
 
   function closePaymentProofModal() {
     setPaymentProofModalOpen(false);
-    setPaymentProofDraftImage(editPaymentProofImage || "");
+    setPaymentProofDraftImages(Array.isArray(editPaymentProofImages) ? editPaymentProofImages : []);
     setPaymentProofDraftFile(null);
     setPaymentProofError("");
   }
 
   function savePaymentProofModal() {
-    if (!paymentProofDraftImage) {
+    if (!paymentProofDraftImages.length) {
       setPaymentProofError("Please upload, drag-drop, or paste the payment proof image.");
       return;
     }
-    setEditPaymentProofImage(paymentProofDraftImage);
+    setEditPaymentProofImages(paymentProofDraftImages);
     setEditPaymentProofFile(paymentProofDraftFile);
     setEditPaymentMode("online");
     setEditPaymentCompleted(true);
@@ -840,9 +849,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     }
     setEditPaymentCompleted(false);
     setEditPaymentMode("");
-    setEditPaymentProofImage("");
+    setEditPaymentProofImages([]);
     setEditPaymentProofFile(null);
-    setPaymentProofDraftImage("");
+    setPaymentProofDraftImages([]);
     setPaymentProofDraftFile(null);
     setPaymentModeModalOpen(false);
     setPaymentProofModalOpen(false);
@@ -1351,9 +1360,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       setEditPaymentMode(String(estimate.payment_mode || "").trim().toLowerCase());
       setEditJobCompleted(String(estimate.job_status || "").toLowerCase() === "completed");
       setEditDeliveryCompleted(String(estimate.delivery_status || "").toLowerCase() === "completed");
-      setEditPaymentProofImage(String(estimate.payment_proof_image || ""));
+      setEditPaymentProofImages(normalizePaymentProofImages(estimate));
       setEditPaymentProofFile(null);
-      setPaymentProofDraftImage(String(estimate.payment_proof_image || ""));
+      setPaymentProofDraftImages(normalizePaymentProofImages(estimate));
       setPaymentProofDraftFile(null);
       appendAssistantMessage(
         {
@@ -1501,29 +1510,15 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
           editPaymentMode,
           editJobCompleted,
           editDeliveryCompleted,
-          editPaymentProofImage,
+          editPaymentProofImages,
           text,
         })
         : null;
       const data = useEditFlow
-        ? await apiFetch(QUICK_ESTIMATES_COLLECTION_API, (
-          editPaymentCompleted && editPaymentMode === "online" && editPaymentProofFile
-            ? (() => {
-              const formData = new FormData();
-              Object.entries(editPayload).forEach(([key, value]) => {
-                formData.append(key, value ?? "");
-              });
-              formData.append("payment_proof_file", editPaymentProofFile);
-              return {
-                method: "POST",
-                body: formData,
-              };
-            })()
-            : {
-              method: "POST",
-              body: JSON.stringify(editPayload),
-            }
-        ))
+        ? await apiFetch(QUICK_ESTIMATES_COLLECTION_API, {
+          method: "POST",
+          body: JSON.stringify(editPayload),
+        })
         : await apiFetch("/api/business-autopilot/site-admin/chat", {
           method: "POST",
           body: JSON.stringify({ message: text }),
@@ -1543,7 +1538,8 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
               payment_mode: editPaymentCompleted ? editPaymentMode : "",
               job_status: editJobCompleted ? "completed" : "non_completed",
               delivery_status: editDeliveryCompleted ? "completed" : "non_completed",
-              payment_proof_image: editPaymentCompleted ? (data?.quick_estimate?.payment_proof_image || editPaymentProofImage) : "",
+              payment_proof_image: editPaymentCompleted ? (data?.quick_estimate?.payment_proof_image || editPaymentProofImages?.[0] || "") : "",
+              payment_proof_images: editPaymentCompleted ? normalizePaymentProofImages(data?.quick_estimate || { payment_proof_images: editPaymentProofImages }) : [],
             }
             : row
         )));
@@ -1975,9 +1971,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                             onClick={openPaymentProofModal}
                             disabled={sending}
                           >
-                            {editPaymentProofImage ? "Change Payment Proof" : "Upload Payment Proof"}
+                            {editPaymentProofImages.length ? "Change Payment Proof" : "Upload Payment Proof"}
                           </button>
-                          {editPaymentProofImage ? <small>Payment proof attached.</small> : <small>Payment proof required.</small>}
+                          {editPaymentProofImages.length ? <small>{`${editPaymentProofImages.length} payment proof image${editPaymentProofImages.length === 1 ? "" : "s"} attached.`}</small> : <small>Payment proof required.</small>}
                         </>
                       ) : editPaymentMode === "cash" ? <small>Cash payment selected.</small> : <small>Select payment mode.</small>}
                     </div>
@@ -2483,7 +2479,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
               </button>
             </div>
             <div
-              className={`ba-site-admin-chat__proof-dropzone ${paymentProofDraftImage ? "has-image" : ""}`}
+              className={`ba-site-admin-chat__proof-dropzone ${paymentProofDraftImages.length ? "has-image" : ""}`}
               onDragOver={(event) => {
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "copy";
@@ -2494,8 +2490,8 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
               role="button"
               aria-label="Payment proof upload area"
             >
-              {paymentProofDraftImage ? (
-                <img src={paymentProofDraftImage} alt="Payment proof preview" className="ba-site-admin-chat__proof-preview" />
+              {paymentProofDraftImages.length ? (
+                <img src={paymentProofDraftImages[0]} alt="Payment proof preview" className="ba-site-admin-chat__proof-preview" />
               ) : (
                 <div className="ba-site-admin-chat__proof-placeholder">
                   <i className="bi bi-image" aria-hidden="true" />
@@ -2506,20 +2502,51 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
             </div>
             <div className="ba-site-admin-chat__proof-actions">
               <label className="btn btn-outline-light ba-site-admin-chat__proof-btn">
-                <input type="file" accept="image/*" hidden onChange={handlePaymentProofFileChange} />
-                Choose Image
+                <input type="file" accept="image/*" multiple hidden onChange={handlePaymentProofFileChange} />
+                Choose Images
               </label>
-              {paymentProofDraftImage ? (
+              {paymentProofDraftImages.length ? (
                 <button
                   type="button"
                   className="btn btn-outline-light ba-site-admin-chat__proof-btn"
-                  onClick={() => setPaymentProofDraftImage("")}
+                  onClick={() => setPaymentProofDraftImages([])}
                   disabled={paymentProofUploading}
                 >
-                  Remove
+                  Clear All
                 </button>
               ) : null}
             </div>
+            {paymentProofDraftImages.length ? (
+              <div className="table-responsive">
+                <table className="table table-sm align-middle mb-3">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 72 }}>Preview</th>
+                      <th>Name</th>
+                      <th style={{ width: 96 }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paymentProofDraftImages.map((image, index) => (
+                      <tr key={`${index}-${image.slice(0, 24)}`}>
+                        <td><img src={image} alt={`Payment proof ${index + 1}`} className="ba-site-admin-chat__proof-preview" style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 10 }} /></td>
+                        <td>{`Proof ${index + 1}`}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-outline-danger btn-sm"
+                            onClick={() => setPaymentProofDraftImages((prev) => prev.filter((_, imageIndex) => imageIndex !== index))}
+                            disabled={paymentProofUploading}
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
             {paymentProofError ? <div className="ba-assistant__setup-note">{paymentProofError}</div> : null}
             <div className="ba-site-admin-chat__modal-actions">
               <button

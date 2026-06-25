@@ -44,6 +44,23 @@ function readImageFileAsDataUrl(file) {
   });
 }
 
+async function readImageFilesAsDataUrls(files) {
+  const imageFiles = Array.from(files || []).filter((file) => String(file?.type || "").startsWith("image/"));
+  if (!imageFiles.length) {
+    return [];
+  }
+  return Promise.all(imageFiles.map((file) => readImageFileAsDataUrl(file)));
+}
+
+function normalizePaymentProofImages(row) {
+  const rawList = Array.isArray(row?.payment_proof_images) ? row.payment_proof_images : [];
+  if (rawList.length) {
+    return rawList.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+  const single = String(row?.payment_proof_image || "").trim();
+  return single ? [single] : [];
+}
+
 function SiteAdminHeaderTabs() {
   const location = useLocation();
   const pathname = String(location.pathname || "");
@@ -202,7 +219,7 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
   const [paymentModeFilter, setPaymentModeFilter] = useState("all");
   const [paymentModalRow, setPaymentModalRow] = useState(null);
   const [paymentModalMode, setPaymentModalMode] = useState("");
-  const [paymentProofDraftImage, setPaymentProofDraftImage] = useState("");
+  const [paymentProofDraftImages, setPaymentProofDraftImages] = useState([]);
   const [paymentProofError, setPaymentProofError] = useState("");
   const [paymentSaving, setPaymentSaving] = useState(false);
   const [inlineTooltip, setInlineTooltip] = useState(null);
@@ -227,17 +244,12 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
 
   async function loadPaymentProofFromFiles(files) {
     try {
-      const imageFile = Array.from(files || []).find((item) => String(item?.type || "").startsWith("image/"));
-      if (!imageFile) {
+      const imageData = await readImageFilesAsDataUrls(files);
+      if (!imageData.length) {
         setPaymentProofError("Please choose an image file only.");
         return false;
       }
-      const imageData = await readImageFileAsDataUrl(imageFile);
-      if (!imageData) {
-        setPaymentProofError("Unable to load selected image.");
-        return false;
-      }
-      setPaymentProofDraftImage(imageData);
+      setPaymentProofDraftImages((prev) => [...prev, ...imageData]);
       setPaymentProofError("");
       return true;
     } catch (error) {
@@ -344,7 +356,7 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
   function openPaymentModal(row) {
     setPaymentModalRow(row);
     setPaymentModalMode(String(row?.payment_mode || "").trim().toLowerCase() || "cash");
-    setPaymentProofDraftImage(String(row?.payment_proof_image || ""));
+    setPaymentProofDraftImages(normalizePaymentProofImages(row));
     setPaymentProofError("");
   }
 
@@ -354,7 +366,7 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
     }
     setPaymentModalRow(null);
     setPaymentModalMode("");
-    setPaymentProofDraftImage("");
+    setPaymentProofDraftImages([]);
     setPaymentProofError("");
   }
 
@@ -603,7 +615,7 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
       setPaymentProofError("Please choose cash or online payment mode.");
       return;
     }
-    if (paymentModalMode === "online" && !paymentProofDraftImage) {
+    if (paymentModalMode === "online" && !paymentProofDraftImages.length) {
       setPaymentProofError("Please upload the payment proof image.");
       return;
     }
@@ -618,7 +630,8 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
           action: "payment",
           payment_status: "completed",
           payment_mode: paymentModalMode,
-          payment_proof_image: paymentModalMode === "online" ? paymentProofDraftImage : "",
+          payment_proof_image: paymentModalMode === "online" ? (paymentProofDraftImages[0] || "") : "",
+          payment_proof_images: paymentModalMode === "online" ? paymentProofDraftImages : [],
         }),
       });
       const updatedRow = data?.quick_estimate || null;
@@ -1224,7 +1237,7 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
                   {paymentModalMode === "online" ? (
                     <>
                       <div
-                        className={`ba-site-admin-chat__proof-dropzone ${paymentProofDraftImage ? "has-image" : ""}`}
+                        className={`ba-site-admin-chat__proof-dropzone ${paymentProofDraftImages.length ? "has-image" : ""}`}
                         onDragOver={(event) => {
                           event.preventDefault();
                           event.dataTransfer.dropEffect = "copy";
@@ -1235,8 +1248,8 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
                         role="button"
                         aria-label="Payment proof upload area"
                       >
-                        {paymentProofDraftImage ? (
-                          <img src={paymentProofDraftImage} alt="Payment proof preview" className="ba-site-admin-chat__proof-preview" />
+                        {paymentProofDraftImages.length ? (
+                          <img src={paymentProofDraftImages[0]} alt="Payment proof preview" className="ba-site-admin-chat__proof-preview" />
                         ) : (
                           <div className="ba-site-admin-chat__proof-placeholder">
                             <i className="bi bi-image" aria-hidden="true" />
@@ -1247,20 +1260,51 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
                       </div>
                       <div className="ba-site-admin-chat__proof-actions">
                         <label className="btn btn-outline-light ba-site-admin-chat__proof-btn">
-                          <input type="file" accept="image/*" hidden onChange={handlePaymentProofFileChange} />
-                          Choose Image
+                          <input type="file" accept="image/*" multiple hidden onChange={handlePaymentProofFileChange} />
+                          Choose Images
                         </label>
-                        {paymentProofDraftImage ? (
+                        {paymentProofDraftImages.length ? (
                           <button
                             type="button"
                             className="btn btn-outline-light ba-site-admin-chat__proof-btn"
-                            onClick={() => setPaymentProofDraftImage("")}
+                            onClick={() => setPaymentProofDraftImages([])}
                             disabled={paymentSaving}
                           >
-                            Remove
+                            Clear All
                           </button>
                         ) : null}
                       </div>
+                      {paymentProofDraftImages.length ? (
+                        <div className="table-responsive">
+                          <table className="table table-sm align-middle mb-3">
+                            <thead>
+                              <tr>
+                                <th style={{ width: 72 }}>Preview</th>
+                                <th>Name</th>
+                                <th style={{ width: 96 }}>Action</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {paymentProofDraftImages.map((image, index) => (
+                                <tr key={`${index}-${image.slice(0, 24)}`}>
+                                  <td><img src={image} alt={`Payment proof ${index + 1}`} className="ba-site-admin-chat__proof-preview" style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 10 }} /></td>
+                                  <td>{`Proof ${index + 1}`}</td>
+                                  <td>
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline-danger btn-sm"
+                                      onClick={() => setPaymentProofDraftImages((prev) => prev.filter((_, imageIndex) => imageIndex !== index))}
+                                      disabled={paymentSaving}
+                                    >
+                                      Delete
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : null}
                     </>
                   ) : (
                     <div className="ba-site-admin-data-view__payment-mode-note">
