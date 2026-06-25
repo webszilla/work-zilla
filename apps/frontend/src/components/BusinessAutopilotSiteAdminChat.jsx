@@ -2580,7 +2580,14 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                   <tbody>
                     {paymentProofDraftImages.map((image, index) => (
                       <tr key={`${index}-${image.slice(0, 24)}`}>
-                        <td><img src={image} alt={`Payment proof ${index + 1}`} className="ba-site-admin-chat__proof-preview" style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 10 }} /></td>
+                        <td>
+                          <span className="ba-site-admin-chat__proof-thumb">
+                            <img src={image} alt={`Payment proof ${index + 1}`} className="ba-site-admin-chat__proof-thumb-image" />
+                            <span className="ba-site-admin-chat__proof-thumb-hover">
+                              <img src={image} alt={`Payment proof ${index + 1} enlarged preview`} />
+                            </span>
+                          </span>
+                        </td>
                         <td>{`Proof ${index + 1}`}</td>
                         <td>
                           <button
