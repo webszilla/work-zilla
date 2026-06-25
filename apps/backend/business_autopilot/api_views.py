@@ -226,6 +226,26 @@ def _ba_pdf_image_from_data_url(data_url):
         return None
 
 
+def _ba_uploaded_image_to_data_url(uploaded_file):
+    if not uploaded_file:
+        return ""
+    content_type = str(getattr(uploaded_file, "content_type", "") or "").strip().lower()
+    if not content_type.startswith("image/"):
+        return ""
+    try:
+        uploaded_file.seek(0)
+    except Exception:
+        pass
+    try:
+        raw = uploaded_file.read()
+    except Exception:
+        return ""
+    if not raw:
+        return ""
+    encoded = base64.b64encode(raw).decode("ascii")
+    return f"data:{content_type};base64,{encoded}"
+
+
 def _ba_pdf_image_from_file(file_field):
     if not file_field:
         return None
@@ -9897,6 +9917,15 @@ def quick_estimates(request, estimate_id: int = None):
                 payload = json.loads(request.body.decode("utf-8") or "{}")
             except json.JSONDecodeError:
                 return JsonResponse({"detail": "invalid_json"}, status=400)
+    if request.content_type and request.content_type.startswith("multipart/form-data"):
+        uploaded_payment_proof = (
+            request.FILES.get("payment_proof_file")
+            or request.FILES.get("paymentProofFile")
+            or request.FILES.get("payment_proof_image")
+        )
+        uploaded_payment_proof_data_url = _ba_uploaded_image_to_data_url(uploaded_payment_proof)
+        if uploaded_payment_proof_data_url:
+            payload["payment_proof_image"] = uploaded_payment_proof_data_url
 
     patch_action = str(payload.get("action") or payload.get("__action") or "").strip().lower()
     if resolved_method == "DELETE" and patch_action not in {"delete", "cancel"}:

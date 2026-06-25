@@ -189,6 +189,10 @@ ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
   - `/downloads/mac-agent/` -> `404`
 
 LATEST WORK LOG (2026-06-25)
+- Business Autopilot Site Admin payment proof upload save fixed for CDN/live:
+  - quick estimate edit save now sends new payment proof uploads as multipart FormData instead of large base64 JSON
+  - backend converts uploaded proof file into the existing data-url storage format
+  - this avoids live 403 failures caused by CDN/WAF on large JSON request bodies
 - Business Autopilot Site Admin cancelled estimate hard-delete flow fixed:
   - POST override delete requests now preserve explicit `action: delete`
   - cancelled estimate delete now removes the row instead of re-running cancel logic

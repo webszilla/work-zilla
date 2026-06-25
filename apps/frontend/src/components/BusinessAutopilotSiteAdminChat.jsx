@@ -474,6 +474,33 @@ function readFileAsDataUrl(file) {
   });
 }
 
+function buildQuickEstimateEditPayload({
+  editingEstimate,
+  editMobile,
+  editClientName,
+  editNotes,
+  editPaymentCompleted,
+  editPaymentMode,
+  editJobCompleted,
+  editDeliveryCompleted,
+  editPaymentProofImage,
+  text,
+}) {
+  return {
+    __action: "PATCH",
+    quick_estimate_id: editingEstimate.id,
+    mobile: editMobile,
+    client_name: editClientName,
+    notes: editNotes,
+    payment_status: editPaymentCompleted ? "completed" : "non_completed",
+    payment_mode: editPaymentCompleted ? editPaymentMode : "",
+    job_status: editJobCompleted ? "completed" : "non_completed",
+    delivery_status: editDeliveryCompleted ? "completed" : "non_completed",
+    payment_proof_image: editPaymentCompleted ? editPaymentProofImage : "",
+    item_text: text,
+  };
+}
+
 async function extractFirstImageDataUrl(fileList) {
   const files = Array.from(fileList || []);
   const imageFile = files.find((file) => String(file?.type || "").startsWith("image/"));
@@ -503,9 +530,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   const [editJobCompleted, setEditJobCompleted] = useState(false);
   const [editDeliveryCompleted, setEditDeliveryCompleted] = useState(false);
   const [editPaymentProofImage, setEditPaymentProofImage] = useState("");
+  const [editPaymentProofFile, setEditPaymentProofFile] = useState(null);
   const [paymentModeModalOpen, setPaymentModeModalOpen] = useState(false);
   const [paymentProofModalOpen, setPaymentProofModalOpen] = useState(false);
   const [paymentProofDraftImage, setPaymentProofDraftImage] = useState("");
+  const [paymentProofDraftFile, setPaymentProofDraftFile] = useState(null);
   const [paymentProofError, setPaymentProofError] = useState("");
   const [paymentProofUploading, setPaymentProofUploading] = useState(false);
   const [sending, setSending] = useState(false);
@@ -688,8 +717,10 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setEditJobCompleted(false);
     setEditDeliveryCompleted(false);
     setEditPaymentProofImage("");
+    setEditPaymentProofFile(null);
     setPaymentProofModalOpen(false);
     setPaymentProofDraftImage("");
+    setPaymentProofDraftFile(null);
     setPaymentProofError("");
     setPaymentProofUploading(false);
     if (nextNotice) {
@@ -701,12 +732,15 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     try {
       setPaymentProofUploading(true);
       setPaymentProofError("");
-      const dataUrl = await extractFirstImageDataUrl(fileList);
+      const files = Array.from(fileList || []);
+      const imageFile = files.find((file) => String(file?.type || "").startsWith("image/")) || null;
+      const dataUrl = await extractFirstImageDataUrl(files);
       if (!dataUrl) {
         setPaymentProofError("Please upload an image file only.");
         return false;
       }
       setPaymentProofDraftImage(dataUrl);
+      setPaymentProofDraftFile(imageFile);
       return true;
     } catch (error) {
       setPaymentProofError(error?.message || "Unable to load image.");
@@ -744,6 +778,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   function openPaymentProofModal() {
     setEditPaymentMode("online");
     setPaymentProofDraftImage(editPaymentProofImage || "");
+    setPaymentProofDraftFile(null);
     setPaymentProofError("");
     setPaymentProofModalOpen(true);
   }
@@ -761,7 +796,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setEditPaymentMode("cash");
     setEditPaymentCompleted(true);
     setEditPaymentProofImage("");
+    setEditPaymentProofFile(null);
     setPaymentProofDraftImage("");
+    setPaymentProofDraftFile(null);
     setPaymentProofError("");
     setNotice("");
     setPaymentModeModalOpen(false);
@@ -778,6 +815,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   function closePaymentProofModal() {
     setPaymentProofModalOpen(false);
     setPaymentProofDraftImage(editPaymentProofImage || "");
+    setPaymentProofDraftFile(null);
     setPaymentProofError("");
   }
 
@@ -787,6 +825,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       return;
     }
     setEditPaymentProofImage(paymentProofDraftImage);
+    setEditPaymentProofFile(paymentProofDraftFile);
     setEditPaymentMode("online");
     setEditPaymentCompleted(true);
     setPaymentProofModalOpen(false);
@@ -802,7 +841,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setEditPaymentCompleted(false);
     setEditPaymentMode("");
     setEditPaymentProofImage("");
+    setEditPaymentProofFile(null);
     setPaymentProofDraftImage("");
+    setPaymentProofDraftFile(null);
     setPaymentModeModalOpen(false);
     setPaymentProofModalOpen(false);
     setPaymentProofError("");
@@ -1311,7 +1352,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       setEditJobCompleted(String(estimate.job_status || "").toLowerCase() === "completed");
       setEditDeliveryCompleted(String(estimate.delivery_status || "").toLowerCase() === "completed");
       setEditPaymentProofImage(String(estimate.payment_proof_image || ""));
+      setEditPaymentProofFile(null);
       setPaymentProofDraftImage(String(estimate.payment_proof_image || ""));
+      setPaymentProofDraftFile(null);
       appendAssistantMessage(
         {
           reply: `Quick Estimate ${estimate.estimate_number} loaded for editing. You can update mobile number, client name, and full item list now.`,
@@ -1448,23 +1491,39 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setMessages((prev) => [...prev, userMessage]);
     setSending(true);
     try {
-      const data = useEditFlow
-        ? await apiFetch(QUICK_ESTIMATES_COLLECTION_API, {
-          method: "POST",
-          body: JSON.stringify({
-            __action: "PATCH",
-            quick_estimate_id: editingEstimate.id,
-            mobile: editMobile,
-            client_name: editClientName,
-            notes: editNotes,
-            payment_status: editPaymentCompleted ? "completed" : "non_completed",
-            payment_mode: editPaymentCompleted ? editPaymentMode : "",
-            job_status: editJobCompleted ? "completed" : "non_completed",
-            delivery_status: editDeliveryCompleted ? "completed" : "non_completed",
-            payment_proof_image: editPaymentCompleted ? editPaymentProofImage : "",
-            item_text: text,
-          }),
+      const editPayload = useEditFlow
+        ? buildQuickEstimateEditPayload({
+          editingEstimate,
+          editMobile,
+          editClientName,
+          editNotes,
+          editPaymentCompleted,
+          editPaymentMode,
+          editJobCompleted,
+          editDeliveryCompleted,
+          editPaymentProofImage,
+          text,
         })
+        : null;
+      const data = useEditFlow
+        ? await apiFetch(QUICK_ESTIMATES_COLLECTION_API, (
+          editPaymentCompleted && editPaymentMode === "online" && editPaymentProofFile
+            ? (() => {
+              const formData = new FormData();
+              Object.entries(editPayload).forEach(([key, value]) => {
+                formData.append(key, value ?? "");
+              });
+              formData.append("payment_proof_file", editPaymentProofFile);
+              return {
+                method: "POST",
+                body: formData,
+              };
+            })()
+            : {
+              method: "POST",
+              body: JSON.stringify(editPayload),
+            }
+        ))
         : await apiFetch("/api/business-autopilot/site-admin/chat", {
           method: "POST",
           body: JSON.stringify({ message: text }),
@@ -1484,7 +1543,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
               payment_mode: editPaymentCompleted ? editPaymentMode : "",
               job_status: editJobCompleted ? "completed" : "non_completed",
               delivery_status: editDeliveryCompleted ? "completed" : "non_completed",
-              payment_proof_image: editPaymentCompleted ? editPaymentProofImage : "",
+              payment_proof_image: editPaymentCompleted ? (data?.quick_estimate?.payment_proof_image || editPaymentProofImage) : "",
             }
             : row
         )));

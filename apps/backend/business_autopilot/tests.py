@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.utils import timezone
 import json
@@ -2874,6 +2875,43 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         estimate = QuickEstimate.objects.get(organization=self.org, id=estimate_id)
         self.assertEqual(estimate.payment_status, QuickEstimate.PROGRESS_COMPLETED)
         self.assertEqual(estimate.payment_mode, "cash")
+
+    def test_quick_estimate_collection_post_multipart_patch_accepts_payment_proof_file(self):
+        created = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={
+                "message": "9092833701\nGuru\nBusiness Card 500 nos Rs.1050",
+            },
+            content_type="application/json",
+        )
+        estimate_id = created.json()["quick_estimate_id"]
+        uploaded = SimpleUploadedFile(
+            "proof.png",
+            base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9sAAAAASUVORK5CYII="),
+            content_type="image/png",
+        )
+
+        response = self.client.post(
+            "/api/business-autopilot/quick-estimates/",
+            data={
+                "__action": "PATCH",
+                "quick_estimate_id": estimate_id,
+                "mobile": "9092833701",
+                "client_name": "Guru",
+                "payment_status": "completed",
+                "payment_mode": "online",
+                "job_status": "non_completed",
+                "delivery_status": "non_completed",
+                "item_text": "1. Business Card 500 nos Rs.1050",
+                "payment_proof_file": uploaded,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        estimate = QuickEstimate.objects.get(organization=self.org, id=estimate_id)
+        self.assertEqual(estimate.payment_status, QuickEstimate.PROGRESS_COMPLETED)
+        self.assertEqual(estimate.payment_mode, "online")
+        self.assertTrue(str(estimate.payment_proof_image).startswith("data:image/png;base64,"))
 
     def test_quick_estimate_list_includes_creator_and_assignment_details(self):
         assignee = User.objects.create_user(
