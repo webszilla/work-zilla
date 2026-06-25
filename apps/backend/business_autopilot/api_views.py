@@ -5512,7 +5512,7 @@ def _safe_render_quick_estimate_thermal_preview(row, org):
         return ""
 
 
-def _serialize_quick_estimate(row, include_preview=False):
+def _serialize_quick_estimate(row, include_preview=False, actor=None):
     row = _purge_expired_quick_estimate_payment_proof(row)
     created_by = getattr(row, "created_by", None) or getattr(getattr(row, "organization", None), "owner", None)
     assigned_user = getattr(row, "assigned_user", None)
@@ -5563,6 +5563,7 @@ def _serialize_quick_estimate(row, include_preview=False):
         "whatsapp_url": _build_quick_estimate_whatsapp_url(row),
         "thermal_preview_url": f"/api/business-autopilot/quick-estimates/{row.id}/thermal-preview/",
         "thermal_preview_pdf_url": f"/api/business-autopilot/quick-estimates/{row.id}/thermal-preview/?format=pdf",
+        "can_delete_cancelled": _can_delete_cancelled_quick_estimate(actor, row.organization) if actor else False,
         "items": [_serialize_quick_estimate_item(item) for item in row.items.all().order_by("id")],
     }
     if include_preview:
@@ -9859,7 +9860,7 @@ def quick_estimates(request, estimate_id: int = None):
         .order_by("-created_at", "-id")
     )
     if resolved_method == "GET" and estimate_id is None:
-        return JsonResponse({"quick_estimates": [_serialize_quick_estimate(row) for row in qs[:100]]})
+        return JsonResponse({"quick_estimates": [_serialize_quick_estimate(row, actor=request.user) for row in qs[:100]]})
 
     if resolved_method in {"PATCH", "DELETE"} and not estimate_id:
         if payload is None:
@@ -9874,7 +9875,7 @@ def quick_estimates(request, estimate_id: int = None):
         return JsonResponse({"detail": "quick_estimate_not_found"}, status=404)
 
     if resolved_method == "GET":
-        return JsonResponse({"quick_estimate": _serialize_quick_estimate(row, include_preview=True)})
+        return JsonResponse({"quick_estimate": _serialize_quick_estimate(row, include_preview=True, actor=request.user)})
 
     if payload is None:
         if request.content_type and request.content_type.startswith("multipart/form-data"):
@@ -9888,6 +9889,23 @@ def quick_estimates(request, estimate_id: int = None):
     patch_action = str(payload.get("action") or payload.get("__action") or "").strip().lower()
     if resolved_method == "DELETE":
         patch_action = "cancel"
+
+    if patch_action == "delete":
+        if not _can_delete_cancelled_quick_estimate(request.user, org):
+            return JsonResponse({"detail": "quick_estimate_delete_forbidden", "message": "Only ORG admin can delete cancelled estimates."}, status=403)
+        if str(row.status or "").strip().lower() not in {"cancelled", "canceled"}:
+            return JsonResponse({"detail": "quick_estimate_delete_requires_cancelled", "message": "Only cancelled estimates can be deleted."}, status=400)
+        estimate_number = row.estimate_number
+        estimate_pk = row.id
+        SiteAdminChatState.objects.filter(organization=org, last_quick_estimate_id=estimate_pk).update(
+            last_quick_estimate=None,
+            awaiting_whatsapp_share=False,
+        )
+        row.delete()
+        return JsonResponse({
+            "message": f"{estimate_number} deleted.",
+            "deleted_estimate_id": estimate_pk,
+        })
 
     if patch_action == "cancel":
         reason = str(payload.get("reason") or payload.get("cancel_reason") or "").strip()
@@ -9919,7 +9937,7 @@ def quick_estimates(request, estimate_id: int = None):
         ) or row
         return JsonResponse({
             "message": f"{row.estimate_number} cancelled.",
-            "quick_estimate": _serialize_quick_estimate(row, include_preview=True),
+            "quick_estimate": _serialize_quick_estimate(row, include_preview=True, actor=request.user),
         })
 
     if patch_action == "reopen":
@@ -9949,7 +9967,7 @@ def quick_estimates(request, estimate_id: int = None):
         ) or row
         return JsonResponse({
             "message": f"{row.estimate_number} reopened.",
-            "quick_estimate": _serialize_quick_estimate(row, include_preview=True),
+            "quick_estimate": _serialize_quick_estimate(row, include_preview=True, actor=request.user),
         })
 
     if patch_action == "assign":
@@ -9988,7 +10006,7 @@ def quick_estimates(request, estimate_id: int = None):
             return JsonResponse(
                 {
                     "message": f"Assigned user removed from {row.estimate_number}.",
-                    "quick_estimate": _serialize_quick_estimate(row, include_preview=True),
+                    "quick_estimate": _serialize_quick_estimate(row, include_preview=True, actor=request.user),
                 }
             )
         membership_query = OrganizationUser.objects.filter(
@@ -10040,7 +10058,7 @@ def quick_estimates(request, estimate_id: int = None):
         return JsonResponse(
             {
                 "message": f"{row.estimate_number} assigned to {_get_org_user_display_name(membership.user)}.",
-                "quick_estimate": _serialize_quick_estimate(row, include_preview=True),
+                "quick_estimate": _serialize_quick_estimate(row, include_preview=True, actor=request.user),
             }
         )
 
@@ -10110,7 +10128,7 @@ def quick_estimates(request, estimate_id: int = None):
         return JsonResponse(
             {
                 "message": f"Payment updated for {row.estimate_number}.",
-                "quick_estimate": _serialize_quick_estimate(row, include_preview=True),
+                "quick_estimate": _serialize_quick_estimate(row, include_preview=True, actor=request.user),
             }
         )
 
@@ -10885,6 +10903,10 @@ def _crm_is_admin(user: User, org: Organization):
     membership = _get_org_membership(user, org)
     membership_role = _normalize_admin_role(getattr(membership, "role", "")) if membership else ""
     return membership_role in {"company_admin", "org_admin", "owner"}
+
+
+def _can_delete_cancelled_quick_estimate(user: User, org: Organization):
+    return _crm_is_admin(user, org)
 
 
 def _crm_to_decimal(value):

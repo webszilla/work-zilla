@@ -188,7 +188,15 @@ ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
   - `/downloads/windows-agent/` -> `404`
   - `/downloads/mac-agent/` -> `404`
 
-LATEST WORK LOG (2026-06-24)
+LATEST WORK LOG (2026-06-25)
+- Business Autopilot Site Admin cancelled estimate delete control deployed:
+  - cancelled quick estimate rows now show a separate delete action
+  - delete option is exposed only for ORG admin/company admin accounts
+  - non-admin users are blocked in backend even if they try direct API access
+  - cancel flow remains available for active estimates
+  - quick estimate payload now includes delete permission flag for UI rendering
+  - permission coverage added in backend tests
+PREVIOUS WORK LOG (2026-06-24)
 - Business Autopilot Site Admin estimate fixes deployed:
   - edit mobile field now shows old mobile suggestions with client name and also supports custom numbers
   - quick estimate edit Save and Cancel buttons aligned to a consistent fixed size

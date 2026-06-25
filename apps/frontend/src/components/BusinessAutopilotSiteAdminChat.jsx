@@ -293,6 +293,14 @@ function getEstimateAssignedUserLabels(row) {
     .filter(Boolean);
 }
 
+function canDeleteCancelledEstimate(row) {
+  return Boolean(row?.can_delete_cancelled || row?.canDeleteCancelled);
+}
+
+function isCancelledEstimateRow(row) {
+  return String(row?.status || "").toLowerCase() === "cancelled";
+}
+
 function countPlainTextFromHtml(value) {
   if (typeof window === "undefined") {
     return String(value || "").replace(/<[^>]*>/g, "").trim().length;
@@ -1339,6 +1347,8 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     if (!estimateId || sending) {
       return;
     }
+    const currentRow = getEstimateRowById(estimateId);
+    const isDeleteFlow = isCancelledEstimateRow(currentRow);
     const reason = String(deleteReason || "").trim();
     if (!reason) {
       setNotice("Please enter the cancel reason.");
@@ -1349,15 +1359,22 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     try {
       const data = await apiFetch(QUICK_ESTIMATES_COLLECTION_API, {
         method: "POST",
-        body: JSON.stringify({ __action: "DELETE", quick_estimate_id: estimateId, reason }),
+        body: JSON.stringify({
+          __action: "DELETE",
+          quick_estimate_id: estimateId,
+          action: isDeleteFlow ? "delete" : "cancel",
+          reason,
+        }),
       });
       if (data?.quick_estimate) {
         upsertEstimateRow(data.quick_estimate);
+      } else if (Number(data?.deleted_estimate_id || 0) === Number(estimateId)) {
+        removeEstimateRow(estimateId);
       }
       if (editingEstimate?.id === estimateId) {
         resetEditEstimate();
       }
-      setNotice(String(data?.message || "Quick Estimate cancelled."));
+      setNotice(String(data?.message || (isDeleteFlow ? "Quick Estimate deleted." : "Quick Estimate cancelled.")));
     } catch (error) {
       const message = error?.message || "Unable to cancel this Quick Estimate right now.";
       setNotice(message);
@@ -2169,15 +2186,29 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                                 <i className="bi bi-clock-history" aria-hidden="true" />
                               </button>
                               {String(row.status || "").toLowerCase() === "cancelled" ? (
-                                <button
-                                  type="button"
-                                  className="btn btn-sm btn-outline-secondary saas-org-icon-btn ba-site-admin-chat__action-btn ba-site-admin-chat__action-btn--history"
-                                  onClick={() => handleReopenEstimate(row)}
-                                  title="Reopen Estimate"
-                                  aria-label="Reopen Estimate"
-                                >
-                                  <i className="bi bi-arrow-clockwise" aria-hidden="true" />
-                                </button>
+                                <>
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline-secondary saas-org-icon-btn ba-site-admin-chat__action-btn ba-site-admin-chat__action-btn--history"
+                                    onClick={() => handleReopenEstimate(row)}
+                                    title="Reopen Estimate"
+                                    aria-label="Reopen Estimate"
+                                  >
+                                    <i className="bi bi-arrow-clockwise" aria-hidden="true" />
+                                  </button>
+                                  {canDeleteCancelledEstimate(row) ? (
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm btn-outline-danger saas-org-icon-btn ba-site-admin-chat__action-btn ba-site-admin-chat__action-btn--delete"
+                                      onClick={() => handleDeleteEstimate(row.id, row.estimate_number)}
+                                      title="Delete Estimate"
+                                      aria-label="Delete Estimate"
+                                      data-no-delete-confirm="true"
+                                    >
+                                      <i className="bi bi-trash3" aria-hidden="true" />
+                                    </button>
+                                  ) : null}
+                                </>
                               ) : (
                                 <button
                                   type="button"
@@ -2647,19 +2678,23 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
         </div>
       ) : null}
       {deleteConfirmOpen ? (
-        <div className="ba-site-admin-chat__modal-overlay" onClick={() => !sending && setDeleteConfirmOpen(false)}>
-          <div className="ba-site-admin-chat__modal ba-site-admin-chat__modal--confirm" onClick={(event) => event.stopPropagation()}>
+        (() => {
+          const targetRow = getEstimateRowById(deleteConfirmEstimate?.id);
+          const isDeleteFlow = isCancelledEstimateRow(targetRow);
+          return (
+            <div className="ba-site-admin-chat__modal-overlay" onClick={() => !sending && setDeleteConfirmOpen(false)}>
+              <div className="ba-site-admin-chat__modal ba-site-admin-chat__modal--confirm" onClick={(event) => event.stopPropagation()}>
             <div className="ba-site-admin-chat__modal-head">
               <div>
-                <div className="ba-site-admin-chat__modal-title">Cancel Estimate</div>
+                <div className="ba-site-admin-chat__modal-title">{isDeleteFlow ? "Delete Estimate" : "Cancel Estimate"}</div>
                 <div className="ba-site-admin-chat__modal-subtitle">
-                  Cancel {deleteConfirmEstimate?.estimateNumber || "this Quick Estimate"}?
+                  {isDeleteFlow ? "Delete" : "Cancel"} {deleteConfirmEstimate?.estimateNumber || "this Quick Estimate"}?
                 </div>
               </div>
               <button
                 type="button"
                 className="ba-assistant__close d-inline-flex align-items-center justify-content-center"
-                aria-label="Close cancel popup"
+                aria-label={isDeleteFlow ? "Close delete popup" : "Close cancel popup"}
                 onClick={() => setDeleteConfirmOpen(false)}
                 disabled={sending}
               >
@@ -2674,7 +2709,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                 rows={3}
                 value={deleteReason}
                 onChange={(event) => setDeleteReason(event.target.value)}
-                placeholder="Enter cancel reason"
+                placeholder={isDeleteFlow ? "Enter delete reason" : "Enter cancel reason"}
                 disabled={sending}
               />
             </div>
@@ -2695,11 +2730,13 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                 onClick={confirmDeleteEstimate}
                 disabled={sending}
               >
-                {sending ? "Cancelling..." : "Cancel Estimate"}
+                {sending ? (isDeleteFlow ? "Deleting..." : "Cancelling...") : (isDeleteFlow ? "Delete Estimate" : "Cancel Estimate")}
               </button>
             </div>
-          </div>
-        </div>
+              </div>
+            </div>
+          );
+        })()
       ) : null}
     </div>
   );
