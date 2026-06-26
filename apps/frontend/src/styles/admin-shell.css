@@ -2042,11 +2042,10 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 .ba-site-admin-chat__proof-thumb-hover {
   position: absolute;
   left: calc(100% + 14px);
-  top: 50%;
-  transform: translateY(-50%);
-  width: 350px;
-  max-width: min(350px, calc(100vw - 80px));
-  padding: 10px;
+  top: 0;
+  width: 120px;
+  max-width: min(120px, calc(100vw - 80px));
+  padding: 8px;
   border-radius: 16px;
   border: 1px solid rgba(148, 163, 184, 0.28);
   background: rgba(255, 255, 255, 0.98);
@@ -2056,6 +2055,13 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
   visibility: hidden;
   transition: opacity 160ms ease, visibility 160ms ease;
   z-index: 30;
+}
+
+.ba-site-admin-chat__proof-thumb-hover img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
 }
 
 .ba-site-admin-chat__proof-thumb:hover .ba-site-admin-chat__proof-thumb-hover,

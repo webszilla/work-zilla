@@ -1336,7 +1336,7 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
                             Choose Images
                           </label>
                         </div>
-                        <div className="col-12 col-md-6">
+                        <div className="col-12 col-md-4">
                           <label className="ba-site-admin-chat__date-field">
                             <span className="ba-site-admin-chat__date-field-label">
                               <i className="bi bi-calendar3" aria-hidden="true" />
@@ -1351,7 +1351,7 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
                             />
                           </label>
                         </div>
-                        <div className="col-12 col-md-2">
+                        <div className="col-12 col-md-4">
                           {paymentProofDraftEntries.length ? (
                             <button
                               type="button"
