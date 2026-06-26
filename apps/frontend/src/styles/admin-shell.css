@@ -1603,7 +1603,8 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 .ba-site-admin-chat__table-wrap {
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 16px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: #fff;
   max-height: 620px;
   position: relative;
@@ -1611,8 +1612,10 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 }
 
 .ba-site-admin-chat__table-wrap table {
+  width: 100%;
   border-collapse: separate;
   border-spacing: 0;
+  table-layout: fixed;
   position: relative;
   z-index: 1;
 }
@@ -1686,6 +1689,9 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
   font-weight: 600;
   font-size: 0.95rem;
   line-height: 1.18;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ba-site-admin-chat__estimate-meta small {
@@ -1711,6 +1717,7 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
   flex-direction: column;
   align-items: flex-start;
   gap: 6px;
+  min-width: 0;
   position: relative;
   z-index: 1;
 }
@@ -1733,8 +1740,38 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 .ba-site-admin-chat__status-icons {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   overflow: visible;
+}
+
+.ba-site-admin-chat__table-wrap .ba-site-admin-chat__sno-col {
+  width: 56px;
+}
+
+.ba-site-admin-chat__table-wrap th:nth-child(2),
+.ba-site-admin-chat__table-wrap td:nth-child(2) {
+  width: 18%;
+}
+
+.ba-site-admin-chat__table-wrap th:nth-child(3),
+.ba-site-admin-chat__table-wrap td:nth-child(3) {
+  width: 19%;
+}
+
+.ba-site-admin-chat__table-wrap th:nth-child(4),
+.ba-site-admin-chat__table-wrap td:nth-child(4) {
+  width: 22%;
+}
+
+.ba-site-admin-chat__table-wrap th:nth-child(5),
+.ba-site-admin-chat__table-wrap td:nth-child(5) {
+  width: 12%;
+}
+
+.ba-site-admin-chat__table-wrap th:nth-child(6),
+.ba-site-admin-chat__table-wrap td:nth-child(6) {
+  width: 164px;
 }
 
 .ba-site-admin-chat__status-icon {

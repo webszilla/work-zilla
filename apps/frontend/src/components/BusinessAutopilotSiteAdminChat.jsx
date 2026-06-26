@@ -25,7 +25,7 @@ const ESTIMATE_FILTER_TABS = [
   { key: "cancelled", label: "Cancel" },
 ];
 
-const TABLE_PAGE_SIZE = 15;
+const TABLE_PAGE_SIZE = 10;
 
 function buildWelcomeMessage() {
   return {
