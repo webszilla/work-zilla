@@ -1337,13 +1337,19 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
                           </label>
                         </div>
                         <div className="col-12 col-md-6">
-                          <input
-                            type="date"
-                            className="form-control ba-site-admin-chat__date-input"
-                            value={paymentProofPaidDate}
-                            onChange={(event) => setPaymentProofPaidDate(event.target.value)}
-                            aria-label="Paid date"
-                          />
+                          <label className="ba-site-admin-chat__date-field">
+                            <span className="ba-site-admin-chat__date-field-label">
+                              <i className="bi bi-calendar3" aria-hidden="true" />
+                              Paid Date
+                            </span>
+                            <input
+                              type="date"
+                              className="form-control ba-site-admin-chat__date-input"
+                              value={paymentProofPaidDate}
+                              onChange={(event) => setPaymentProofPaidDate(event.target.value)}
+                              aria-label="Paid date"
+                            />
+                          </label>
                         </div>
                         <div className="col-12 col-md-2">
                           {paymentProofDraftEntries.length ? (
