@@ -1580,7 +1580,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
           }
           const formData = new FormData();
           Object.entries(editPayload).forEach(([key, value]) => {
-            if (key === "payment_proof_images") {
+            if (["payment_proof_image", "payment_proof_images", "payment_proof_entries"].includes(key)) {
               return;
             }
             formData.append(key, value ?? "");
