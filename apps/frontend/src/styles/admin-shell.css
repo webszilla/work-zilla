@@ -2057,8 +2057,8 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
   position: absolute;
   left: calc(100% + 14px);
   top: 0;
-  width: 120px;
-  max-width: min(120px, calc(100vw - 80px));
+  width: 75px;
+  max-width: min(75px, calc(100vw - 80px));
   padding: 8px;
   border-radius: 16px;
   border: 3px solid rgba(148, 163, 184, 0.28);
@@ -2086,7 +2086,7 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 
 .ba-site-admin-chat__proof-thumb-hover img {
   width: 100%;
-  max-height: 70vh;
+  max-height: none;
   object-fit: contain;
   border-radius: 12px;
   display: block;

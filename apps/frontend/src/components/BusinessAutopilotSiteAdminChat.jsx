@@ -546,6 +546,14 @@ function normalizePaymentProofEntries(row) {
   return single ? [{ image: single, paid_date: "" }] : [];
 }
 
+function truncateWithEllipsis(value, limit = 15) {
+  const text = String(value || "");
+  if (text.length <= limit) {
+    return text;
+  }
+  return `${text.slice(0, limit)}...`;
+}
+
 export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   const navigate = useNavigate();
   const confirm = useConfirm();
@@ -2219,7 +2227,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                               >
                                 {row.estimate_number || "-"}
                               </button>
-                              <span>{row.client_name || "-"}</span>
+                              <span title={row.client_name || "-"}>
+                                {truncateWithEllipsis(row.client_name || "-", 15)}
+                              </span>
                               <small>{row.mobile || "-"}</small>
                             </div>
                           </td>
