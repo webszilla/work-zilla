@@ -3077,13 +3077,47 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         estimate = QuickEstimate.objects.get(organization=self.org, id=estimate_id)
         self.assertEqual(estimate.payment_status, QuickEstimate.PROGRESS_COMPLETED)
         self.assertEqual(estimate.payment_mode, "online")
-        self.assertEqual(json.loads(estimate.payment_proof_image), [image_one, image_two])
+        self.assertEqual(json.loads(estimate.payment_proof_image), [
+            {"image": image_one, "paid_date": ""},
+            {"image": image_two, "paid_date": ""},
+        ])
 
         detail = self.client.get(f"/api/business-autopilot/quick-estimates/{estimate_id}/")
         self.assertEqual(detail.status_code, 200)
         quick_estimate = detail.json()["quick_estimate"]
         self.assertEqual(quick_estimate["payment_proof_image"], image_one)
         self.assertEqual(quick_estimate["payment_proof_images"], [image_one, image_two])
+        self.assertEqual(quick_estimate["payment_proof_entries"], [
+            {"image": image_one, "paid_date": ""},
+            {"image": image_two, "paid_date": ""},
+        ])
+
+    def test_quick_estimate_payment_update_stores_paid_date_in_payment_proof_entries(self):
+        created = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={
+                "message": "9092833701\nGuru\nBusiness Card 500 nos Rs.1050",
+            },
+            content_type="application/json",
+        )
+        estimate_id = created.json()["quick_estimate_id"]
+        image_one = "data:image/png;base64,AAA111"
+
+        response = self.client.post(
+            f"/api/business-autopilot/quick-estimates/{estimate_id}/",
+            data=json.dumps({
+                "__action": "PATCH",
+                "action": "payment",
+                "payment_status": "completed",
+                "payment_mode": "online",
+                "payment_proof_entries": [{"image": image_one, "paid_date": "2026-06-26"}],
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        estimate = QuickEstimate.objects.get(organization=self.org, id=estimate_id)
+        self.assertEqual(json.loads(estimate.payment_proof_image), [{"image": image_one, "paid_date": "2026-06-26"}])
 
     def test_quick_estimate_list_includes_creator_and_assignment_details(self):
         assignee = User.objects.create_user(

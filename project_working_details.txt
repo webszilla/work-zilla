@@ -259,10 +259,11 @@ PREVIOUS WORK LOG (2026-06-13)
 - Quick Estimate multi payment-proof support:
   - payment proof popup now accepts multiple uploaded, dropped, or pasted images
   - online payment proof images are stored as a list while keeping old single-image data compatible
+  - each payment proof entry can now store a paid date alongside the image
   - popup shows bottom table list for all selected proof images
   - each proof row now has delete option and clear-all support
   - applied in both Site Admin chat edit flow and Data View payment popup
-  - CDN/WAF note: payment proof save/update must use `multipart/form-data`; large base64 JSON payloads can trigger `403` when CDN protection is enabled
+  - CDN/server compatibility note: this server runs behind CDN/WAF protection, so every save or update flow that sends images, files, or large rich payloads must be implemented using a CDN-safe request method such as `multipart/form-data` instead of large base64 JSON bodies. Treat this as a common engineering rule for future development to avoid `403` and similar request-blocking errors.
 
 - Quick Estimate contact and mobile handling fixes:
   - fixed contact delete so removed contacts do not reappear from linked estimates

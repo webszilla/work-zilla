@@ -68,13 +68,22 @@ async function readImageFilesAsDataUrls(files) {
   return Promise.all(imageFiles.map((file) => readImageFileAsDataUrl(file)));
 }
 
-function normalizePaymentProofImages(row) {
+function normalizePaymentProofEntries(row) {
+  const rawEntries = Array.isArray(row?.payment_proof_entries) ? row.payment_proof_entries : [];
+  if (rawEntries.length) {
+    return rawEntries
+      .map((item) => ({
+        image: String(item?.image || "").trim(),
+        paid_date: String(item?.paid_date || item?.paidDate || "").trim(),
+      }))
+      .filter((item) => item.image);
+  }
   const rawList = Array.isArray(row?.payment_proof_images) ? row.payment_proof_images : [];
   if (rawList.length) {
-    return rawList.map((item) => String(item || "").trim()).filter(Boolean);
+    return rawList.map((item) => ({ image: String(item || "").trim(), paid_date: "" })).filter((item) => item.image);
   }
   const single = String(row?.payment_proof_image || "").trim();
-  return single ? [single] : [];
+  return single ? [{ image: single, paid_date: "" }] : [];
 }
 
 function SiteAdminHeaderTabs() {
@@ -235,7 +244,8 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
   const [paymentModeFilter, setPaymentModeFilter] = useState("all");
   const [paymentModalRow, setPaymentModalRow] = useState(null);
   const [paymentModalMode, setPaymentModalMode] = useState("");
-  const [paymentProofDraftImages, setPaymentProofDraftImages] = useState([]);
+  const [paymentProofDraftEntries, setPaymentProofDraftEntries] = useState([]);
+  const [paymentProofPaidDate, setPaymentProofPaidDate] = useState("");
   const [paymentProofError, setPaymentProofError] = useState("");
   const [paymentSaving, setPaymentSaving] = useState(false);
   const [inlineTooltip, setInlineTooltip] = useState(null);
@@ -265,7 +275,10 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
         setPaymentProofError("Please choose an image file only.");
         return false;
       }
-      setPaymentProofDraftImages((prev) => [...prev, ...imageData]);
+      setPaymentProofDraftEntries((prev) => [
+        ...prev,
+        ...imageData.map((image) => ({ image, paid_date: paymentProofPaidDate })),
+      ]);
       setPaymentProofError("");
       return true;
     } catch (error) {
@@ -385,8 +398,10 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
   function openPaymentModal(row) {
     setPaymentModalRow(row);
     setPaymentModalMode(String(row?.payment_mode || "").trim().toLowerCase() || "cash");
-    setPaymentProofDraftImages(normalizePaymentProofImages(row));
+    const nextEntries = normalizePaymentProofEntries(row);
+    setPaymentProofDraftEntries(nextEntries);
     setPaymentProofError("");
+    setPaymentProofPaidDate(String(nextEntries[0]?.paid_date || "").trim());
   }
 
   function closePaymentModal(force = false) {
@@ -395,8 +410,9 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
     }
     setPaymentModalRow(null);
     setPaymentModalMode("");
-    setPaymentProofDraftImages([]);
+    setPaymentProofDraftEntries([]);
     setPaymentProofError("");
+    setPaymentProofPaidDate("");
   }
 
   function closeContactDetailsModal() {
@@ -644,7 +660,7 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
       setPaymentProofError("Please choose cash or online payment mode.");
       return;
     }
-    if (paymentModalMode === "online" && !paymentProofDraftImages.length) {
+    if (paymentModalMode === "online" && !paymentProofDraftEntries.length) {
       setPaymentProofError("Please upload the payment proof image.");
       return;
     }
@@ -654,7 +670,7 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
       const paymentEndpoint = paymentModalRow?.id
         ? `/api/business-autopilot/quick-estimates/${paymentModalRow.id}/`
         : QUICK_ESTIMATES_COLLECTION_API;
-      const shouldUseMultipart = paymentModalMode === "online" && paymentProofDraftImages.length > 0;
+      const shouldUseMultipart = paymentModalMode === "online" && paymentProofDraftEntries.length > 0;
       const data = await apiFetch(paymentEndpoint, shouldUseMultipart ? (() => {
         const formData = new FormData();
         formData.append("__action", "PATCH");
@@ -662,8 +678,12 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
         formData.append("action", "payment");
         formData.append("payment_status", "completed");
         formData.append("payment_mode", paymentModalMode);
-        paymentProofDraftImages.forEach((image, index) => {
-          const file = dataUrlToFile(image, `payment-proof-${index + 1}`);
+        const firstPaidDate = String(paymentProofDraftEntries[0]?.paid_date || "").trim();
+        if (firstPaidDate) {
+          formData.append("payment_paid_date", firstPaidDate);
+        }
+        paymentProofDraftEntries.forEach((entry, index) => {
+          const file = dataUrlToFile(entry?.image, `payment-proof-${index + 1}`);
           if (file) {
             formData.append("payment_proof_files", file);
           }
@@ -682,6 +702,7 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
           payment_mode: paymentModalMode,
           payment_proof_image: "",
           payment_proof_images: [],
+          payment_proof_entries: [],
         }),
       });
       const updatedRow = data?.quick_estimate || null;
@@ -1287,7 +1308,7 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
                   {paymentModalMode === "online" ? (
                     <>
                       <div
-                        className={`ba-site-admin-chat__proof-dropzone ${paymentProofDraftImages.length ? "has-image" : ""}`}
+                        className={`ba-site-admin-chat__proof-dropzone ${paymentProofDraftEntries.length ? "has-image" : ""}`}
                         onDragOver={(event) => {
                           event.preventDefault();
                           event.dataTransfer.dropEffect = "copy";
@@ -1298,8 +1319,8 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
                         role="button"
                         aria-label="Payment proof upload area"
                       >
-                        {paymentProofDraftImages.length ? (
-                          <img src={paymentProofDraftImages[0]} alt="Payment proof preview" className="ba-site-admin-chat__proof-preview" />
+                        {paymentProofDraftEntries.length ? (
+                          <img src={paymentProofDraftEntries[0]?.image} alt="Payment proof preview" className="ba-site-admin-chat__proof-preview" />
                         ) : (
                           <div className="ba-site-admin-chat__proof-placeholder">
                             <i className="bi bi-image" aria-hidden="true" />
@@ -1313,44 +1334,53 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
                           <input type="file" accept="image/*" multiple hidden onChange={handlePaymentProofFileChange} />
                           Choose Images
                         </label>
-                        {paymentProofDraftImages.length ? (
+                        <input
+                          type="date"
+                          className="form-control ba-site-admin-chat__date-input"
+                          value={paymentProofPaidDate}
+                          onChange={(event) => setPaymentProofPaidDate(event.target.value)}
+                          aria-label="Paid date"
+                        />
+                        {paymentProofDraftEntries.length ? (
                           <button
                             type="button"
                             className="btn btn-outline-light ba-site-admin-chat__proof-btn"
-                            onClick={() => setPaymentProofDraftImages([])}
+                            onClick={() => setPaymentProofDraftEntries([])}
                             disabled={paymentSaving}
                           >
                             Clear All
                           </button>
                         ) : null}
                       </div>
-                      {paymentProofDraftImages.length ? (
+                      {paymentProofDraftEntries.length ? (
                         <div className="table-responsive">
                           <table className="table table-sm align-middle mb-3">
                             <thead>
                               <tr>
                                 <th style={{ width: 72 }}>Preview</th>
                                 <th>Name</th>
+                                <th style={{ width: 140 }}>Paid Date</th>
                                 <th style={{ width: 96 }}>Action</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {paymentProofDraftImages.map((image, index) => (
-                                <tr key={`${index}-${image.slice(0, 24)}`}>
+                              {paymentProofDraftEntries.map((entry, index) => (
+                                <tr key={`${index}-${String(entry?.image || "").slice(0, 24)}`}>
                                   <td>
                                     <span className="ba-site-admin-chat__proof-thumb">
-                                      <img src={image} alt={`Payment proof ${index + 1}`} className="ba-site-admin-chat__proof-thumb-image" />
+                                      <img src={entry?.image} alt={`Payment proof ${index + 1}`} className="ba-site-admin-chat__proof-thumb-image" />
                                       <span className="ba-site-admin-chat__proof-thumb-hover">
-                                        <img src={image} alt={`Payment proof ${index + 1} enlarged preview`} />
+                                        <img src={entry?.image} alt={`Payment proof ${index + 1} enlarged preview`} />
                                       </span>
                                     </span>
                                   </td>
                                   <td>{`Proof ${index + 1}`}</td>
+                                  <td>{entry?.paid_date || "-"}</td>
                                   <td>
                                     <button
                                       type="button"
                                       className="btn btn-outline-danger btn-sm"
-                                      onClick={() => setPaymentProofDraftImages((prev) => prev.filter((_, imageIndex) => imageIndex !== index))}
+                                      onClick={() => setPaymentProofDraftEntries((prev) => prev.filter((_, imageIndex) => imageIndex !== index))}
                                       disabled={paymentSaving}
                                     >
                                       Delete

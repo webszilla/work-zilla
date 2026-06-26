@@ -499,9 +499,10 @@ function buildQuickEstimateEditPayload({
   editPaymentMode,
   editJobCompleted,
   editDeliveryCompleted,
-  editPaymentProofImages,
+  editPaymentProofEntries,
   text,
 }) {
+  const paymentProofEntries = Array.isArray(editPaymentProofEntries) ? editPaymentProofEntries : [];
   return {
     __action: "PATCH",
     quick_estimate_id: editingEstimate.id,
@@ -512,8 +513,9 @@ function buildQuickEstimateEditPayload({
     payment_mode: editPaymentCompleted ? editPaymentMode : "",
     job_status: editJobCompleted ? "completed" : "non_completed",
     delivery_status: editDeliveryCompleted ? "completed" : "non_completed",
-    payment_proof_image: editPaymentCompleted ? (editPaymentProofImages?.[0] || "") : "",
-    payment_proof_images: editPaymentCompleted ? (Array.isArray(editPaymentProofImages) ? editPaymentProofImages : []) : [],
+    payment_proof_image: editPaymentCompleted ? (paymentProofEntries[0]?.image || "") : "",
+    payment_proof_images: editPaymentCompleted ? paymentProofEntries.map((item) => item?.image).filter(Boolean) : [],
+    payment_proof_entries: editPaymentCompleted ? paymentProofEntries : [],
     item_text: text,
   };
 }
@@ -526,13 +528,22 @@ async function extractImageDataUrls(fileList) {
   return Promise.all(files.map((file) => readFileAsDataUrl(file)));
 }
 
-function normalizePaymentProofImages(row) {
+function normalizePaymentProofEntries(row) {
+  const rawEntries = Array.isArray(row?.payment_proof_entries) ? row.payment_proof_entries : [];
+  if (rawEntries.length) {
+    return rawEntries
+      .map((item) => ({
+        image: String(item?.image || "").trim(),
+        paid_date: String(item?.paid_date || item?.paidDate || "").trim(),
+      }))
+      .filter((item) => item.image);
+  }
   const rawList = Array.isArray(row?.payment_proof_images) ? row.payment_proof_images : [];
   if (rawList.length) {
-    return rawList.map((item) => String(item || "").trim()).filter(Boolean);
+    return rawList.map((item) => ({ image: String(item || "").trim(), paid_date: "" })).filter((item) => item.image);
   }
   const single = String(row?.payment_proof_image || "").trim();
-  return single ? [single] : [];
+  return single ? [{ image: single, paid_date: "" }] : [];
 }
 
 export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
@@ -554,11 +565,12 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   const [editPaymentMode, setEditPaymentMode] = useState("");
   const [editJobCompleted, setEditJobCompleted] = useState(false);
   const [editDeliveryCompleted, setEditDeliveryCompleted] = useState(false);
-  const [editPaymentProofImages, setEditPaymentProofImages] = useState([]);
+  const [editPaymentProofEntries, setEditPaymentProofEntries] = useState([]);
   const [editPaymentProofFile, setEditPaymentProofFile] = useState(null);
   const [paymentModeModalOpen, setPaymentModeModalOpen] = useState(false);
   const [paymentProofModalOpen, setPaymentProofModalOpen] = useState(false);
-  const [paymentProofDraftImages, setPaymentProofDraftImages] = useState([]);
+  const [paymentProofDraftEntries, setPaymentProofDraftEntries] = useState([]);
+  const [paymentProofPaidDate, setPaymentProofPaidDate] = useState("");
   const [paymentProofDraftFile, setPaymentProofDraftFile] = useState(null);
   const [paymentProofError, setPaymentProofError] = useState("");
   const [paymentProofUploading, setPaymentProofUploading] = useState(false);
@@ -754,10 +766,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setEditPaymentCompleted(false);
     setEditJobCompleted(false);
     setEditDeliveryCompleted(false);
-    setEditPaymentProofImages([]);
+    setEditPaymentProofEntries([]);
     setEditPaymentProofFile(null);
     setPaymentProofModalOpen(false);
-    setPaymentProofDraftImages([]);
+    setPaymentProofDraftEntries([]);
+    setPaymentProofPaidDate("");
     setPaymentProofDraftFile(null);
     setPaymentProofError("");
     setPaymentProofUploading(false);
@@ -777,7 +790,10 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
         setPaymentProofError("Please upload an image file only.");
         return false;
       }
-      setPaymentProofDraftImages((prev) => [...prev, ...dataUrls]);
+      setPaymentProofDraftEntries((prev) => [
+        ...prev,
+        ...dataUrls.map((image) => ({ image, paid_date: paymentProofPaidDate })),
+      ]);
       setPaymentProofDraftFile(imageFile);
       return true;
     } catch (error) {
@@ -815,9 +831,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
 
   function openPaymentProofModal() {
     setEditPaymentMode("online");
-    setPaymentProofDraftImages(Array.isArray(editPaymentProofImages) ? editPaymentProofImages : []);
+    const nextEntries = Array.isArray(editPaymentProofEntries) ? editPaymentProofEntries : [];
+    setPaymentProofDraftEntries(nextEntries);
     setPaymentProofDraftFile(null);
     setPaymentProofError("");
+    setPaymentProofPaidDate(String(nextEntries[0]?.paid_date || "").trim());
     setPaymentProofModalOpen(true);
   }
 
@@ -833,11 +851,12 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   function selectCashPaymentMode() {
     setEditPaymentMode("cash");
     setEditPaymentCompleted(true);
-    setEditPaymentProofImages([]);
+    setEditPaymentProofEntries([]);
     setEditPaymentProofFile(null);
-    setPaymentProofDraftImages([]);
+    setPaymentProofDraftEntries([]);
     setPaymentProofDraftFile(null);
     setPaymentProofError("");
+    setPaymentProofPaidDate("");
     setNotice("");
     setPaymentModeModalOpen(false);
     setPaymentProofModalOpen(false);
@@ -852,17 +871,19 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
 
   function closePaymentProofModal() {
     setPaymentProofModalOpen(false);
-    setPaymentProofDraftImages(Array.isArray(editPaymentProofImages) ? editPaymentProofImages : []);
+    const nextEntries = Array.isArray(editPaymentProofEntries) ? editPaymentProofEntries : [];
+    setPaymentProofDraftEntries(nextEntries);
     setPaymentProofDraftFile(null);
     setPaymentProofError("");
+    setPaymentProofPaidDate(String(nextEntries[0]?.paid_date || "").trim());
   }
 
   function savePaymentProofModal() {
-    if (!paymentProofDraftImages.length) {
+    if (!paymentProofDraftEntries.length) {
       setPaymentProofError("Please upload, drag-drop, or paste the payment proof image.");
       return;
     }
-    setEditPaymentProofImages(paymentProofDraftImages);
+    setEditPaymentProofEntries(paymentProofDraftEntries);
     setEditPaymentProofFile(paymentProofDraftFile);
     setEditPaymentMode("online");
     setEditPaymentCompleted(true);
@@ -878,13 +899,14 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     }
     setEditPaymentCompleted(false);
     setEditPaymentMode("");
-    setEditPaymentProofImages([]);
+    setEditPaymentProofEntries([]);
     setEditPaymentProofFile(null);
-    setPaymentProofDraftImages([]);
+    setPaymentProofDraftEntries([]);
     setPaymentProofDraftFile(null);
     setPaymentModeModalOpen(false);
     setPaymentProofModalOpen(false);
     setPaymentProofError("");
+    setPaymentProofPaidDate("");
     setNotice("");
   }
 
@@ -1389,10 +1411,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       setEditPaymentMode(String(estimate.payment_mode || "").trim().toLowerCase());
       setEditJobCompleted(String(estimate.job_status || "").toLowerCase() === "completed");
       setEditDeliveryCompleted(String(estimate.delivery_status || "").toLowerCase() === "completed");
-      setEditPaymentProofImages(normalizePaymentProofImages(estimate));
+      setEditPaymentProofEntries(normalizePaymentProofEntries(estimate));
       setEditPaymentProofFile(null);
-      setPaymentProofDraftImages(normalizePaymentProofImages(estimate));
+      setPaymentProofDraftEntries(normalizePaymentProofEntries(estimate));
       setPaymentProofDraftFile(null);
+      setPaymentProofPaidDate("");
       appendAssistantMessage(
         {
           reply: `Quick Estimate ${estimate.estimate_number} loaded for editing. You can update mobile number, client name, and full item list now.`,
@@ -1542,13 +1565,13 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
           editPaymentMode,
           editJobCompleted,
           editDeliveryCompleted,
-          editPaymentProofImages,
+          editPaymentProofEntries,
           text,
         })
         : null;
       const data = useEditFlow
         ? await apiFetch(editEndpoint, (() => {
-          const shouldUseMultipart = editPaymentCompleted && editPaymentMode === "online" && Array.isArray(editPaymentProofImages) && editPaymentProofImages.length > 0;
+          const shouldUseMultipart = editPaymentCompleted && editPaymentMode === "online" && Array.isArray(editPaymentProofEntries) && editPaymentProofEntries.length > 0;
           if (!shouldUseMultipart) {
             return {
               method: "POST",
@@ -1562,8 +1585,12 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
             }
             formData.append(key, value ?? "");
           });
-          editPaymentProofImages.forEach((image, index) => {
-            const file = dataUrlToFile(image, `payment-proof-${index + 1}`);
+          const firstPaidDate = String(editPaymentProofEntries[0]?.paid_date || "").trim();
+          if (firstPaidDate) {
+            formData.append("payment_paid_date", firstPaidDate);
+          }
+          editPaymentProofEntries.forEach((entry, index) => {
+            const file = dataUrlToFile(entry?.image, `payment-proof-${index + 1}`);
             if (file) {
               formData.append("payment_proof_files", file);
             }
@@ -1592,8 +1619,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
               payment_mode: editPaymentCompleted ? editPaymentMode : "",
               job_status: editJobCompleted ? "completed" : "non_completed",
               delivery_status: editDeliveryCompleted ? "completed" : "non_completed",
-              payment_proof_image: editPaymentCompleted ? (data?.quick_estimate?.payment_proof_image || editPaymentProofImages?.[0] || "") : "",
-              payment_proof_images: editPaymentCompleted ? normalizePaymentProofImages(data?.quick_estimate || { payment_proof_images: editPaymentProofImages }) : [],
+              payment_proof_image: editPaymentCompleted ? (data?.quick_estimate?.payment_proof_image || editPaymentProofEntries?.[0]?.image || "") : "",
+              payment_proof_images: editPaymentCompleted ? normalizePaymentProofEntries(data?.quick_estimate || { payment_proof_entries: editPaymentProofEntries }).map((item) => item.image) : [],
+              payment_proof_entries: editPaymentCompleted ? normalizePaymentProofEntries(data?.quick_estimate || { payment_proof_entries: editPaymentProofEntries }) : [],
             }
             : row
         )));
@@ -2025,9 +2053,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                             onClick={openPaymentProofModal}
                             disabled={sending}
                           >
-                            {editPaymentProofImages.length ? "Change Payment Proof" : "Upload Payment Proof"}
+                            {editPaymentProofEntries.length ? "Change Payment Proof" : "Upload Payment Proof"}
                           </button>
-                          {editPaymentProofImages.length ? <small>{`${editPaymentProofImages.length} payment proof image${editPaymentProofImages.length === 1 ? "" : "s"} attached.`}</small> : <small>Payment proof required.</small>}
+                          {editPaymentProofEntries.length ? <small>{`${editPaymentProofEntries.length} payment proof image${editPaymentProofEntries.length === 1 ? "" : "s"} attached.`}</small> : <small>Payment proof required.</small>}
                         </>
                       ) : editPaymentMode === "cash" ? <small>Cash payment selected.</small> : <small>Select payment mode.</small>}
                     </div>
@@ -2533,7 +2561,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
               </button>
             </div>
             <div
-              className={`ba-site-admin-chat__proof-dropzone ${paymentProofDraftImages.length ? "has-image" : ""}`}
+              className={`ba-site-admin-chat__proof-dropzone ${paymentProofDraftEntries.length ? "has-image" : ""}`}
               onDragOver={(event) => {
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "copy";
@@ -2544,8 +2572,8 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
               role="button"
               aria-label="Payment proof upload area"
             >
-              {paymentProofDraftImages.length ? (
-                <img src={paymentProofDraftImages[0]} alt="Payment proof preview" className="ba-site-admin-chat__proof-preview" />
+              {paymentProofDraftEntries.length ? (
+                <img src={paymentProofDraftEntries[0]?.image} alt="Payment proof preview" className="ba-site-admin-chat__proof-preview" />
               ) : (
                 <div className="ba-site-admin-chat__proof-placeholder">
                   <i className="bi bi-image" aria-hidden="true" />
@@ -2559,44 +2587,53 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                 <input type="file" accept="image/*" multiple hidden onChange={handlePaymentProofFileChange} />
                 Choose Images
               </label>
-              {paymentProofDraftImages.length ? (
+              <input
+                type="date"
+                className="form-control ba-site-admin-chat__date-input"
+                value={paymentProofPaidDate}
+                onChange={(event) => setPaymentProofPaidDate(event.target.value)}
+                aria-label="Paid date"
+              />
+              {paymentProofDraftEntries.length ? (
                 <button
                   type="button"
                   className="btn btn-outline-light ba-site-admin-chat__proof-btn"
-                  onClick={() => setPaymentProofDraftImages([])}
+                  onClick={() => setPaymentProofDraftEntries([])}
                   disabled={paymentProofUploading}
                 >
                   Clear All
                 </button>
               ) : null}
             </div>
-            {paymentProofDraftImages.length ? (
+            {paymentProofDraftEntries.length ? (
               <div className="table-responsive">
                 <table className="table table-sm align-middle mb-3">
                   <thead>
                     <tr>
                       <th style={{ width: 72 }}>Preview</th>
                       <th>Name</th>
+                      <th style={{ width: 140 }}>Paid Date</th>
                       <th style={{ width: 96 }}>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {paymentProofDraftImages.map((image, index) => (
-                      <tr key={`${index}-${image.slice(0, 24)}`}>
+                    {paymentProofDraftEntries.map((entry, index) => (
+                      <tr key={`${index}-${String(entry?.image || "").slice(0, 24)}`}>
                         <td>
                           <span className="ba-site-admin-chat__proof-thumb">
-                            <img src={image} alt={`Payment proof ${index + 1}`} className="ba-site-admin-chat__proof-thumb-image" />
+                            <img src={entry?.image} alt={`Payment proof ${index + 1}`} className="ba-site-admin-chat__proof-thumb-image" />
                             <span className="ba-site-admin-chat__proof-thumb-hover">
-                              <img src={image} alt={`Payment proof ${index + 1} enlarged preview`} />
+                              <img src={entry?.image} alt={`Payment proof ${index + 1} enlarged preview`} />
                             </span>
                           </span>
                         </td>
                         <td>{`Proof ${index + 1}`}</td>
+                        <td>{entry?.paid_date || "-"}</td>
                         <td>
                           <button
                             type="button"
                             className="btn btn-outline-danger btn-sm"
-                            onClick={() => setPaymentProofDraftImages((prev) => prev.filter((_, imageIndex) => imageIndex !== index))}
+                            onClick={() => setPaymentProofDraftEntries((prev) => prev.filter((_, imageIndex) => imageIndex !== index))}
                             disabled={paymentProofUploading}
                           >
                             Delete
