@@ -7547,6 +7547,14 @@ function parseWorkedDurationMinutes(value) {
   return (hours * 60) + minutes;
 }
 
+function formatTotalWorkedHours(minutes) {
+  const totalMinutes = Number(minutes);
+  if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) {
+    return "0.0";
+  }
+  return (totalMinutes / 60).toFixed(1);
+}
+
 function normalizeImportHeader(value) {
   return String(value || "")
     .trim()
@@ -29617,6 +29625,7 @@ export function HrManagementModule({
       permission: 0,
       halfDay: 0,
     };
+    let totalWorkedMinutes = 0;
     rows.forEach((row) => {
       const raw = String(row?.status || "").trim().toLowerCase();
       if (raw.startsWith("present")) counts.present += 1;
@@ -29625,6 +29634,11 @@ export function HrManagementModule({
       else if (raw === "absent") counts.absent += 1;
       else if (raw === "permission") counts.permission += 1;
       else if (raw === "half day" || raw === "halfday") counts.halfDay += 1;
+
+      const workedMinutes = parseWorkedDurationMinutes(row?.workedHours || computeWorkedDuration(row?.inTime, row?.outTime));
+      if (workedMinutes !== null && workedMinutes > 0) {
+        totalWorkedMinutes += workedMinutes;
+      }
     });
 
     const parts = [];
@@ -29636,7 +29650,7 @@ export function HrManagementModule({
     if (counts.absent) parts.push(`Absent (${counts.absent})`);
 
     const prefix = parts.length ? `${parts.join("  ")}` : "No records";
-    return `${prefix}  •  ${rows.length} days`;
+    return `${prefix}  •  ${rows.length} days | Total Working Hrs : ${formatTotalWorkedHours(totalWorkedMinutes)}`;
   }, [
     activeTab,
     attendanceFilteredRows,
