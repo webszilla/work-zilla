@@ -305,6 +305,14 @@ function getEstimateCreatedByLabel(row) {
   return String(label || "").trim() || "-";
 }
 
+function getEstimateCreatedByDisplay(row) {
+  const fullName = getEstimateCreatedByLabel(row);
+  return {
+    fullName,
+    shortName: truncateWithEllipsis(fullName, 12),
+  };
+}
+
 function getEstimateAssignedUserLabels(row) {
   const values = [
     row?.assigned_user_name,
@@ -2292,7 +2300,10 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                           <td>
                             <div className="ba-site-admin-chat__estimate-meta ba-site-admin-chat__estimate-meta--compact">
                               <strong>{formatDateLabel(row.created_at)}</strong>
-                              <small>Created By: {getEstimateCreatedByLabel(row)}</small>
+                              <small className="ba-site-admin-chat__created-by-text" title={`Created By: ${getEstimateCreatedByDisplay(row).fullName}`}>
+                                <span>Created By:</span>{" "}
+                                <span className="ba-site-admin-chat__created-by-name">{getEstimateCreatedByDisplay(row).shortName}</span>
+                              </small>
                               <button
                                 type="button"
                                 className="ba-site-admin-chat__inline-link"

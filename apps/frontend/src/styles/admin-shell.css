@@ -1700,6 +1700,19 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
   line-height: 1.2;
 }
 
+.ba-site-admin-chat__created-by-text {
+  font-size: 0.83rem !important;
+}
+
+.ba-site-admin-chat__created-by-name {
+  display: inline-block;
+  max-width: 12ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
 .ba-site-admin-chat__status-pill {
   display: inline-flex;
   align-items: center;
@@ -1926,9 +1939,10 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 
 .ba-site-admin-chat__status-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(96px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
   margin-top: 10px;
+  align-items: stretch;
 }
 
 .ba-site-admin-chat__status-date-card {
@@ -1936,16 +1950,18 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
   border: 1px solid rgba(134, 239, 172, 0.48);
   border-radius: 16px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
-  padding: 10px 10px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  justify-content: center;
 }
 
 .ba-site-admin-chat__status-date-input {
-  min-height: 36px;
+  min-height: 34px;
   font-weight: 600;
-  font-size: 0.82rem;
+  font-size: 0.74rem;
+  padding: 6px 8px;
 }
 
 .ba-site-admin-chat__proof-summary {
@@ -2140,20 +2156,22 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 .ba-site-admin-chat__status-switch {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 42px;
+  gap: 6px;
+  min-height: 40px;
+  min-width: 0;
   margin: 0;
-  padding: 8px 10px;
+  padding: 8px;
   border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 14px;
   background: #fff;
+  overflow: hidden;
 }
 
 .ba-site-admin-chat__status-switch .form-check-input {
   margin: 0;
   float: none;
-  width: 2.4em;
-  height: 1.25em;
+  width: 2em;
+  height: 1.1em;
   border-color: rgba(148, 163, 184, 0.44);
   background-color: #e2e8f0;
   background-image: var(--bs-form-switch-bg);
@@ -2180,16 +2198,20 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
   display: flex;
   flex-direction: column;
   line-height: 1.2;
+  min-width: 0;
 }
 
 .ba-site-admin-chat__status-switch-copy strong {
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ba-site-admin-chat__status-switch-copy small {
   color: #64748b;
-  font-size: 0.7rem;
+  font-size: 0.64rem;
   font-weight: 700;
 }
 
