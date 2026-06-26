@@ -1329,28 +1329,34 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
                           </div>
                         )}
                       </div>
-                      <div className="ba-site-admin-chat__proof-actions">
-                        <label className="btn btn-outline-light ba-site-admin-chat__proof-btn">
-                          <input type="file" accept="image/*" multiple hidden onChange={handlePaymentProofFileChange} />
-                          Choose Images
-                        </label>
-                        <input
-                          type="date"
-                          className="form-control ba-site-admin-chat__date-input"
-                          value={paymentProofPaidDate}
-                          onChange={(event) => setPaymentProofPaidDate(event.target.value)}
-                          aria-label="Paid date"
-                        />
-                        {paymentProofDraftEntries.length ? (
-                          <button
-                            type="button"
-                            className="btn btn-outline-light ba-site-admin-chat__proof-btn"
-                            onClick={() => setPaymentProofDraftEntries([])}
-                            disabled={paymentSaving}
-                          >
-                            Clear All
-                          </button>
-                        ) : null}
+                      <div className="ba-site-admin-chat__proof-actions row g-2">
+                        <div className="col-12 col-md-4">
+                          <label className="btn btn-outline-light ba-site-admin-chat__proof-btn w-100">
+                            <input type="file" accept="image/*" multiple hidden onChange={handlePaymentProofFileChange} />
+                            Choose Images
+                          </label>
+                        </div>
+                        <div className="col-12 col-md-6">
+                          <input
+                            type="date"
+                            className="form-control ba-site-admin-chat__date-input"
+                            value={paymentProofPaidDate}
+                            onChange={(event) => setPaymentProofPaidDate(event.target.value)}
+                            aria-label="Paid date"
+                          />
+                        </div>
+                        <div className="col-12 col-md-2">
+                          {paymentProofDraftEntries.length ? (
+                            <button
+                              type="button"
+                              className="btn btn-outline-light ba-site-admin-chat__proof-btn w-100"
+                              onClick={() => setPaymentProofDraftEntries([])}
+                              disabled={paymentSaving}
+                            >
+                              Clear All
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
                       {paymentProofDraftEntries.length ? (
                         <div className="table-responsive">

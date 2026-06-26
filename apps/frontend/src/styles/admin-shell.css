@@ -1973,12 +1973,19 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 }
 
 .ba-site-admin-chat__proof-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
   margin-top: 14px;
   margin-bottom: 5px;
-  flex-wrap: wrap;
+}
+
+.ba-site-admin-chat__proof-actions > [class*="col-"] {
+  display: flex;
+  align-items: stretch;
+}
+
+.ba-site-admin-chat__proof-actions .ba-site-admin-chat__date-input,
+.ba-site-admin-chat__proof-actions .ba-site-admin-chat__proof-btn {
+  width: 100%;
+  min-height: 42px;
 }
 
 .ba-site-admin-chat__proof-thumb {
