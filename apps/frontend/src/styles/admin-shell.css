@@ -1804,8 +1804,9 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 .ba-site-admin-chat__status-preview {
   position: fixed;
   inset: auto;
-  width: 125px;
-  max-width: 125px;
+  width: 125px !important;
+  min-width: 125px !important;
+  max-width: 125px !important;
   min-height: 125px;
   padding: 0;
   border-radius: 14px;
@@ -1819,13 +1820,15 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 
 .ba-site-admin-chat__status-preview-image {
   display: block;
-  width: 125px;
-  max-width: 125px;
+  width: 100% !important;
+  min-width: 119px !important;
+  max-width: 100% !important;
   height: auto;
   max-height: none;
   object-fit: contain;
   border-radius: 10px;
   background: #fff;
+  box-sizing: border-box;
 }
 
 .ba-site-admin-chat__status-preview-modal {
@@ -1886,7 +1889,7 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 
 .ba-site-admin-chat__status-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(96px, 1fr));
   gap: 10px;
   margin-top: 10px;
 }
@@ -1896,15 +1899,16 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
   border: 1px solid rgba(134, 239, 172, 0.48);
   border-radius: 16px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
-  padding: 14px 12px;
+  padding: 10px 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .ba-site-admin-chat__status-date-input {
-  min-height: 40px;
+  min-height: 36px;
   font-weight: 600;
+  font-size: 0.82rem;
 }
 
 .ba-site-admin-chat__proof-summary {
@@ -2099,10 +2103,10 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 .ba-site-admin-chat__status-switch {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 46px;
+  gap: 8px;
+  min-height: 42px;
   margin: 0;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 14px;
   background: #fff;
@@ -2142,13 +2146,13 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 }
 
 .ba-site-admin-chat__status-switch-copy strong {
-  font-size: 0.84rem;
+  font-size: 0.78rem;
   color: #0f172a;
 }
 
 .ba-site-admin-chat__status-switch-copy small {
   color: #64748b;
-  font-size: 0.76rem;
+  font-size: 0.7rem;
   font-weight: 700;
 }
 
