@@ -1337,11 +1337,8 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
                           </label>
                         </div>
                         <div className="col-12 col-md-4">
-                          <label className="ba-site-admin-chat__date-field">
-                            <span className="ba-site-admin-chat__date-field-label">
-                              <i className="bi bi-calendar3" aria-hidden="true" />
-                              Paid Date
-                            </span>
+                          <label className={`ba-site-admin-chat__date-field ${paymentProofPaidDate ? "has-value" : ""}`}>
+                            <span className="ba-site-admin-chat__date-field-placeholder">Select Date</span>
                             <input
                               type="date"
                               className="form-control ba-site-admin-chat__date-input"
