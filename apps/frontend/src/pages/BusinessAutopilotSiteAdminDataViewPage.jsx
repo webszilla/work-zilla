@@ -651,8 +651,11 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
     setPaymentSaving(true);
     setNotice("");
     try {
+      const paymentEndpoint = paymentModalRow?.id
+        ? `/api/business-autopilot/quick-estimates/${paymentModalRow.id}/`
+        : QUICK_ESTIMATES_COLLECTION_API;
       const shouldUseMultipart = paymentModalMode === "online" && paymentProofDraftImages.length > 0;
-      const data = await apiFetch(QUICK_ESTIMATES_COLLECTION_API, shouldUseMultipart ? (() => {
+      const data = await apiFetch(paymentEndpoint, shouldUseMultipart ? (() => {
         const formData = new FormData();
         formData.append("__action", "PATCH");
         formData.append("quick_estimate_id", String(paymentModalRow.id || ""));

@@ -1529,6 +1529,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setMessages((prev) => [...prev, userMessage]);
     setSending(true);
     try {
+      const editEndpoint = useEditFlow && editingEstimate?.id
+        ? `/api/business-autopilot/quick-estimates/${editingEstimate.id}/`
+        : QUICK_ESTIMATES_COLLECTION_API;
       const editPayload = useEditFlow
         ? buildQuickEstimateEditPayload({
           editingEstimate,
@@ -1544,7 +1547,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
         })
         : null;
       const data = useEditFlow
-        ? await apiFetch(QUICK_ESTIMATES_COLLECTION_API, (() => {
+        ? await apiFetch(editEndpoint, (() => {
           const shouldUseMultipart = editPaymentCompleted && editPaymentMode === "online" && Array.isArray(editPaymentProofImages) && editPaymentProofImages.length > 0;
           if (!shouldUseMultipart) {
             return {
