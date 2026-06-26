@@ -5374,7 +5374,7 @@ def _render_quick_estimate_thermal_preview(row, org):
             "items": list(row.items.all().order_by("id")),
             "formatted_total": _format_quick_estimate_amount(row.total_amount),
             "formatted_subtotal": _format_quick_estimate_amount(row.subtotal),
-            "created_at_label": timezone.localtime(row.created_at).strftime("%d/%m/%Y, %I:%M %p") if row.created_at else "",
+            "created_at_label": timezone.localtime(row.created_at).strftime("%d/%m/%Y") if row.created_at else "",
             "assigned_user_name": _get_org_user_display_name(assigned_user),
         },
     )
@@ -5464,7 +5464,7 @@ def _quick_estimate_pdf_response(row, org):
     header_text = _normalize_quick_estimate_header_html(settings_data.get("headerText"))
     header_segments = _quick_estimate_pdf_header_segments(header_text, company_name, content_width)
     header_images = _quick_estimate_pdf_header_images(header_text)
-    created_at_label = timezone.localtime(row.created_at).strftime("%d/%m/%Y, %I:%M %p") if row.created_at else ""
+    created_at_label = timezone.localtime(row.created_at).strftime("%d/%m/%Y") if row.created_at else ""
     assigned_user_name = _get_org_user_display_name(getattr(row, "assigned_user", None)) or "-"
     items = list(row.items.all().order_by("id"))
     item_blocks = []
@@ -9619,10 +9619,22 @@ def _normalize_quick_estimate_progress_status(value: str) -> str:
     return QuickEstimate.PROGRESS_COMPLETED if normalized == QuickEstimate.PROGRESS_COMPLETED else QuickEstimate.PROGRESS_NON_COMPLETED
 
 
+def _normalize_quick_estimate_edit_date(value, current_value=None):
+    parsed = parse_date(str(value or "").strip() or "")
+    if not parsed:
+        return current_value
+    current_dt = current_value if isinstance(current_value, datetime) else timezone.now()
+    if timezone.is_naive(current_dt):
+        current_dt = timezone.make_aware(current_dt, timezone.get_current_timezone())
+    merged = datetime.combine(parsed, current_dt.timetz().replace(tzinfo=None))
+    return timezone.make_aware(merged, timezone.get_current_timezone()) if timezone.is_naive(merged) else merged
+
+
 def _site_admin_update_quick_estimate_items(
     estimate,
     item_text,
     *,
+    estimate_date=None,
     mobile="",
     client_name="",
     notes="",
@@ -9648,7 +9660,22 @@ def _site_admin_update_quick_estimate_items(
         payment_proof_entries if payment_proof_entries is not None else payment_proof_images if payment_proof_images is not None else payment_proof_image or getattr(estimate, "payment_proof_image", "")
     )
     next_payment_proof_images = [entry.get("image") for entry in next_payment_proof_entries if str(entry.get("image") or "").strip()]
+    next_estimate_datetime = _normalize_quick_estimate_edit_date(estimate_date, estimate.created_at)
+    changed_fields = []
+    previous_estimate_date = timezone.localtime(estimate.created_at).date().isoformat() if getattr(estimate, "created_at", None) else ""
+    next_estimate_date_label = timezone.localtime(next_estimate_datetime).date().isoformat() if next_estimate_datetime else previous_estimate_date
+    if next_estimate_date_label != previous_estimate_date:
+        changed_fields.append("date")
+    if next_mobile != estimate.mobile:
+        changed_fields.append("mobile")
+    if (next_client_name or "") != (estimate.client_name or ""):
+        changed_fields.append("client")
+    if str(notes or getattr(estimate, "notes", "") or "").strip()[:120] != str(getattr(estimate, "notes", "") or "").strip():
+        changed_fields.append("notes")
+    if item_text.strip():
+        changed_fields.append("items")
     previous_snapshot = {
+        "estimate_date": timezone.localtime(estimate.created_at).date().isoformat() if getattr(estimate, "created_at", None) else "",
         "mobile": estimate.mobile,
         "client_name": estimate.client_name,
         "notes": str(getattr(estimate, "notes", "") or ""),
@@ -9686,6 +9713,7 @@ def _site_admin_update_quick_estimate_items(
         else:
             customer_id = str(estimate.customer_id or "").strip()
         estimate.customer_id = customer_id
+        estimate.created_at = next_estimate_datetime
         estimate.mobile = next_mobile
         estimate.client_name = next_client_name or estimate.client_name
         estimate.notes = str(notes or getattr(estimate, "notes", "") or "").strip()[:120]
@@ -9719,6 +9747,7 @@ def _site_admin_update_quick_estimate_items(
             estimate.delivery_verified_by = None
         estimate.save(update_fields=[
             "customer_id",
+            "created_at",
             "mobile",
             "client_name",
             "notes",
@@ -9747,14 +9776,16 @@ def _site_admin_update_quick_estimate_items(
                 address=estimate.address,
                 gst_number=estimate.gst_number,
             )
+        changed_fields_label = ", ".join(dict.fromkeys(changed_fields)) if changed_fields else "details"
         _record_quick_estimate_history(
             estimate,
             action=QuickEstimateHistory.ACTION_UPDATED,
             actor=user,
-            note=f"Estimate updated for {estimate.client_name}.",
+            note=f"Estimate updated for {estimate.client_name} ({changed_fields_label}).",
             snapshot={
                 "before": previous_snapshot,
                 "after": {
+                    "estimate_date": timezone.localtime(estimate.created_at).date().isoformat() if getattr(estimate, "created_at", None) else "",
                     "mobile": estimate.mobile,
                     "client_name": estimate.client_name,
                     "notes": estimate.notes,
@@ -10159,6 +10190,8 @@ def quick_estimates(request, estimate_id: int = None):
         paid_date = str(payload.get("payment_paid_date") or payload.get("paymentPaidDate") or payload.get("paid_date") or payload.get("paidDate") or "").strip()
         uploaded_payment_proof_entries = []
         for item in uploaded_payment_proofs:
+            if int(getattr(item, "size", 0) or 0) > 1024 * 1024:
+                return JsonResponse({"detail": "payment_proof_too_large", "message": "Each payment proof image must be 1 MB or smaller."}, status=400)
             data_url = _ba_uploaded_image_to_data_url(item)
             if not data_url:
                 continue
@@ -10431,6 +10464,7 @@ def quick_estimates(request, estimate_id: int = None):
     if not item_text:
         return JsonResponse({"detail": "item_text_required", "message": "Please share the estimate item details."}, status=400)
     next_mobile = _normalize_site_admin_mobile(payload.get("mobile") or row.mobile)
+    next_estimate_date = str(payload.get("estimate_date") or payload.get("estimateDate") or "").strip()
     next_client_name = str(payload.get("client_name") or payload.get("clientName") or row.client_name or "").strip()[:180]
     next_notes = str(payload.get("notes") or payload.get("note") or getattr(row, "notes", "") or "").strip()[:120]
     next_payment_status = _normalize_quick_estimate_progress_status(payload.get("payment_status") or payload.get("paymentStatus") or row.payment_status)
@@ -10462,6 +10496,7 @@ def quick_estimates(request, estimate_id: int = None):
         updated = _site_admin_update_quick_estimate_items(
             row,
             item_text,
+            estimate_date=next_estimate_date,
             mobile=next_mobile,
             client_name=next_client_name,
             notes=next_notes,

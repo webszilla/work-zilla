@@ -262,7 +262,33 @@ function formatDateTimeLabel(value) {
   }).format(date);
 }
 
+function toDateInputValue(value) {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatDateInputLabel(value) {
+  if (!value) {
+    return "Select Date";
+  }
+  const [year, month, day] = String(value).split("-");
+  if (!year || !month || !day) {
+    return "Select Date";
+  }
+  return `${day}-${month}-${year}`;
+}
+
 const QUICK_ESTIMATES_COLLECTION_API = "/api/business-autopilot/quick-estimates/";
+const PAYMENT_PROOF_MAX_SIZE_BYTES = 1024 * 1024;
 
 function getEstimateCreatedByLabel(row) {
   const candidates = [
@@ -492,6 +518,7 @@ function dataUrlToFile(dataUrl, filename = "payment-proof.png") {
 
 function buildQuickEstimateEditPayload({
   editingEstimate,
+  editEstimateDate,
   editMobile,
   editClientName,
   editNotes,
@@ -506,6 +533,7 @@ function buildQuickEstimateEditPayload({
   return {
     __action: "PATCH",
     quick_estimate_id: editingEstimate.id,
+    estimate_date: editEstimateDate,
     mobile: editMobile,
     client_name: editClientName,
     notes: editNotes,
@@ -567,6 +595,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   const [prompt, setPrompt] = useState("");
   const [editMobile, setEditMobile] = useState("");
   const [editClientName, setEditClientName] = useState("");
+  const [editEstimateDate, setEditEstimateDate] = useState("");
   const [editMobileSearchOpen, setEditMobileSearchOpen] = useState(false);
   const [editNotes, setEditNotes] = useState("");
   const [editPaymentCompleted, setEditPaymentCompleted] = useState(false);
@@ -767,6 +796,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   function resetEditEstimate(nextNotice = "") {
     setEditingEstimate(null);
     setPrompt("");
+    setEditEstimateDate("");
     setEditMobile("");
     setEditClientName("");
     setEditNotes("");
@@ -792,6 +822,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       setPaymentProofUploading(true);
       setPaymentProofError("");
       const files = Array.from(fileList || []);
+      const oversizedFile = files.find((file) => Number(file?.size || 0) > PAYMENT_PROOF_MAX_SIZE_BYTES);
+      if (oversizedFile) {
+        setPaymentProofError("Each payment proof image must be 1 MB or smaller.");
+        return false;
+      }
       const imageFile = files.find((file) => String(file?.type || "").startsWith("image/")) || null;
       const dataUrls = await extractImageDataUrls(files);
       if (!dataUrls.length) {
@@ -891,7 +926,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       setPaymentProofError("Please upload, drag-drop, or paste the payment proof image.");
       return;
     }
-    setEditPaymentProofEntries(paymentProofDraftEntries);
+    const normalizedEntries = paymentProofDraftEntries.map((entry) => ({
+      ...entry,
+      paid_date: paymentProofPaidDate || String(entry?.paid_date || "").trim(),
+    }));
+    setEditPaymentProofEntries(normalizedEntries);
     setEditPaymentProofFile(paymentProofDraftFile);
     setEditPaymentMode("online");
     setEditPaymentCompleted(true);
@@ -1411,6 +1450,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
         estimateNumber: String(estimate.estimate_number || ""),
       });
       setPrompt(editableText);
+      setEditEstimateDate(toDateInputValue(estimate.created_at));
       setEditMobile(String(estimate.mobile || ""));
       setEditClientName(String(estimate.client_name || ""));
       setEditMobileSearchOpen(false);
@@ -1566,6 +1606,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       const editPayload = useEditFlow
         ? buildQuickEstimateEditPayload({
           editingEstimate,
+          editEstimateDate,
           editMobile,
           editClientName,
           editNotes,
@@ -1622,6 +1663,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
               ...row,
               mobile: editMobile,
               client_name: editClientName,
+              created_at: data?.quick_estimate?.created_at || row.created_at,
               notes: editNotes,
               payment_status: editPaymentCompleted ? "completed" : "non_completed",
               payment_mode: editPaymentCompleted ? editPaymentMode : "",
@@ -2042,6 +2084,20 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                         <small>{editDeliveryCompleted ? "Completed" : "Pending"}</small>
                       </span>
                     </label>
+                    <div className="ba-site-admin-chat__status-date-card">
+                      <span className="ba-site-admin-chat__status-switch-copy">
+                        <strong>Estimate Date</strong>
+                        <small>Date only</small>
+                      </span>
+                      <input
+                        type="date"
+                        className="form-control ba-site-admin-chat__status-date-input"
+                        value={editEstimateDate}
+                        onChange={(event) => setEditEstimateDate(event.target.value)}
+                        disabled={sending}
+                        aria-label="Estimate date"
+                      />
+                    </div>
                   </div>
                   {editPaymentCompleted ? (
                     <div className="ba-site-admin-chat__proof-summary">
@@ -2600,8 +2656,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                 </label>
               </div>
               <div className="col-12 col-md-4">
-                <label className={`ba-site-admin-chat__date-field ${paymentProofPaidDate ? "has-value" : ""}`}>
-                  <span className="ba-site-admin-chat__date-field-placeholder">Select Date</span>
+                <label className="ba-site-admin-chat__date-field">
+                  <span className={`ba-site-admin-chat__date-field-display ${paymentProofPaidDate ? "has-value" : ""}`}>
+                    <i className="bi bi-calendar3" aria-hidden="true" />
+                    <span>{formatDateInputLabel(paymentProofPaidDate)}</span>
+                  </span>
                   <input
                     type="date"
                     className="form-control ba-site-admin-chat__date-input"
@@ -2647,7 +2706,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                           </span>
                         </td>
                         <td>{`Proof ${index + 1}`}</td>
-                        <td>{entry?.paid_date || "-"}</td>
+                        <td>{formatDateInputLabel(paymentProofPaidDate || entry?.paid_date).replace("Select Date", "-")}</td>
                         <td>
                           <button
                             type="button"
