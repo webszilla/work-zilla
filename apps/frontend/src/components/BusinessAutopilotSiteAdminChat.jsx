@@ -1242,14 +1242,14 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setSettingsSaving(true);
     setNotice("");
     try {
+      const formData = new FormData();
+      formData.append("__action", "PATCH");
+      formData.append("headerText", qeHeaderText);
+      formData.append("templateSize", qeTemplateSize);
+      formData.append("paymentProofRetentionDays", qePaymentProofRetentionDays);
       const data = await apiFetch("/api/business-autopilot/quick-estimate-settings/", {
         method: "POST",
-        body: JSON.stringify({
-          __action: "PATCH",
-          headerText: qeHeaderText,
-          templateSize: qeTemplateSize,
-          paymentProofRetentionDays: qePaymentProofRetentionDays,
-        }),
+        body: formData,
       });
       setQeHeaderText(String(data?.settings?.headerText || ""));
       setQeTemplateSize(String(data?.settings?.templateSize || "4in").toLowerCase() === "3in" ? "3in" : "4in");

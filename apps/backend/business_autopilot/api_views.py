@@ -10611,11 +10611,19 @@ def quick_estimate_settings(request):
 
     resolved_method = request.method
     payload = None
+    content_type = str(request.META.get("CONTENT_TYPE") or "").lower()
+    is_form_encoded = request.method == "POST" and (
+        "multipart/form-data" in content_type
+        or "application/x-www-form-urlencoded" in content_type
+    )
     if request.method == "POST":
-        try:
-            payload = json.loads(request.body.decode("utf-8") or "{}")
-        except json.JSONDecodeError:
-            return JsonResponse({"detail": "invalid_json"}, status=400)
+        if is_form_encoded:
+            payload = request.POST.dict()
+        else:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
         override_method = str(request.META.get("HTTP_X_HTTP_METHOD_OVERRIDE") or "").strip().upper()
         body_action = str(payload.get("action") or payload.get("__action") or "").strip().upper()
         if body_action == "PATCH":
@@ -10629,10 +10637,13 @@ def quick_estimate_settings(request):
         return JsonResponse({"settings": _get_quick_estimate_settings(org)})
 
     if payload is None:
-        try:
-            payload = json.loads(request.body.decode("utf-8") or "{}")
-        except json.JSONDecodeError:
-            return JsonResponse({"detail": "invalid_json"}, status=400)
+        if is_form_encoded:
+            payload = request.POST.dict()
+        else:
+            try:
+                payload = json.loads(request.body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                return JsonResponse({"detail": "invalid_json"}, status=400)
 
     header_text = _normalize_quick_estimate_header_html(payload.get("headerText") or payload.get("header_text"))
     template_size = str(payload.get("templateSize") or payload.get("template_size") or "4in").strip().lower()

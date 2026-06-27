@@ -3345,6 +3345,45 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         self.assertIn('filename="QE-0012_3in.pdf"', response["Content-Disposition"])
         self.assertTrue(response.content.startswith(b"%PDF"))
 
+    def test_quick_estimate_settings_post_with_body_action_patch_saves_json_payload(self):
+        response = self.client.post(
+            "/api/business-autopilot/quick-estimate-settings/",
+            data=json.dumps(
+                {
+                    "__action": "PATCH",
+                    "headerText": "<p>Demo Header</p>",
+                    "templateSize": "3in",
+                    "paymentProofRetentionDays": "60",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        workspace = AccountsWorkspace.objects.get(organization=self.org)
+        settings_data = workspace.data.get("quickEstimateSettings") or {}
+        self.assertEqual(settings_data.get("templateSize"), "3in")
+        self.assertEqual(settings_data.get("paymentProofRetentionDays"), "60")
+        self.assertIn("Demo Header", settings_data.get("headerText") or "")
+
+    def test_quick_estimate_settings_post_with_formdata_patch_saves_qr_header(self):
+        response = self.client.post(
+            "/api/business-autopilot/quick-estimate-settings/",
+            data={
+                "__action": "PATCH",
+                "headerText": '<p>Gpay : 9092833701</p><img src="data:image/png;base64,AAA111" alt="QR" />',
+                "templateSize": "3in",
+                "paymentProofRetentionDays": "45",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        workspace = AccountsWorkspace.objects.get(organization=self.org)
+        settings_data = workspace.data.get("quickEstimateSettings") or {}
+        self.assertEqual(settings_data.get("templateSize"), "3in")
+        self.assertEqual(settings_data.get("paymentProofRetentionDays"), "45")
+        self.assertIn("data:image/png;base64,AAA111", settings_data.get("headerText") or "")
+
     def test_site_admin_reset_clears_pending_state(self):
         self.client.post(
             "/api/business-autopilot/site-admin/chat",
