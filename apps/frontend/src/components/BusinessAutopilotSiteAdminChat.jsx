@@ -430,6 +430,27 @@ function buildEstimateStatusNote(row) {
     .join(" • ");
 }
 
+function truncateStatusUpdaterName(value, limit = 10) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  return normalized.length <= limit ? normalized : `${normalized.slice(0, limit)}...`;
+}
+
+function getStatusUpdateMeta(row, key) {
+  const completed = String(row?.[`${key}_status`] || row?.[`${key}Status`] || "").trim().toLowerCase() === "completed";
+  const fallbackName = String(row?.[`${key}_verified_by_name`] || row?.[`${key}VerifiedByName`] || "").trim();
+  const latestName = String(row?.[`${key}_status_updated_by_name`] || row?.[`${key}StatusUpdatedByName`] || fallbackName).trim();
+  const count = Number(row?.[`${key}_status_updated_by_count`] || row?.[`${key}StatusUpdatedByCount`] || (latestName ? 1 : 0)) || 0;
+  return {
+    completed,
+    latestName,
+    shortName: truncateStatusUpdaterName(latestName, 10),
+    count: completed ? count : 0,
+  };
+}
+
 function getEstimatePaymentProofImage(row) {
   const values = [
     row?.payment_proof_image,
@@ -443,27 +464,39 @@ function getEstimatePaymentProofImage(row) {
   return String(match || "").trim();
 }
 
+function getEstimatePaymentProofImages(row) {
+  return normalizePaymentProofEntries(row)
+    .map((entry) => resolvePreviewImageUrl(entry?.image))
+    .filter(Boolean);
+}
+
 function getStatusProgressMeta(row) {
+  const paymentMeta = getStatusUpdateMeta(row, "payment");
+  const jobMeta = getStatusUpdateMeta(row, "job");
+  const deliveryMeta = getStatusUpdateMeta(row, "delivery");
   return [
     {
       key: "payment",
       icon: "bi-cash-coin",
-      completed: String(row?.payment_status || row?.paymentStatus || "").toLowerCase() === "completed",
-      tooltip: String(row?.payment_status || row?.paymentStatus || "").toLowerCase() === "completed" ? "Payment Completed" : "Payment Pending",
+      completed: paymentMeta.completed,
+      tooltip: paymentMeta.completed ? `Payment Completed: ${paymentMeta.shortName || "-"}` : "Payment Pending",
+      updaterCount: paymentMeta.count,
       previewImage: getEstimatePaymentProofImage(row),
     },
     {
       key: "job",
       icon: "bi-briefcase",
-      completed: String(row?.job_status || row?.jobStatus || "").toLowerCase() === "completed",
-      tooltip: String(row?.job_status || row?.jobStatus || "").toLowerCase() === "completed" ? "Job Completed" : "Job Pending",
+      completed: jobMeta.completed,
+      tooltip: jobMeta.completed ? `Job Completed: ${jobMeta.shortName || "-"}` : "Job Pending",
+      updaterCount: jobMeta.count,
       previewImage: "",
     },
     {
       key: "delivery",
       icon: "bi-truck",
-      completed: String(row?.delivery_status || row?.deliveryStatus || "").toLowerCase() === "completed",
-      tooltip: String(row?.delivery_status || row?.deliveryStatus || "").toLowerCase() === "completed" ? "Delivery Completed" : "Not Delivered",
+      completed: deliveryMeta.completed,
+      tooltip: deliveryMeta.completed ? `Delivery Completed: ${deliveryMeta.shortName || "-"}` : "Not Delivered",
+      updaterCount: deliveryMeta.count,
       previewImage: "",
     },
     {
@@ -471,6 +504,7 @@ function getStatusProgressMeta(row) {
       icon: "bi-journal-text",
       completed: Boolean(String(row?.notes || row?.note || "").trim()),
       tooltip: String(row?.notes || row?.note || "").trim() ? "View Notes" : "No Notes",
+      updaterCount: 0,
       previewImage: "",
     },
   ];
@@ -496,7 +530,7 @@ function resolvePreviewImageUrl(value) {
 }
 
 function getPaymentVerifierLabel(row) {
-  return String(row?.payment_verified_by_name || "").trim();
+  return String(row?.payment_status_updated_by_name || row?.payment_verified_by_name || "").trim();
 }
 
 function readFileAsDataUrl(file) {
@@ -611,10 +645,12 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   const [editJobCompleted, setEditJobCompleted] = useState(false);
   const [editDeliveryCompleted, setEditDeliveryCompleted] = useState(false);
   const [editPaymentProofEntries, setEditPaymentProofEntries] = useState([]);
+  const [editPaymentStatusUpdaterName, setEditPaymentStatusUpdaterName] = useState("");
   const [editPaymentProofFile, setEditPaymentProofFile] = useState(null);
   const [paymentModeModalOpen, setPaymentModeModalOpen] = useState(false);
   const [paymentProofModalOpen, setPaymentProofModalOpen] = useState(false);
   const [paymentProofDraftEntries, setPaymentProofDraftEntries] = useState([]);
+  const [paymentProofActiveIndex, setPaymentProofActiveIndex] = useState(0);
   const [paymentProofPaidDate, setPaymentProofPaidDate] = useState("");
   const [paymentProofDraftFile, setPaymentProofDraftFile] = useState(null);
   const [paymentProofError, setPaymentProofError] = useState("");
@@ -813,9 +849,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setEditJobCompleted(false);
     setEditDeliveryCompleted(false);
     setEditPaymentProofEntries([]);
+    setEditPaymentStatusUpdaterName("");
     setEditPaymentProofFile(null);
     setPaymentProofModalOpen(false);
     setPaymentProofDraftEntries([]);
+    setPaymentProofActiveIndex(0);
     setPaymentProofPaidDate("");
     setPaymentProofDraftFile(null);
     setPaymentProofError("");
@@ -845,6 +883,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
         ...prev,
         ...dataUrls.map((image) => ({ image, paid_date: paymentProofPaidDate })),
       ]);
+      setPaymentProofActiveIndex(0);
       setPaymentProofDraftFile(imageFile);
       return true;
     } catch (error) {
@@ -884,6 +923,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setEditPaymentMode("online");
     const nextEntries = Array.isArray(editPaymentProofEntries) ? editPaymentProofEntries : [];
     setPaymentProofDraftEntries(nextEntries);
+    setPaymentProofActiveIndex(0);
     setPaymentProofDraftFile(null);
     setPaymentProofError("");
     setPaymentProofPaidDate(String(nextEntries[0]?.paid_date || "").trim());
@@ -905,6 +945,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setEditPaymentProofEntries([]);
     setEditPaymentProofFile(null);
     setPaymentProofDraftEntries([]);
+    setPaymentProofActiveIndex(0);
     setPaymentProofDraftFile(null);
     setPaymentProofError("");
     setPaymentProofPaidDate("");
@@ -924,6 +965,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setPaymentProofModalOpen(false);
     const nextEntries = Array.isArray(editPaymentProofEntries) ? editPaymentProofEntries : [];
     setPaymentProofDraftEntries(nextEntries);
+    setPaymentProofActiveIndex(0);
     setPaymentProofDraftFile(null);
     setPaymentProofError("");
     setPaymentProofPaidDate(String(nextEntries[0]?.paid_date || "").trim());
@@ -953,19 +995,18 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       return;
     }
     setEditPaymentCompleted(false);
-    setEditPaymentMode("");
-    setEditPaymentProofEntries([]);
     setEditPaymentProofFile(null);
-    setPaymentProofDraftEntries([]);
+    setEditPaymentMode(String(editPaymentMode || "").trim().toLowerCase() || "online");
+    setPaymentProofDraftEntries(Array.isArray(editPaymentProofEntries) ? editPaymentProofEntries : []);
     setPaymentProofDraftFile(null);
     setPaymentModeModalOpen(false);
     setPaymentProofModalOpen(false);
     setPaymentProofError("");
-    setPaymentProofPaidDate("");
+    setPaymentProofPaidDate(String(editPaymentProofEntries?.[0]?.paid_date || "").trim());
     setNotice("");
   }
 
-  function openStatusPreview(event, image, tooltip) {
+  function openStatusPreview(event, images, tooltip) {
     if (typeof window === "undefined") {
       return;
     }
@@ -977,15 +1018,15 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       left: Math.max(12, Math.min(window.innerWidth - tooltipWidth - 12, rect.left + (rect.width / 2) - (tooltipWidth / 2))),
       width: tooltipWidth,
     });
-    const resolvedImage = resolvePreviewImageUrl(image);
-    if (!resolvedImage) {
+    const resolvedImages = (Array.isArray(images) ? images : [images]).map((image) => resolvePreviewImageUrl(image)).filter(Boolean);
+    if (!resolvedImages.length) {
       return;
     }
     setStatusPreview({
-      image: resolvedImage,
+      images: resolvedImages,
       tooltip: tooltip || "",
-      top: Math.max(16, Math.min(window.innerHeight - 220, rect.top - 18)),
-      left: Math.max(16, Math.min(window.innerWidth - 180, rect.right + 12)),
+      top: Math.max(16, Math.min(window.innerHeight - 260, rect.top - 18)),
+      left: Math.max(16, Math.min(window.innerWidth - 240, rect.right + 12)),
     });
   }
 
@@ -994,33 +1035,34 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setStatusTooltip(null);
   }
 
-  async function fetchEstimatePaymentProofImage(estimateId) {
+  async function fetchEstimatePaymentProofImages(estimateId) {
     if (!estimateId) {
-      return "";
+      return [];
     }
     try {
       const data = await apiFetch(`/api/business-autopilot/quick-estimates/${estimateId}/`);
       const estimate = data?.quick_estimate || null;
       if (!estimate) {
-        return "";
+        return [];
       }
       upsertEstimateRow(estimate);
-      return getEstimatePaymentProofImage(estimate);
+      return getEstimatePaymentProofImages(estimate);
     } catch {
-      return "";
+      return [];
     }
   }
 
   async function handleStatusIconHover(event, row, item) {
-    openStatusPreview(event, item.previewImage, item.tooltip);
-    if (item.key !== "payment" || item.previewImage || !item.completed) {
+    const previewImages = item.key === "payment" ? getEstimatePaymentProofImages(row) : [];
+    openStatusPreview(event, previewImages, item.tooltip);
+    if (item.key !== "payment" || previewImages.length || !item.completed) {
       return;
     }
-    const fetchedImage = await fetchEstimatePaymentProofImage(row?.id);
-    if (!fetchedImage) {
+    const fetchedImages = await fetchEstimatePaymentProofImages(row?.id);
+    if (!fetchedImages.length) {
       return;
     }
-    openStatusPreview(event, fetchedImage, item.tooltip);
+    openStatusPreview(event, fetchedImages, item.tooltip);
   }
 
   async function handleStatusIconClick(row, item) {
@@ -1032,19 +1074,20 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       });
       return;
     }
-    if (item.previewImage) {
-      openStatusPreviewModal(item.previewImage, item.tooltip);
+    const previewImages = item.key === "payment" ? getEstimatePaymentProofImages(row) : [];
+    if (previewImages.length) {
+      openStatusPreviewModal(previewImages[0], item.tooltip);
       return;
     }
     if (item.key !== "payment" || !item.completed) {
       return;
     }
-    const fetchedImage = await fetchEstimatePaymentProofImage(row?.id);
-    if (!fetchedImage) {
+    const fetchedImages = await fetchEstimatePaymentProofImages(row?.id);
+    if (!fetchedImages.length) {
       setNotice("Payment proof image is not available for this estimate.");
       return;
     }
-    openStatusPreviewModal(fetchedImage, item.tooltip);
+    openStatusPreviewModal(fetchedImages[0], item.tooltip);
   }
 
   function openStatusPreviewModal(image, tooltip) {
@@ -1468,6 +1511,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       setEditJobCompleted(String(estimate.job_status || "").toLowerCase() === "completed");
       setEditDeliveryCompleted(String(estimate.delivery_status || "").toLowerCase() === "completed");
       setEditPaymentProofEntries(normalizePaymentProofEntries(estimate));
+      setEditPaymentStatusUpdaterName(String(estimate.payment_status_updated_by_name || estimate.payment_verified_by_name || "").trim());
       setEditPaymentProofFile(null);
       setPaymentProofDraftEntries(normalizePaymentProofEntries(estimate));
       setPaymentProofDraftFile(null);
@@ -2095,7 +2139,6 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                     <div className="ba-site-admin-chat__status-date-card">
                       <span className="ba-site-admin-chat__status-switch-copy">
                         <strong>Estimate Date</strong>
-                        <small>Date only</small>
                       </span>
                       <input
                         type="date"
@@ -2344,8 +2387,13 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                                     role="button"
                                     tabIndex={0}
                                   >
-                                    <i className={`bi ${item.icon}`} aria-hidden="true" />
-                                  </span>
+                                      <i className={`bi ${item.icon}`} aria-hidden="true" />
+                                      {item.updaterCount > 1 ? (
+                                        <span className="ba-site-admin-chat__status-icon-count" aria-hidden="true">
+                                          {item.updaterCount}
+                                        </span>
+                                      ) : null}
+                                    </span>
                                 ))}
                               </div>
                               <small className="ba-site-admin-chat__status-note">{buildEstimateStatusNote(row)}</small>
@@ -2650,7 +2698,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
               aria-label="Payment proof upload area"
             >
               {paymentProofDraftEntries.length ? (
-                <img src={paymentProofDraftEntries[0]?.image} alt="Payment proof preview" className="ba-site-admin-chat__proof-preview" />
+                <img
+                  src={paymentProofDraftEntries[Math.min(paymentProofActiveIndex, Math.max(paymentProofDraftEntries.length - 1, 0))]?.image}
+                  alt="Payment proof preview"
+                  className="ba-site-admin-chat__proof-preview"
+                />
               ) : (
                 <div className="ba-site-admin-chat__proof-placeholder">
                   <i className="bi bi-image" aria-hidden="true" />
@@ -2670,7 +2722,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                 <label className="ba-site-admin-chat__date-field">
                   <span className={`ba-site-admin-chat__date-field-display ${paymentProofPaidDate ? "has-value" : ""}`}>
                     <i className="bi bi-calendar3" aria-hidden="true" />
-                    <span>{formatDateInputLabel(paymentProofPaidDate)}</span>
+                    <span>{paymentProofPaidDate ? formatDateInputLabel(paymentProofPaidDate) : "Select Date"}</span>
                   </span>
                   <input
                     type="date"
@@ -2686,7 +2738,10 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                   <button
                     type="button"
                     className="btn btn-outline-light ba-site-admin-chat__proof-btn w-100"
-                    onClick={() => setPaymentProofDraftEntries([])}
+                    onClick={() => {
+                      setPaymentProofDraftEntries([]);
+                      setPaymentProofActiveIndex(0);
+                    }}
                     disabled={paymentProofUploading}
                   >
                     Clear All
@@ -2701,7 +2756,8 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                     <tr>
                       <th style={{ width: 72 }}>Preview</th>
                       <th>Name</th>
-                      <th style={{ width: 140 }}>Paid Date</th>
+                      <th style={{ width: 160 }}>Paid Date</th>
+                      <th style={{ width: 150 }}>Status Update By</th>
                       <th style={{ width: 96 }}>Action</th>
                     </tr>
                   </thead>
@@ -2710,19 +2766,36 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                       <tr key={`${index}-${String(entry?.image || "").slice(0, 24)}`}>
                         <td>
                           <span className="ba-site-admin-chat__proof-thumb">
-                            <img src={entry?.image} alt={`Payment proof ${index + 1}`} className="ba-site-admin-chat__proof-thumb-image" />
+                            <button
+                              type="button"
+                              className={`ba-site-admin-chat__proof-thumb-button ${paymentProofActiveIndex === index ? "is-active" : ""}`}
+                              onClick={() => setPaymentProofActiveIndex(index)}
+                              aria-label={`Preview payment proof ${index + 1}`}
+                            >
+                              <img src={entry?.image} alt={`Payment proof ${index + 1}`} className="ba-site-admin-chat__proof-thumb-image" />
+                            </button>
                             <span className="ba-site-admin-chat__proof-thumb-hover">
-                              <img src={entry?.image} alt={`Payment proof ${index + 1} enlarged preview`} />
+                              {paymentProofDraftEntries.map((previewEntry, previewIndex) => (
+                                <img
+                                  key={`${previewIndex}-${String(previewEntry?.image || "").slice(0, 24)}`}
+                                  src={previewEntry?.image}
+                                  alt={`Payment proof ${previewIndex + 1} enlarged preview`}
+                                />
+                              ))}
                             </span>
                           </span>
                         </td>
                         <td>{`Proof ${index + 1}`}</td>
-                        <td>{formatDateInputLabel(paymentProofPaidDate || entry?.paid_date).replace("Select Date", "-")}</td>
+                        <td>{formatDateInputLabel(paymentProofPaidDate || entry?.paid_date)}</td>
+                        <td>{truncateStatusUpdaterName(editPaymentStatusUpdaterName, 10) || "-"}</td>
                         <td>
                           <button
                             type="button"
                             className="btn btn-outline-danger btn-sm"
-                            onClick={() => setPaymentProofDraftEntries((prev) => prev.filter((_, imageIndex) => imageIndex !== index))}
+                            onClick={() => {
+                              setPaymentProofDraftEntries((prev) => prev.filter((_, imageIndex) => imageIndex !== index));
+                              setPaymentProofActiveIndex((prev) => (prev > 0 && prev >= index ? prev - 1 : 0));
+                            }}
                             disabled={paymentProofUploading}
                           >
                             Delete

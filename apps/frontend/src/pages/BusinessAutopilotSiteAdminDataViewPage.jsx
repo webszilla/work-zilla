@@ -86,6 +86,14 @@ function normalizePaymentProofEntries(row) {
   return single ? [{ image: single, paid_date: "" }] : [];
 }
 
+function truncateStatusUpdaterName(value, limit = 10) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  return normalized.length <= limit ? normalized : `${normalized.slice(0, limit)}...`;
+}
+
 function SiteAdminHeaderTabs() {
   const location = useLocation();
   const pathname = String(location.pathname || "");
@@ -245,6 +253,7 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
   const [paymentModalRow, setPaymentModalRow] = useState(null);
   const [paymentModalMode, setPaymentModalMode] = useState("");
   const [paymentProofDraftEntries, setPaymentProofDraftEntries] = useState([]);
+  const [paymentProofActiveIndex, setPaymentProofActiveIndex] = useState(0);
   const [paymentProofPaidDate, setPaymentProofPaidDate] = useState("");
   const [paymentProofError, setPaymentProofError] = useState("");
   const [paymentSaving, setPaymentSaving] = useState(false);
@@ -279,6 +288,7 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
         ...prev,
         ...imageData.map((image) => ({ image, paid_date: paymentProofPaidDate })),
       ]);
+      setPaymentProofActiveIndex(0);
       setPaymentProofError("");
       return true;
     } catch (error) {
@@ -400,6 +410,7 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
     setPaymentModalMode(String(row?.payment_mode || "").trim().toLowerCase() || "cash");
     const nextEntries = normalizePaymentProofEntries(row);
     setPaymentProofDraftEntries(nextEntries);
+    setPaymentProofActiveIndex(0);
     setPaymentProofError("");
     setPaymentProofPaidDate(String(nextEntries[0]?.paid_date || "").trim());
   }
@@ -411,6 +422,7 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
     setPaymentModalRow(null);
     setPaymentModalMode("");
     setPaymentProofDraftEntries([]);
+    setPaymentProofActiveIndex(0);
     setPaymentProofError("");
     setPaymentProofPaidDate("");
   }
@@ -1320,7 +1332,11 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
                         aria-label="Payment proof upload area"
                       >
                         {paymentProofDraftEntries.length ? (
-                          <img src={paymentProofDraftEntries[0]?.image} alt="Payment proof preview" className="ba-site-admin-chat__proof-preview" />
+                          <img
+                            src={paymentProofDraftEntries[Math.min(paymentProofActiveIndex, Math.max(paymentProofDraftEntries.length - 1, 0))]?.image}
+                            alt="Payment proof preview"
+                            className="ba-site-admin-chat__proof-preview"
+                          />
                         ) : (
                           <div className="ba-site-admin-chat__proof-placeholder">
                             <i className="bi bi-image" aria-hidden="true" />
@@ -1353,7 +1369,10 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
                             <button
                               type="button"
                               className="btn btn-outline-light ba-site-admin-chat__proof-btn w-100"
-                              onClick={() => setPaymentProofDraftEntries([])}
+                              onClick={() => {
+                                setPaymentProofDraftEntries([]);
+                                setPaymentProofActiveIndex(0);
+                              }}
                               disabled={paymentSaving}
                             >
                               Clear All
@@ -1369,6 +1388,7 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
                                 <th style={{ width: 72 }}>Preview</th>
                                 <th>Name</th>
                                 <th style={{ width: 140 }}>Paid Date</th>
+                                <th style={{ width: 150 }}>Status Update By</th>
                                 <th style={{ width: 96 }}>Action</th>
                               </tr>
                             </thead>
@@ -1377,19 +1397,36 @@ export default function BusinessAutopilotSiteAdminDataViewPage() {
                                 <tr key={`${index}-${String(entry?.image || "").slice(0, 24)}`}>
                                   <td>
                                     <span className="ba-site-admin-chat__proof-thumb">
-                                      <img src={entry?.image} alt={`Payment proof ${index + 1}`} className="ba-site-admin-chat__proof-thumb-image" />
+                                      <button
+                                        type="button"
+                                        className={`ba-site-admin-chat__proof-thumb-button ${paymentProofActiveIndex === index ? "is-active" : ""}`}
+                                        onClick={() => setPaymentProofActiveIndex(index)}
+                                        aria-label={`Preview payment proof ${index + 1}`}
+                                      >
+                                        <img src={entry?.image} alt={`Payment proof ${index + 1}`} className="ba-site-admin-chat__proof-thumb-image" />
+                                      </button>
                                       <span className="ba-site-admin-chat__proof-thumb-hover">
-                                        <img src={entry?.image} alt={`Payment proof ${index + 1} enlarged preview`} />
+                                        {paymentProofDraftEntries.map((previewEntry, previewIndex) => (
+                                          <img
+                                            key={`${previewIndex}-${String(previewEntry?.image || "").slice(0, 24)}`}
+                                            src={previewEntry?.image}
+                                            alt={`Payment proof ${previewIndex + 1} enlarged preview`}
+                                          />
+                                        ))}
                                       </span>
                                     </span>
                                   </td>
                                   <td>{`Proof ${index + 1}`}</td>
-                                  <td>{entry?.paid_date || "-"}</td>
+                                  <td>{entry?.paid_date || "Select Date"}</td>
+                                  <td>{truncateStatusUpdaterName(paymentModalRow?.payment_status_updated_by_name || paymentModalRow?.payment_verified_by_name, 10) || "-"}</td>
                                   <td>
                                     <button
                                       type="button"
                                       className="btn btn-outline-danger btn-sm"
-                                      onClick={() => setPaymentProofDraftEntries((prev) => prev.filter((_, imageIndex) => imageIndex !== index))}
+                                      onClick={() => {
+                                        setPaymentProofDraftEntries((prev) => prev.filter((_, imageIndex) => imageIndex !== index));
+                                        setPaymentProofActiveIndex((prev) => (prev > 0 && prev >= index ? prev - 1 : 0));
+                                      }}
                                       disabled={paymentSaving}
                                     >
                                       Delete

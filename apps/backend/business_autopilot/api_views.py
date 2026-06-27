@@ -5726,6 +5726,49 @@ def _serialize_quick_estimate_payment_proof_images(value):
     return json.dumps(rows) if rows else ""
 
 
+def _build_quick_estimate_status_update_summary(row, status_key, current_actor=None):
+    field_name = f"{status_key}_status"
+    target_value = str(getattr(row, field_name, "") or "").strip().lower()
+    names = []
+    seen = set()
+
+    def add_name(value):
+        normalized = str(value or "").strip()
+        if not normalized:
+            return
+        lookup = normalized.lower()
+        if lookup in seen:
+            return
+        seen.add(lookup)
+        names.append(normalized)
+
+    history_rows = (
+        QuickEstimateHistory.objects
+        .filter(quick_estimate=row, action=QuickEstimateHistory.ACTION_UPDATED)
+        .select_related("actor")
+        .order_by("created_at", "id")
+    )
+    for history_row in history_rows:
+        snapshot = history_row.snapshot if isinstance(history_row.snapshot, dict) else {}
+        before = snapshot.get("before") if isinstance(snapshot.get("before"), dict) else {}
+        after = snapshot.get("after") if isinstance(snapshot.get("after"), dict) else {}
+        before_value = str(before.get(field_name) or "").strip().lower()
+        after_value = str(after.get(field_name) or "").strip().lower()
+        if before_value == after_value:
+            continue
+        if after_value != QuickEstimate.PROGRESS_COMPLETED:
+            continue
+        add_name(_get_org_user_display_name(getattr(history_row, "actor", None)))
+
+    add_name(_get_org_user_display_name(current_actor))
+    latest_name = names[-1] if names else ""
+    return {
+        "count": len(names) if target_value == QuickEstimate.PROGRESS_COMPLETED else 0,
+        "latest_name": latest_name if target_value == QuickEstimate.PROGRESS_COMPLETED else "",
+        "names": names if target_value == QuickEstimate.PROGRESS_COMPLETED else [],
+    }
+
+
 def _serialize_quick_estimate(row, include_preview=False, actor=None):
     row = _purge_expired_quick_estimate_payment_proof(row)
     created_by = getattr(row, "created_by", None) or getattr(getattr(row, "organization", None), "owner", None)
@@ -5734,6 +5777,9 @@ def _serialize_quick_estimate(row, include_preview=False, actor=None):
     payment_verified_by = getattr(row, "payment_verified_by", None)
     job_verified_by = getattr(row, "job_verified_by", None)
     delivery_verified_by = getattr(row, "delivery_verified_by", None)
+    payment_update_summary = _build_quick_estimate_status_update_summary(row, "payment", current_actor=payment_verified_by)
+    job_update_summary = _build_quick_estimate_status_update_summary(row, "job", current_actor=job_verified_by)
+    delivery_update_summary = _build_quick_estimate_status_update_summary(row, "delivery", current_actor=delivery_verified_by)
     payment_proof_entries = _normalize_quick_estimate_payment_proof_entries(getattr(row, "payment_proof_image", ""))
     payment_proof_images = [entry.get("image") for entry in payment_proof_entries if str(entry.get("image") or "").strip()]
     payload = {
@@ -5759,6 +5805,15 @@ def _serialize_quick_estimate(row, include_preview=False, actor=None):
         "payment_verified_by_name": _get_org_user_display_name(payment_verified_by),
         "job_verified_by_name": _get_org_user_display_name(job_verified_by),
         "delivery_verified_by_name": _get_org_user_display_name(delivery_verified_by),
+        "payment_status_updated_by_count": payment_update_summary["count"],
+        "payment_status_updated_by_name": payment_update_summary["latest_name"],
+        "payment_status_updated_by_names": payment_update_summary["names"],
+        "job_status_updated_by_count": job_update_summary["count"],
+        "job_status_updated_by_name": job_update_summary["latest_name"],
+        "job_status_updated_by_names": job_update_summary["names"],
+        "delivery_status_updated_by_count": delivery_update_summary["count"],
+        "delivery_status_updated_by_name": delivery_update_summary["latest_name"],
+        "delivery_status_updated_by_names": delivery_update_summary["names"],
         "customer_id": row.customer_id or "",
         "created_by_id": getattr(row, "created_by_id", None) or getattr(getattr(row, "organization", None), "owner_id", None),
         "created_by_name": _get_org_user_display_name(created_by),
@@ -10417,8 +10472,7 @@ def quick_estimates(request, estimate_id: int = None):
             row.payment_proof_image = ""
             row.payment_verified_by = request.user
         else:
-            row.payment_proof_image = ""
-            row.payment_mode = ""
+            row.payment_proof_image = previous_snapshot["payment_proof_image"]
             row.payment_verified_by = None
         row.save(update_fields=["payment_status", "payment_mode", "payment_proof_image", "payment_verified_by", "updated_at"])
         _record_quick_estimate_history(
