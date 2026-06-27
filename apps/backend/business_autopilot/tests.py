@@ -1,3 +1,4 @@
+import base64
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
@@ -3383,6 +3384,31 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         self.assertEqual(settings_data.get("templateSize"), "3in")
         self.assertEqual(settings_data.get("paymentProofRetentionDays"), "45")
         self.assertIn("data:image/png;base64,AAA111", settings_data.get("headerText") or "")
+
+    def test_quick_estimate_settings_post_replaces_header_image_tokens_with_uploaded_media_urls(self):
+        uploaded = SimpleUploadedFile(
+            "qr.png",
+            base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9sAAAAASUVORK5CYII="),
+            content_type="image/png",
+        )
+
+        response = self.client.post(
+            "/api/business-autopilot/quick-estimate-settings/",
+            data={
+                "__action": "PATCH",
+                "headerText": '<p>Gpay : 9092833701</p><img src="__WZ_QE_HEADER_IMAGE_1__" alt="QR" />',
+                "templateSize": "3in",
+                "paymentProofRetentionDays": "45",
+                "header_image_tokens": "__WZ_QE_HEADER_IMAGE_1__",
+                "header_image_files": uploaded,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        workspace = AccountsWorkspace.objects.get(organization=self.org)
+        settings_data = workspace.data.get("quickEstimateSettings") or {}
+        self.assertIn("/media/business_autopilot/quick_estimate_headers/", settings_data.get("headerText") or "")
+        self.assertNotIn("__WZ_QE_HEADER_IMAGE_1__", settings_data.get("headerText") or "")
 
     def test_site_admin_reset_clears_pending_state(self):
         self.client.post(

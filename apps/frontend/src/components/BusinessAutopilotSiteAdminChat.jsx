@@ -419,9 +419,15 @@ function matchEstimateFilter(row, filterKey) {
 }
 
 function buildEstimateStatusNote(row) {
+  const paymentMode = String(row?.payment_mode || row?.paymentMode || "").trim().toLowerCase();
+  const paymentTitle = paymentMode === "online"
+    ? "Online Payment"
+    : paymentMode === "cash"
+      ? "Cash Payment"
+      : "Payment";
   const statuses = [
     { title: "Job", value: row?.job_status || row?.jobStatus },
-    { title: "Payment", value: row?.payment_status || row?.paymentStatus },
+    { title: paymentTitle, value: row?.payment_status || row?.paymentStatus },
     { title: "Delivery", value: row?.delivery_status || row?.deliveryStatus },
   ];
   return statuses
@@ -556,6 +562,42 @@ function dataUrlToFile(dataUrl, filename = "payment-proof.png") {
   }
   const extension = mimeType.split("/")[1] || "png";
   return new File([bytes], filename.endsWith(`.${extension}`) ? filename : `${filename}.${extension}`, { type: mimeType });
+}
+
+function buildQuickEstimateSettingsFormData({
+  headerText,
+  templateSize,
+  paymentProofRetentionDays,
+}) {
+  const formData = new FormData();
+  formData.append("__action", "PATCH");
+  formData.append("templateSize", templateSize);
+  formData.append("paymentProofRetentionDays", paymentProofRetentionDays);
+  if (typeof window === "undefined" || typeof window.DOMParser !== "function") {
+    formData.append("headerText", String(headerText || ""));
+    return formData;
+  }
+  const parser = new window.DOMParser();
+  const doc = parser.parseFromString(String(headerText || ""), "text/html");
+  const images = Array.from(doc.querySelectorAll("img"));
+  let uploadIndex = 0;
+  images.forEach((image) => {
+    const src = String(image.getAttribute("src") || "").trim();
+    if (!src.startsWith("data:image/")) {
+      return;
+    }
+    const file = dataUrlToFile(src, `qe-header-image-${uploadIndex + 1}.png`);
+    if (!file) {
+      return;
+    }
+    const token = `__WZ_QE_HEADER_IMAGE_${Date.now()}_${uploadIndex}__`;
+    formData.append("header_image_files", file);
+    formData.append("header_image_tokens", token);
+    image.setAttribute("src", token);
+    uploadIndex += 1;
+  });
+  formData.append("headerText", String(doc.body?.innerHTML || "").trim());
+  return formData;
 }
 
 function buildQuickEstimateEditPayload({
@@ -1242,11 +1284,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setSettingsSaving(true);
     setNotice("");
     try {
-      const formData = new FormData();
-      formData.append("__action", "PATCH");
-      formData.append("headerText", qeHeaderText);
-      formData.append("templateSize", qeTemplateSize);
-      formData.append("paymentProofRetentionDays", qePaymentProofRetentionDays);
+      const formData = buildQuickEstimateSettingsFormData({
+        headerText: qeHeaderText,
+        templateSize: qeTemplateSize,
+        paymentProofRetentionDays: qePaymentProofRetentionDays,
+      });
       const data = await apiFetch("/api/business-autopilot/quick-estimate-settings/", {
         method: "POST",
         body: formData,
@@ -1254,7 +1296,6 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       setQeHeaderText(String(data?.settings?.headerText || ""));
       setQeTemplateSize(String(data?.settings?.templateSize || "4in").toLowerCase() === "3in" ? "3in" : "4in");
       setQePaymentProofRetentionDays(String(data?.settings?.paymentProofRetentionDays || "45") === "60" ? "60" : "45");
-      setSettingsOpen(false);
       setNotice(String(data?.message || "Quick Estimate settings saved."));
       const previewEstimateIds = Array.from(new Set(
         messages
@@ -1329,6 +1370,42 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     document.body.appendChild(link);
     link.click();
     link.remove();
+  }
+
+  async function handleCopyEstimatePublicUrl(row) {
+    const publicUrl = String(row?.public_preview_url || "").trim();
+    if (!publicUrl) {
+      setNotice("Public estimate link is not available for this estimate.");
+      return;
+    }
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(publicUrl);
+        setNotice("Estimate public link copied.");
+        return;
+      } catch {
+        // Fall through to manual copy helper.
+      }
+    }
+    if (typeof window === "undefined") {
+      setNotice(publicUrl);
+      return;
+    }
+    const helper = document.createElement("textarea");
+    helper.value = publicUrl;
+    helper.setAttribute("readonly", "");
+    helper.style.position = "fixed";
+    helper.style.opacity = "0";
+    document.body.appendChild(helper);
+    helper.select();
+    try {
+      document.execCommand("copy");
+      setNotice("Estimate public link copied.");
+    } catch {
+      setNotice(publicUrl);
+    } finally {
+      helper.remove();
+    }
   }
 
   function openAssignModal(estimateId) {
@@ -2008,7 +2085,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
             </div>
 
             <form ref={composerBlockRef} className="ba-assistant__composer" onSubmit={handleSubmit}>
-              {notice ? <div className="ba-assistant__setup-note">{notice}</div> : null}
+              {notice && !settingsOpen ? <div className="ba-assistant__setup-note">{notice}</div> : null}
               {editingEstimate ? (
                 <>
                   <div className="ba-site-admin-chat__edit-grid">
@@ -2345,7 +2422,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                               <strong>{formatDateLabel(row.created_at)}</strong>
                               <small className="ba-site-admin-chat__created-by-text" title={`Created By: ${getEstimateCreatedByDisplay(row).fullName}`}>
                                 <span>Created By:</span>{" "}
-                                <span className="ba-site-admin-chat__created-by-name">{getEstimateCreatedByDisplay(row).shortName}</span>
+                                <span className="ba-site-admin-chat__created-by-name">{getEstimateCreatedByDisplay(row).fullName || "-"}</span>
                               </small>
                               <button
                                 type="button"
@@ -2440,6 +2517,15 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                               </button>
                               <button
                                 type="button"
+                                className="btn btn-sm btn-outline-secondary saas-org-icon-btn ba-site-admin-chat__action-btn ba-site-admin-chat__action-btn--copy-link"
+                                onClick={() => handleCopyEstimatePublicUrl(row)}
+                                title="Copy Public Estimate Link"
+                                aria-label="Copy Public Estimate Link"
+                              >
+                                <i className="bi bi-link-45deg" aria-hidden="true" />
+                              </button>
+                              <button
+                                type="button"
                                 className="btn btn-sm btn-outline-secondary saas-org-icon-btn ba-site-admin-chat__action-btn ba-site-admin-chat__action-btn--history"
                                 onClick={() => handleViewHistory(row)}
                                 title="Estimate History"
@@ -2508,13 +2594,13 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
           </aside>
         </div>
       </div>
-      {statusPreview?.image ? (
+      {statusPreview?.images?.[0] ? (
         <div
           className="ba-site-admin-chat__status-preview ba-site-admin-chat__status-preview--floating"
           style={{ top: `${statusPreview.top}px`, left: `${statusPreview.left}px` }}
           role="presentation"
         >
-          <img src={statusPreview.image} alt={statusPreview.tooltip || "Payment proof preview"} className="ba-site-admin-chat__status-preview-image" />
+          <img src={statusPreview.images[0]} alt={statusPreview.tooltip || "Payment proof preview"} className="ba-site-admin-chat__status-preview-image" />
         </div>
       ) : null}
       {statusTooltip?.text ? (
@@ -2584,6 +2670,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
               <span>Character limit: 200</span>
               <strong>{qeHeaderTextCount}/200</strong>
             </div>
+            {notice ? <div className="ba-assistant__setup-note ba-site-admin-chat__settings-notice">{notice}</div> : null}
             <div className="ba-site-admin-chat__modal-actions">
               <button
                 type="button"
@@ -2729,6 +2816,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                     className="form-control ba-site-admin-chat__date-input"
                     value={paymentProofPaidDate}
                     onChange={(event) => setPaymentProofPaidDate(event.target.value)}
+                    placeholder="Select Date"
                     aria-label="Paid date"
                   />
                 </label>

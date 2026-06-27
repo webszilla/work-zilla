@@ -5323,6 +5323,30 @@ def _build_quick_estimate_public_preview_url(row):
     return f"{_get_public_site_base_url()}/api/business-autopilot/qe/{token}/"
 
 
+def _store_quick_estimate_header_images(org, header_text, files, tokens):
+    normalized_html = str(header_text or "")
+    uploaded_files = list(files or [])
+    uploaded_tokens = [str(token or "").strip() for token in tokens or []]
+    if not normalized_html or not uploaded_files or not uploaded_tokens:
+        return normalized_html
+    for token, uploaded in zip(uploaded_tokens, uploaded_files):
+        safe_token = str(token or "").strip()
+        if not safe_token or safe_token not in normalized_html or not uploaded:
+            continue
+        content_type = str(getattr(uploaded, "content_type", "") or "").strip().lower()
+        extension = "png"
+        if "/" in content_type:
+            extension = re.sub(r"[^a-z0-9]+", "", content_type.split("/", 1)[1]) or "png"
+        elif "." in str(getattr(uploaded, "name", "") or ""):
+            extension = re.sub(r"[^a-z0-9]+", "", str(uploaded.name).rsplit(".", 1)[-1].lower()) or "png"
+        storage_name = default_storage.save(
+            f"business_autopilot/quick_estimate_headers/{int(getattr(org, 'id', 0) or 0)}/{secrets.token_hex(12)}.{extension}",
+            ContentFile(uploaded.read()),
+        )
+        normalized_html = normalized_html.replace(safe_token, default_storage.url(storage_name))
+    return normalized_html
+
+
 def _get_quick_estimate_settings(org):
     workspace = _get_accounts_workspace(org)
     data = _normalize_accounts_workspace(workspace.data)
@@ -5836,6 +5860,7 @@ def _serialize_quick_estimate(row, include_preview=False, actor=None):
         "created_at": row.created_at.isoformat() if row.created_at else "",
         "updated_at": row.updated_at.isoformat() if row.updated_at else "",
         "whatsapp_url": _build_quick_estimate_whatsapp_url(row),
+        "public_preview_url": _build_quick_estimate_public_preview_url(row),
         "thermal_preview_url": f"/api/business-autopilot/quick-estimates/{row.id}/thermal-preview/",
         "thermal_preview_pdf_url": f"/api/business-autopilot/quick-estimates/{row.id}/thermal-preview/?format=pdf",
         "can_delete_cancelled": _can_delete_cancelled_quick_estimate(actor, row.organization) if actor else False,
@@ -10646,6 +10671,13 @@ def quick_estimate_settings(request):
                 return JsonResponse({"detail": "invalid_json"}, status=400)
 
     header_text = _normalize_quick_estimate_header_html(payload.get("headerText") or payload.get("header_text"))
+    if is_form_encoded:
+        header_text = _store_quick_estimate_header_images(
+            org,
+            header_text,
+            request.FILES.getlist("header_image_files"),
+            request.POST.getlist("header_image_tokens"),
+        )
     template_size = str(payload.get("templateSize") or payload.get("template_size") or "4in").strip().lower()
     payment_proof_retention_days = str(
         payload.get("paymentProofRetentionDays")
