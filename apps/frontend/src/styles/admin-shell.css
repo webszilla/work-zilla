@@ -2146,34 +2146,11 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 }
 
 .ba-site-admin-chat__proof-thumb-hover {
-  position: absolute;
-  left: calc(100% + 14px);
-  top: 0;
-  width: 200px !important;
-  max-width: 200px !important;
-  height: auto !important;
-  padding: 8px;
-  border-radius: 8px;
-  border: 3px solid var(--color-primary, #22c55e);
-  background: transparent;
-  box-shadow: 0 22px 48px rgba(15, 23, 42, 0.24);
-  opacity: 0;
-  pointer-events: none;
-  visibility: hidden;
-  transition: opacity 160ms ease, visibility 160ms ease;
-  z-index: 30;
-  overflow: hidden;
+  display: none !important;
 }
 
 .ba-site-admin-chat__proof-thumb-hover img {
-  display: block;
-  width: 200px !important;
-  max-width: 200px !important;
-  height: auto !important;
-  border-radius: 5px;
-  object-fit: contain;
-  background: transparent;
-  margin-top: 8px;
+  display: none !important;
 }
 
 .ba-site-admin-chat__proof-thumb-hover img:first-child {
@@ -2182,8 +2159,7 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 
 .ba-site-admin-chat__proof-thumb:hover .ba-site-admin-chat__proof-thumb-hover,
 .ba-site-admin-chat__proof-thumb:focus-within .ba-site-admin-chat__proof-thumb-hover {
-  opacity: 1;
-  visibility: visible;
+  display: none !important;
 }
 
 .ba-site-admin-chat__modal--compact {
@@ -3469,8 +3445,7 @@ html[data-theme="dark"] .ba-site-admin-chat__proof-placeholder span {
 }
 
 html[data-theme="dark"] .ba-site-admin-chat__proof-thumb-hover {
-  background: transparent;
-  border-color: var(--color-primary, #22c55e);
+  display: none !important;
 }
 
 html[data-theme="dark"] .ba-site-admin-chat__assign-btn:hover,

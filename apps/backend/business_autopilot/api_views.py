@@ -4617,15 +4617,17 @@ def _site_admin_mobile_matches(left, right):
         return False
     if left_digits == right_digits:
         return True
-    india_variants = {
-        left_digits,
-        left_digits[-10:] if len(left_digits) > 10 and left_digits.startswith("91") else "",
-        f"91{left_digits}" if len(left_digits) == 10 else "",
-        right_digits,
-        right_digits[-10:] if len(right_digits) > 10 and right_digits.startswith("91") else "",
-        f"91{right_digits}" if len(right_digits) == 10 else "",
-    }
-    return left_digits in india_variants and right_digits in india_variants
+    left_variants = {left_digits}
+    right_variants = {right_digits}
+    if len(left_digits) == 10:
+        left_variants.add(f"91{left_digits}")
+    if len(left_digits) > 10 and left_digits.startswith("91"):
+        left_variants.add(left_digits[-10:])
+    if len(right_digits) == 10:
+        right_variants.add(f"91{right_digits}")
+    if len(right_digits) > 10 and right_digits.startswith("91"):
+        right_variants.add(right_digits[-10:])
+    return bool(left_variants & right_variants)
 
 
 def _site_admin_format_mobile_display(value):
@@ -9530,6 +9532,12 @@ def _site_admin_merge_quick_estimate_fields(state, message):
                 collected["gst_number"] = str(existing_customer.get("gstin") or "").strip()[:32]
         else:
             collected["existing_client"] = False
+            collected.pop("customer_id", None)
+            if incoming_mobile and not parsed.get("client_name"):
+                collected.pop("client_name", None)
+            if incoming_mobile:
+                for key in ("email", "address", "gst_number"):
+                    collected.pop(key, None)
 
     if parsed.get("email"):
         collected["email"] = parsed["email"]
