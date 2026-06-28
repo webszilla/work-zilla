@@ -419,6 +419,7 @@ export default function BusinessAutopilotAssistantWidget({
   const [historyDate, setHistoryDate] = useState(getTodayIso());
   const [showHistoryPicker, setShowHistoryPicker] = useState(false);
   const [clearHistoryConfirmOpen, setClearHistoryConfirmOpen] = useState(false);
+  const [showSetupRequiredModal, setShowSetupRequiredModal] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [voiceDraft, setVoiceDraft] = useState("");
   const [voiceBusy, setVoiceBusy] = useState(false);
@@ -677,6 +678,13 @@ export default function BusinessAutopilotAssistantWidget({
       historyPersistTimerRef.current = null;
     }
   }, []);
+
+  useEffect(() => {
+    if (!pageMode || settings.loading) {
+      return;
+    }
+    setShowSetupRequiredModal(!settings.hasApiKey);
+  }, [pageMode, settings.hasApiKey, settings.loading]);
 
   const speech = useBrowserSpeechInput({
     lang: detectScriptLanguage(prompt || buildWakePhrase(settings)),
@@ -1531,6 +1539,48 @@ export default function BusinessAutopilotAssistantWidget({
                 onClick={confirmClearChatHistory}
               >
                 Clear History
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {showSetupRequiredModal ? (
+        <div className="ba-site-admin-chat__modal-overlay" onClick={() => setShowSetupRequiredModal(false)}>
+          <div className="ba-site-admin-chat__modal ba-assistant__setup-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="ba-site-admin-chat__modal-head">
+              <div>
+                <div className="ba-site-admin-chat__modal-title">AI Assistant Setup Required</div>
+                <div className="ba-site-admin-chat__modal-subtitle">
+                  This page is available, but the AI Assistant cannot be used until OpenAI is connected.
+                </div>
+              </div>
+              <button
+                type="button"
+                className="ba-assistant__close d-inline-flex align-items-center justify-content-center"
+                aria-label="Close AI Assistant setup popup"
+                onClick={() => setShowSetupRequiredModal(false)}
+              >
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="ba-assistant__setup-modal-copy">
+              <p>To use this page, please connect your OpenAI API key in AI settings.</p>
+              <p>Once the API key is saved, refresh this page and the AI Assistant will be ready to use.</p>
+            </div>
+            <div className="ba-site-admin-chat__modal-actions">
+              <button
+                type="button"
+                className="btn btn-outline-secondary"
+                onClick={() => setShowSetupRequiredModal(false)}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={openOpenAiSettings}
+              >
+                Open AI Settings
               </button>
             </div>
           </div>

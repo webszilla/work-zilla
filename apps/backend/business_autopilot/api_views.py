@@ -5389,6 +5389,17 @@ def _render_quick_estimate_thermal_preview(row, org):
     assigned_user = getattr(row, "assigned_user", None)
     if template_size not in {"3in", "4in"}:
         template_size = "4in"
+    preview_items = []
+    for item in list(row.items.all().order_by("id")):
+        title = str(item.service_name or "").strip()
+        description = _normalize_quick_estimate_item_description(title, item.description)
+        preview_items.append({
+            "service_name": title,
+            "description": description,
+            "quantity": item.quantity,
+            "unit": item.unit,
+            "amount": _format_quick_estimate_amount(item.amount),
+        })
     return render_to_string(
         "business_autopilot/quick_estimate_thermal_preview.html",
         {
@@ -5397,13 +5408,40 @@ def _render_quick_estimate_thermal_preview(row, org):
             "template_size": template_size,
             "thermal_width_px": 288 if template_size == "3in" else 384,
             "estimate": row,
-            "items": list(row.items.all().order_by("id")),
+            "items": preview_items,
             "formatted_total": _format_quick_estimate_amount(row.total_amount),
             "formatted_subtotal": _format_quick_estimate_amount(row.subtotal),
-            "created_at_label": timezone.localtime(row.created_at).strftime("%d/%m/%Y") if row.created_at else "",
+            "created_at_label": _quick_estimate_display_date(row),
             "assigned_user_name": _get_org_user_display_name(assigned_user),
         },
     )
+
+
+def _normalize_quick_estimate_item_text(value):
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    text = re.sub(r"^\d+\s*[\.\)\-:]\s*", "", text)
+    return text.strip()
+
+
+def _normalize_quick_estimate_item_description(title, description):
+    title_text = _normalize_quick_estimate_item_text(title)
+    description_text = str(description or "").strip()
+    if not description_text:
+        return ""
+    normalized_description = _normalize_quick_estimate_item_text(description_text)
+    if title_text and normalized_description.lower() == title_text.lower():
+        return ""
+    return description_text
+
+
+def _quick_estimate_display_date(row):
+    estimate_date = getattr(row, "estimate_date", None)
+    if estimate_date:
+        return estimate_date.strftime("%d/%m/%Y")
+    created_at = getattr(row, "created_at", None)
+    if created_at:
+        return timezone.localtime(created_at).strftime("%d/%m/%Y")
+    return ""
 
 
 def _wrap_quick_estimate_pdf_lines(text, max_width, font_name, font_size):
@@ -5490,7 +5528,7 @@ def _quick_estimate_pdf_response(row, org):
     header_text = _normalize_quick_estimate_header_html(settings_data.get("headerText"))
     header_segments = _quick_estimate_pdf_header_segments(header_text, company_name, content_width)
     header_images = _quick_estimate_pdf_header_images(header_text)
-    created_at_label = timezone.localtime(row.created_at).strftime("%d/%m/%Y") if row.created_at else ""
+    created_at_label = _quick_estimate_display_date(row)
     assigned_user_name = _get_org_user_display_name(getattr(row, "assigned_user", None)) or "-"
     items = list(row.items.all().order_by("id"))
     item_blocks = []
@@ -5499,7 +5537,7 @@ def _quick_estimate_pdf_response(row, org):
     item_text_width = content_width - 60
     for item in items:
         title = str(item.service_name or "").strip()
-        description = str(item.description or "").strip()
+        description = _normalize_quick_estimate_item_description(title, item.description)
         qty_line = ""
         if item.quantity:
             qty_line = f"Qty: {item.quantity}{f' {item.unit}' if item.unit else ''}"
@@ -5535,7 +5573,7 @@ def _quick_estimate_pdf_response(row, org):
 
     items_section_height = 30 + total_height
     total_section_height = 28
-    footer_height = 10
+    footer_height = 18
     top_padding = 18
     bottom_padding = 4
     page_height = (
@@ -5662,7 +5700,7 @@ def _quick_estimate_pdf_response(row, org):
     pdf.setDash(3, 2)
     pdf.line(left, y, right, y)
     pdf.setDash()
-    y -= 6
+    y -= 10
     pdf.setFont("Helvetica", 9)
     pdf.setFillColorRGB(0, 0, 0)
     pdf.drawCentredString(page_width / 2, y, "Thank you.")

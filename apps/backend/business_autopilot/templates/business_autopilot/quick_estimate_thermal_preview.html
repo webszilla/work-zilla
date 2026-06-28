@@ -153,15 +153,15 @@
       font-weight: 700;
     }
     .thank-you {
-      margin-top: 5px;
-      padding-top: 5px;
+      margin-top: 8px;
+      padding-top: 8px;
       border-top: 1px dashed var(--line);
       text-align: center;
       color: var(--muted);
       font-size: 12px;
-      line-height: 1.15;
+      line-height: 1.35;
       margin-bottom: 0;
-      padding-bottom: 0;
+      padding-bottom: 2px;
     }
     @media print {
       body { background: #fff; padding: 0; }
@@ -202,7 +202,7 @@
           <tr>
             <td>
               {% if item.service_name %}<div class="item-name">{{ item.service_name }}</div>{% endif %}
-              <div class="item-desc">{{ item.description }}</div>
+              {% if item.description %}<div class="item-desc">{{ item.description }}</div>{% endif %}
               {% if item.quantity %}<div class="qty">Qty: {{ item.quantity }}{% if item.unit %} {{ item.unit }}{% endif %}</div>{% endif %}
             </td>
             <td>Rs {{ item.amount }}</td>

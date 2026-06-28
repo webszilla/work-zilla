@@ -2183,7 +2183,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                         disabled={sending}
                       />
                       <span className="ba-site-admin-chat__status-switch-copy">
-                        <strong>Payment Status</strong>
+                        <strong>Payment</strong>
                         <small>{editPaymentCompleted ? "Completed" : "Pending"}</small>
                       </span>
                     </label>
@@ -2196,7 +2196,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                         disabled={sending}
                       />
                       <span className="ba-site-admin-chat__status-switch-copy">
-                        <strong>Job Status</strong>
+                        <strong>Job</strong>
                         <small>{editJobCompleted ? "Completed" : "Pending"}</small>
                       </span>
                     </label>
@@ -2209,7 +2209,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                         disabled={sending}
                       />
                       <span className="ba-site-admin-chat__status-switch-copy">
-                        <strong>Delivery Status</strong>
+                        <strong>Delivery</strong>
                         <small>{editDeliveryCompleted ? "Completed" : "Pending"}</small>
                       </span>
                     </label>
