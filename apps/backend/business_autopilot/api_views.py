@@ -5855,6 +5855,7 @@ def _serialize_quick_estimate(
     actor=None,
     include_items=True,
     include_status_summary=True,
+    include_payment_proofs=True,
     assigned_membership_id=None,
 ):
     row = _purge_expired_quick_estimate_payment_proof(row)
@@ -5889,6 +5890,14 @@ def _serialize_quick_estimate(
         }
     payment_proof_entries = _normalize_quick_estimate_payment_proof_entries(getattr(row, "payment_proof_image", ""))
     payment_proof_images = [entry.get("image") for entry in payment_proof_entries if str(entry.get("image") or "").strip()]
+    if not include_payment_proofs:
+        payment_proof_entries = [
+            {
+                "paid_date": str(entry.get("paid_date") or "").strip(),
+            }
+            for entry in payment_proof_entries
+        ]
+        payment_proof_images = []
     payload = {
         "id": row.id,
         "estimate_number": row.estimate_number,
@@ -10340,6 +10349,7 @@ def quick_estimates(request, estimate_id: int = None):
                         actor=request.user,
                         include_items=False,
                         include_status_summary=False,
+                        include_payment_proofs=False,
                         assigned_membership_id=membership_map.get(row.assigned_user_id),
                     )
                     for row in rows
