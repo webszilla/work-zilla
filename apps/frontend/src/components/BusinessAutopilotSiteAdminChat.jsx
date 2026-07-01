@@ -2464,11 +2464,13 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                 </div>
                 <div className="ba-site-admin-chat__table-toolbar-actions">
                   <input
-                    type="search"
+                    type="text"
                     list="ba-site-admin-chat-user-filter-options"
                     className="form-control ba-site-admin-chat__table-user-filter"
                     value={estimateUserFilter}
                     onChange={(event) => setEstimateUserFilter(event.target.value)}
+                    onInput={(event) => setEstimateUserFilter(event.currentTarget.value)}
+                    autoComplete="off"
                     placeholder="Assigned user..."
                     aria-label="Filter estimates by assigned user"
                   />
@@ -2478,10 +2480,12 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                     ))}
                   </datalist>
                   <input
-                    type="search"
+                    type="text"
                     className="form-control ba-site-admin-chat__table-search"
                     value={estimateSearch}
                     onChange={(event) => setEstimateSearch(event.target.value)}
+                    onInput={(event) => setEstimateSearch(event.currentTarget.value)}
+                    autoComplete="off"
                     placeholder="Search estimate, client, mobile..."
                     aria-label="Search estimates"
                   />
