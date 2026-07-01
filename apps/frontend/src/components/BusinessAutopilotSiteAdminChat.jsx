@@ -786,9 +786,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   const listRef = useRef(null);
   const composerRef = useRef(null);
   const normalizedPaymentProofPaidDate = String(paymentProofPaidDate || "").trim();
-  const paymentProofPendingRows = paymentProofPendingImages.length && normalizedPaymentProofPaidDate
-    ? paymentProofPendingImages.map((image) => ({ image, paid_date: normalizedPaymentProofPaidDate, __pending: true }))
-    : [];
+  const paymentProofPendingRows = paymentProofPendingImages.map((image) => ({
+    image,
+    paid_date: normalizedPaymentProofPaidDate,
+    __pending: true,
+  }));
   const paymentProofDisplayEntries = [
     ...(Array.isArray(paymentProofDraftEntries) ? paymentProofDraftEntries : []),
     ...paymentProofPendingRows,
@@ -887,18 +889,24 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       setEstimateLoading(true);
       setEstimateTableNotice("");
       try {
-        const [estimateData, settingsData, usersData] = await Promise.all([
-          apiFetch("/api/business-autopilot/quick-estimates/"),
-          apiFetch("/api/business-autopilot/quick-estimate-settings/"),
-          apiFetch("/api/business-autopilot/users"),
-        ]);
+        const estimateData = await apiFetch("/api/business-autopilot/quick-estimates/");
         if (!ignore) {
           setEstimateRows(Array.isArray(estimateData?.quick_estimates) ? estimateData.quick_estimates : []);
+        }
+        Promise.allSettled([
+          apiFetch("/api/business-autopilot/quick-estimate-settings/"),
+          apiFetch("/api/business-autopilot/users"),
+        ]).then((results) => {
+          if (ignore) {
+            return;
+          }
+          const settingsData = results[0]?.status === "fulfilled" ? results[0].value : null;
+          const usersData = results[1]?.status === "fulfilled" ? results[1].value : null;
           setQeHeaderText(String(settingsData?.settings?.headerText || ""));
           setQeTemplateSize(String(settingsData?.settings?.templateSize || "4in").toLowerCase() === "3in" ? "3in" : "4in");
           setQePaymentProofRetentionDays(String(settingsData?.settings?.paymentProofRetentionDays || "45") === "60" ? "60" : "45");
-        setOrgUsers(filterAssignableOrgUsers(usersData?.users));
-        }
+          setOrgUsers(filterAssignableOrgUsers(usersData?.users));
+        });
       } catch (error) {
         if (!ignore) {
           setEstimateTableNotice(error?.message || "Unable to load Quick Estimates right now.");
@@ -949,14 +957,14 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setEditDeliveryCompleted(false);
     setEditPaymentProofEntries([]);
     setEditPaymentStatusUpdaterName("");
-    setEditPaymentProofFile(null);
+    setEditPaymentProofFiles([]);
     setPaymentProofModalOpen(false);
     setPaymentProofDraftEntries([]);
     setPaymentProofPendingImages([]);
     setPaymentProofActiveIndex(0);
     setPaymentProofEditingIndex(null);
     setPaymentProofPaidDate("");
-    setPaymentProofDraftFile(null);
+    setPaymentProofDraftFiles([]);
     setPaymentProofError("");
     setPaymentProofUploading(false);
     if (nextNotice) {

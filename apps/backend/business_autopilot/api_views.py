@@ -5849,7 +5849,14 @@ def _build_quick_estimate_status_update_summary(row, status_key, current_actor=N
     }
 
 
-def _serialize_quick_estimate(row, include_preview=False, actor=None):
+def _serialize_quick_estimate(
+    row,
+    include_preview=False,
+    actor=None,
+    include_items=True,
+    include_status_summary=True,
+    assigned_membership_id=None,
+):
     row = _purge_expired_quick_estimate_payment_proof(row)
     created_by = getattr(row, "created_by", None) or getattr(getattr(row, "organization", None), "owner", None)
     assigned_user = getattr(row, "assigned_user", None)
@@ -5857,9 +5864,29 @@ def _serialize_quick_estimate(row, include_preview=False, actor=None):
     payment_verified_by = getattr(row, "payment_verified_by", None)
     job_verified_by = getattr(row, "job_verified_by", None)
     delivery_verified_by = getattr(row, "delivery_verified_by", None)
-    payment_update_summary = _build_quick_estimate_status_update_summary(row, "payment", current_actor=payment_verified_by)
-    job_update_summary = _build_quick_estimate_status_update_summary(row, "job", current_actor=job_verified_by)
-    delivery_update_summary = _build_quick_estimate_status_update_summary(row, "delivery", current_actor=delivery_verified_by)
+    if include_status_summary:
+        payment_update_summary = _build_quick_estimate_status_update_summary(row, "payment", current_actor=payment_verified_by)
+        job_update_summary = _build_quick_estimate_status_update_summary(row, "job", current_actor=job_verified_by)
+        delivery_update_summary = _build_quick_estimate_status_update_summary(row, "delivery", current_actor=delivery_verified_by)
+    else:
+        payment_verified_by_name = _get_org_user_display_name(payment_verified_by)
+        job_verified_by_name = _get_org_user_display_name(job_verified_by)
+        delivery_verified_by_name = _get_org_user_display_name(delivery_verified_by)
+        payment_update_summary = {
+            "count": 1 if str(getattr(row, "payment_status", "") or "").strip().lower() == QuickEstimate.PROGRESS_COMPLETED and payment_verified_by_name else 0,
+            "latest_name": payment_verified_by_name,
+            "names": [payment_verified_by_name] if payment_verified_by_name else [],
+        }
+        job_update_summary = {
+            "count": 1 if str(getattr(row, "job_status", "") or "").strip().lower() == QuickEstimate.PROGRESS_COMPLETED and job_verified_by_name else 0,
+            "latest_name": job_verified_by_name,
+            "names": [job_verified_by_name] if job_verified_by_name else [],
+        }
+        delivery_update_summary = {
+            "count": 1 if str(getattr(row, "delivery_status", "") or "").strip().lower() == QuickEstimate.PROGRESS_COMPLETED and delivery_verified_by_name else 0,
+            "latest_name": delivery_verified_by_name,
+            "names": [delivery_verified_by_name] if delivery_verified_by_name else [],
+        }
     payment_proof_entries = _normalize_quick_estimate_payment_proof_entries(getattr(row, "payment_proof_image", ""))
     payment_proof_images = [entry.get("image") for entry in payment_proof_entries if str(entry.get("image") or "").strip()]
     payload = {
@@ -5901,14 +5928,7 @@ def _serialize_quick_estimate(row, include_preview=False, actor=None):
         "created_by_username": str(getattr(created_by, "username", "") or "").strip(),
         "created_by_email": str(getattr(created_by, "email", "") or "").strip(),
         "assigned_user_id": getattr(row, "assigned_user_id", None),
-        "assigned_membership_id": (
-            OrganizationUser.objects
-            .filter(organization=row.organization, user_id=getattr(row, "assigned_user_id", None), is_deleted=False)
-            .values_list("id", flat=True)
-            .first()
-            if getattr(row, "assigned_user_id", None)
-            else None
-        ),
+        "assigned_membership_id": assigned_membership_id,
         "assigned_user_name": _get_org_user_display_name(assigned_user),
         "assigned_by_id": getattr(row, "assigned_by_id", None),
         "assigned_by_name": _get_org_user_display_name(assigned_by),
@@ -5919,8 +5939,9 @@ def _serialize_quick_estimate(row, include_preview=False, actor=None):
         "thermal_preview_url": f"/api/business-autopilot/quick-estimates/{row.id}/thermal-preview/",
         "thermal_preview_pdf_url": f"/api/business-autopilot/quick-estimates/{row.id}/thermal-preview/?format=pdf",
         "can_delete_cancelled": _can_delete_cancelled_quick_estimate(actor, row.organization) if actor else False,
-        "items": [_serialize_quick_estimate_item(item) for item in row.items.all().order_by("id")],
     }
+    if include_items:
+        payload["items"] = [_serialize_quick_estimate_item(item) for item in row.items.all().order_by("id")]
     if include_preview:
         payload["thermal_preview_html"] = _safe_render_quick_estimate_thermal_preview(row, row.organization)
     return payload
@@ -10299,11 +10320,34 @@ def quick_estimates(request, estimate_id: int = None):
             "job_verified_by",
             "delivery_verified_by",
         )
-        .prefetch_related("items")
         .order_by("-estimate_sequence", "-id")
     )
     if resolved_method == "GET" and estimate_id is None:
-        return JsonResponse({"quick_estimates": [_serialize_quick_estimate(row, actor=request.user) for row in qs[:100]]})
+        rows = list(qs[:100])
+        assigned_user_ids = [row.assigned_user_id for row in rows if getattr(row, "assigned_user_id", None)]
+        membership_map = {}
+        if assigned_user_ids:
+            membership_map = dict(
+                OrganizationUser.objects
+                .filter(organization=org, user_id__in=assigned_user_ids, is_deleted=False)
+                .values_list("user_id", "id")
+            )
+        return JsonResponse(
+            {
+                "quick_estimates": [
+                    _serialize_quick_estimate(
+                        row,
+                        actor=request.user,
+                        include_items=False,
+                        include_status_summary=False,
+                        assigned_membership_id=membership_map.get(row.assigned_user_id),
+                    )
+                    for row in rows
+                ]
+            }
+        )
+
+    qs = qs.prefetch_related("items")
 
     if resolved_method in {"PATCH", "DELETE"} and not estimate_id:
         if payload is None:
