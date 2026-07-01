@@ -1917,6 +1917,11 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
   z-index: 10000;
 }
 
+.ba-site-admin-chat__status-tooltip.is-below .ba-site-admin-chat__status-tooltip-arrow {
+  top: -5px;
+  bottom: auto;
+}
+
 .ba-site-admin-chat__status-tooltip-arrow {
   position: absolute;
   left: 50%;

@@ -1216,6 +1216,21 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     });
   }
 
+  function openActionTooltip(event, tooltip) {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const tooltipWidth = Math.min(220, Math.max(120, String(tooltip || "").length * 7 + 20));
+    setStatusTooltip({
+      text: tooltip || "",
+      top: Math.max(12, Math.min(window.innerHeight - 56, rect.bottom + 10)),
+      left: Math.max(12, Math.min(window.innerWidth - tooltipWidth - 12, rect.left + (rect.width / 2) - (tooltipWidth / 2))),
+      width: tooltipWidth,
+      arrowOnTop: true,
+    });
+  }
+
   function closeStatusPreview() {
     setStatusPreview(null);
     setStatusTooltip(null);
@@ -2616,8 +2631,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                                 type="button"
                                 className="btn btn-sm btn-outline-secondary saas-org-icon-btn ba-site-admin-chat__action-btn ba-site-admin-chat__action-btn--view"
                                 onClick={() => handleViewEstimate(row.id)}
-                                title="View Estimate"
                                 aria-label="View Estimate"
+                                onMouseEnter={(event) => openActionTooltip(event, "View Estimate")}
+                                onFocus={(event) => openActionTooltip(event, "View Estimate")}
+                                onMouseLeave={closeStatusPreview}
+                                onBlur={closeStatusPreview}
                               >
                                 <i className="bi bi-eye" aria-hidden="true" />
                               </button>
@@ -2625,8 +2643,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                                 type="button"
                                 className="btn btn-sm btn-outline-success saas-org-icon-btn ba-site-admin-chat__action-btn ba-site-admin-chat__action-btn--edit"
                                 onClick={() => handleEditEstimate(row.id)}
-                                title="Edit Estimate"
                                 aria-label="Edit Estimate"
+                                onMouseEnter={(event) => openActionTooltip(event, "Edit Estimate")}
+                                onFocus={(event) => openActionTooltip(event, "Edit Estimate")}
+                                onMouseLeave={closeStatusPreview}
+                                onBlur={closeStatusPreview}
                               >
                                 <i className="bi bi-pencil" aria-hidden="true" />
                               </button>
@@ -2634,8 +2655,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                                 type="button"
                                 className="btn btn-sm btn-outline-success saas-org-icon-btn ba-site-admin-chat__action-btn ba-site-admin-chat__action-btn--share"
                                 onClick={() => handleShareEstimate(row)}
-                                title="Share Estimate"
                                 aria-label="Share Estimate"
+                                onMouseEnter={(event) => openActionTooltip(event, "Share Estimate")}
+                                onFocus={(event) => openActionTooltip(event, "Share Estimate")}
+                                onMouseLeave={closeStatusPreview}
+                                onBlur={closeStatusPreview}
                               >
                                 <i className="bi bi-whatsapp" aria-hidden="true" />
                               </button>
@@ -2643,8 +2667,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                                 type="button"
                                 className="btn btn-sm btn-outline-secondary saas-org-icon-btn ba-site-admin-chat__action-btn ba-site-admin-chat__action-btn--print"
                                 onClick={() => handlePrintEstimate(row)}
-                                title="Print Estimate"
                                 aria-label="Print Estimate"
+                                onMouseEnter={(event) => openActionTooltip(event, "Print Estimate")}
+                                onFocus={(event) => openActionTooltip(event, "Print Estimate")}
+                                onMouseLeave={closeStatusPreview}
+                                onBlur={closeStatusPreview}
                               >
                                 <i className="bi bi-printer" aria-hidden="true" />
                               </button>
@@ -2652,8 +2679,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                                 type="button"
                                 className="btn btn-sm btn-outline-secondary saas-org-icon-btn ba-site-admin-chat__action-btn ba-site-admin-chat__action-btn--copy-link"
                                 onClick={() => handleCopyEstimatePublicUrl(row)}
-                                title="Copy Public Estimate Link"
                                 aria-label="Copy Public Estimate Link"
+                                onMouseEnter={(event) => openActionTooltip(event, "Copy Public Estimate Link")}
+                                onFocus={(event) => openActionTooltip(event, "Copy Public Estimate Link")}
+                                onMouseLeave={closeStatusPreview}
+                                onBlur={closeStatusPreview}
                               >
                                 <i className="bi bi-link-45deg" aria-hidden="true" />
                               </button>
@@ -2661,8 +2691,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                                 type="button"
                                 className="btn btn-sm btn-outline-secondary saas-org-icon-btn ba-site-admin-chat__action-btn ba-site-admin-chat__action-btn--history"
                                 onClick={() => handleViewHistory(row)}
-                                title="Estimate History"
                                 aria-label="Estimate History"
+                                onMouseEnter={(event) => openActionTooltip(event, "Estimate History")}
+                                onFocus={(event) => openActionTooltip(event, "Estimate History")}
+                                onMouseLeave={closeStatusPreview}
+                                onBlur={closeStatusPreview}
                               >
                                 <i className="bi bi-clock-history" aria-hidden="true" />
                               </button>
@@ -2672,8 +2705,11 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                                     type="button"
                                     className="btn btn-sm btn-outline-secondary saas-org-icon-btn ba-site-admin-chat__action-btn ba-site-admin-chat__action-btn--history"
                                     onClick={() => handleReopenEstimate(row)}
-                                    title="Reopen Estimate"
                                     aria-label="Reopen Estimate"
+                                    onMouseEnter={(event) => openActionTooltip(event, "Reopen Estimate")}
+                                    onFocus={(event) => openActionTooltip(event, "Reopen Estimate")}
+                                    onMouseLeave={closeStatusPreview}
+                                    onBlur={closeStatusPreview}
                                   >
                                     <i className="bi bi-arrow-clockwise" aria-hidden="true" />
                                   </button>
@@ -2682,9 +2718,12 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                                       type="button"
                                       className="btn btn-sm btn-outline-danger saas-org-icon-btn ba-site-admin-chat__action-btn ba-site-admin-chat__action-btn--delete"
                                       onClick={() => handleDeleteEstimate(row.id, row.estimate_number)}
-                                      title="Delete Estimate"
                                       aria-label="Delete Estimate"
                                       data-no-delete-confirm="true"
+                                      onMouseEnter={(event) => openActionTooltip(event, "Delete Estimate")}
+                                      onFocus={(event) => openActionTooltip(event, "Delete Estimate")}
+                                      onMouseLeave={closeStatusPreview}
+                                      onBlur={closeStatusPreview}
                                     >
                                       <i className="bi bi-trash3" aria-hidden="true" />
                                     </button>
@@ -2695,9 +2734,12 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                                   type="button"
                                   className="btn btn-sm btn-outline-danger saas-org-icon-btn ba-site-admin-chat__action-btn ba-site-admin-chat__action-btn--delete"
                                   onClick={() => handleDeleteEstimate(row.id, row.estimate_number)}
-                                  title="Cancel Estimate"
                                   aria-label="Cancel Estimate"
                                   data-no-delete-confirm="true"
+                                  onMouseEnter={(event) => openActionTooltip(event, "Cancel Estimate")}
+                                  onFocus={(event) => openActionTooltip(event, "Cancel Estimate")}
+                                  onMouseLeave={closeStatusPreview}
+                                  onBlur={closeStatusPreview}
                                 >
                                   <i className="bi bi-x-circle" aria-hidden="true" />
                                 </button>
@@ -2738,7 +2780,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       ) : null}
       {statusTooltip?.text ? (
         <div
-          className="ba-site-admin-chat__status-tooltip"
+          className={`ba-site-admin-chat__status-tooltip ${statusTooltip.arrowOnTop ? "is-below" : ""}`}
           style={{ top: `${statusTooltip.top}px`, left: `${statusTooltip.left}px`, width: `${statusTooltip.width}px` }}
           role="tooltip"
         >
