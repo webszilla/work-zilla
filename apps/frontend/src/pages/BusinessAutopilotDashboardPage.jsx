@@ -1047,7 +1047,7 @@ export default function BusinessAutopilotDashboardPage({
       </p>
       <div className="row g-3 mb-3">
         {statCards.map((card) => (
-          <div className={`col-12 col-md-6 ${isOrgAdmin ? "col-xl-2" : "col-xl-3"}`} key={card.key}>
+          <div className="col-12 col-md-6 col-xl-2" key={card.key}>
             <div className="card p-3 h-100 stat-card">
               <div className="stat-icon stat-icon-primary">
                 <i className={`bi ${card.icon}`} aria-hidden="true" />
