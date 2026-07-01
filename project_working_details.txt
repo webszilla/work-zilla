@@ -176,9 +176,10 @@ VERIFY (AFTER DEPLOY)
 
 ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
 - Published at (UTC): `2026-07-01T04:40:10Z`
-- Local SHA: `8ba854458c36ced64466d4708702b43c903c089c`
-- GitHub main SHA: `8ba854458c36ced64466d4708702b43c903c089c`
-- Server SHA: `8ba854458c36ced64466d4708702b43c903c089c`
+- Published at (UTC): `2026-07-01T15:36:46Z`
+- Local SHA: `c4812a74bab813bf42b646151157b1907fc3ff84`
+- GitHub main SHA: `c4812a74bab813bf42b646151157b1907fc3ff84`
+- Server SHA: `c4812a74bab813bf42b646151157b1907fc3ff84`
 - Deploy method: `git-pull`
 - Gunicorn: listening on `:8000` (`yes`)
 - Verified URLs:
@@ -189,6 +190,11 @@ ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
   - `/downloads/mac-agent/` -> `404`
 
 LATEST WORK LOG (2026-06-25)
+- Business Autopilot Site Admin quick estimate live save/action layout fixes deployed:
+  - action icon grid changed back to `4` columns in Site Admin quick estimate table
+  - quick estimate edit save now uses JSON payload for normal date/status/item edits and reserves multipart upload only for new payment proof files
+  - this reduces live `403` risk behind CDN/WAF where multipart edit requests were stricter than local
+  - payment/status preview tooltip now guards async hover state correctly and no longer crashes on `getBoundingClientRect()` after delayed image fetch
 - Business Autopilot Site Admin quick estimate edit/save fixes completed:
   - quick estimate detail payload now returns dedicated `estimate_date` so edited dates persist correctly in edit form, table view, and day filters
   - payment proof modal now waits for both image and paid date before committing proof rows
