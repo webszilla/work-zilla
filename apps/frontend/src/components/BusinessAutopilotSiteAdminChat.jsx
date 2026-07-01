@@ -2484,6 +2484,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                     value={estimateUserFilter}
                     onChange={(event) => setEstimateUserFilter(event.target.value)}
                     onInput={(event) => setEstimateUserFilter(event.currentTarget.value)}
+                    data-no-global-limit
                     autoComplete="off"
                     placeholder="Assigned user..."
                     aria-label="Filter estimates by assigned user"
@@ -2499,6 +2500,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                     value={estimateSearch}
                     onChange={(event) => setEstimateSearch(event.target.value)}
                     onInput={(event) => setEstimateSearch(event.currentTarget.value)}
+                    data-no-global-limit
                     autoComplete="off"
                     placeholder="Search estimate, client, mobile..."
                     aria-label="Search estimates"
