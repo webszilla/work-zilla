@@ -124,6 +124,10 @@ export async function apiFetch(url, options = {}) {
   let response = await fetch(requestUrl, fetchOptions);
   let parsed = await parseResponse(response);
   let data = parsed.data;
+  const rawText = parsed.text || "";
+  const responseIndicatesCsrfIssue = response.status === 403 && /csrf|security token|session expired|origin checking failed/i.test(
+    `${String(data?.detail || "")} ${String(data?.message || "")} ${String(data?.error || "")} ${rawText}`,
+  );
 
   // Some environments intermittently return CSRF 403 after session rotation.
   // Refresh token once and retry unsafe requests before surfacing the error.
@@ -132,7 +136,7 @@ export async function apiFetch(url, options = {}) {
     && response.status === 403
     && method !== "GET"
     && method !== "HEAD"
-    && !data
+    && (!data || responseIndicatesCsrfIssue)
   ) {
     await refreshCsrfToken();
     fetchOptions.headers = {
