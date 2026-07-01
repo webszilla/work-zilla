@@ -2981,7 +2981,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
               </div>
             ) : null}
             {paymentProofDisplayEntries.length ? (
-              <div className="table-responsive">
+              <div className="table-responsive ba-site-admin-chat__proof-table">
                 <table className="table table-sm align-middle mb-3">
                   <thead>
                     <tr>
