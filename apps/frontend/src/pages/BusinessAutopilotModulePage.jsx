@@ -1783,27 +1783,45 @@ function createEmptyDocLine() {
   };
 }
 
+function extractBillingDocSequenceValue(docNo = "", kind = "invoice") {
+  const normalizedDocNo = String(docNo || "").trim();
+  if (!normalizedDocNo) {
+    return 0;
+  }
+  const prefix = kind === "estimate" ? "EST" : "INV";
+  const match = normalizedDocNo.match(new RegExp(`^${prefix}(?:-[A-Z0-9]+)*(?:-\\d{2})?(?:-\\d{2})?(?:-\\d{4})?-(\\d+)$`, "i"));
+  if (!match) {
+    return 0;
+  }
+  const parsed = Number.parseInt(match[1], 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function compareBillingDocumentRowsDesc(leftRow = {}, rightRow = {}, kind = "invoice") {
+  const leftSeq = extractBillingDocSequenceValue(resolveAccountsDocumentNo(leftRow), kind);
+  const rightSeq = extractBillingDocSequenceValue(resolveAccountsDocumentNo(rightRow), kind);
+  if (leftSeq !== rightSeq) {
+    return rightSeq - leftSeq;
+  }
+  const leftIssueTime = new Date(resolveAccountsDocumentIssueDate(leftRow) || 0).getTime();
+  const rightIssueTime = new Date(resolveAccountsDocumentIssueDate(rightRow) || 0).getTime();
+  if (leftIssueTime !== rightIssueTime) {
+    return rightIssueTime - leftIssueTime;
+  }
+  return String(resolveAccountsDocumentNo(rightRow) || "").localeCompare(String(resolveAccountsDocumentNo(leftRow) || ""));
+}
+
 function getNextBillingDocNo(kind = "invoice", existingRows = []) {
   const prefix = kind === "estimate" ? "EST" : "INV";
   const now = new Date();
   const day = String(now.getDate()).padStart(2, "0");
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const year = String(now.getFullYear());
-  const dayKeyCompact = `${day}${month}${year}`;
   const dayKeyDashed = `${day}-${month}-${year}`;
-  const patterns = [
-    new RegExp(`^${prefix}-${dayKeyDashed}-(\\d{3})$`),
-    new RegExp(`^${prefix}-${dayKeyCompact}-(\\d{3})$`),
-  ];
   let maxSeq = 0;
   (Array.isArray(existingRows) ? existingRows : []).forEach((row) => {
-    const rawDocNo = String(row?.docNo || row?.doc_no || "").trim();
-    const match = patterns.map((pattern) => pattern.exec(rawDocNo)).find(Boolean);
-    if (!match) {
-      return;
-    }
-    const seq = Number.parseInt(match[1], 10);
-    if (Number.isFinite(seq) && seq > maxSeq) {
+    const seq = extractBillingDocSequenceValue(resolveAccountsDocumentNo(row), kind);
+    if (seq > maxSeq) {
       maxSeq = seq;
     }
   });
@@ -5471,7 +5489,8 @@ function normalizeAccountsBillingDocumentRecord(row = {}, kind = "invoice") {
 function normalizeAccountsDocumentRows(rows = [], kind = "invoice") {
   return (Array.isArray(rows) ? rows : [])
     .filter((row) => row && typeof row === "object")
-    .map((row) => normalizeAccountsBillingDocumentRecord(row, kind));
+    .map((row) => normalizeAccountsBillingDocumentRecord(row, kind))
+    .sort((leftRow, rightRow) => compareBillingDocumentRowsDesc(leftRow, rightRow, kind));
 }
 
 function _normalizeAccountsWorkspacePayload(data = DEFAULT_ACCOUNTS_DATA) {
@@ -40161,16 +40180,17 @@ function AccountsErpModule({ initialTab = "overview", subscriptionsOnly = false,
 	    }, [activeRows, deletedRows, isInvoice]);
 
 	    const tableRows = useMemo(() => {
+	      const sortRows = (sourceRows) => [...sourceRows].sort((leftRow, rightRow) => compareBillingDocumentRowsDesc(leftRow, rightRow, kind));
 	      if (!isInvoice) {
-	        return activeRows;
+	        return sortRows(activeRows);
 	      }
 	      if (invoiceStatusTab === "deleted") {
-	        return deletedRows;
+	        return sortRows(deletedRows);
 	      }
 	      if (invoiceStatusTab === "all") {
-	        return activeRows;
+	        return sortRows(activeRows);
 	      }
-	      return activeRows.filter((row) => getInvoiceStatusKey(row) === invoiceStatusTab);
+	      return sortRows(activeRows.filter((row) => getInvoiceStatusKey(row) === invoiceStatusTab));
 	    }, [activeRows, deletedRows, invoiceStatusTab, isInvoice]);
 
 	    const selectedIdSet = useMemo(

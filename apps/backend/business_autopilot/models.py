@@ -201,6 +201,7 @@ class QuickEstimate(models.Model):
     customer_id = models.CharField(max_length=64, blank=True, default="")
     estimate_sequence = models.PositiveIntegerField()
     estimate_number = models.CharField(max_length=32)
+    estimate_date = models.DateField(null=True, blank=True, db_index=True)
     mobile = models.CharField(max_length=30, db_index=True)
     client_name = models.CharField(max_length=180)
     notes = models.TextField(blank=True, default="")

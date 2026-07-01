@@ -15,7 +15,7 @@ import { bindGlobalTableActionTooltipEnhancer } from "./lib/tableActionTooltipEn
 import { bindGlobalTableOverflowEnhancer } from "./lib/tableOverflowEnhancer.js";
 
 // Debug build marker (helps verify the browser is running the latest frontend bundle).
-window.__WZ_FRONTEND_BUILD_ID = "2026-05-21T08:53+05:30";
+window.__WZ_FRONTEND_BUILD_ID = "2026-07-01T17:45+05:30";
 
 loadRemoteSharedUiCss();
 bindGlobalEmailRealtimeValidation();

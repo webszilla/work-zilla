@@ -651,6 +651,14 @@ function buildQuickEstimateEditPayload({
   };
 }
 
+function resolveSubmittedEstimateDate(inputRef, stateValue) {
+  const directValue = String(inputRef?.current?.value || "").trim();
+  if (directValue) {
+    return directValue;
+  }
+  return String(stateValue || "").trim();
+}
+
 async function extractImageDataUrls(fileList) {
   const files = Array.from(fileList || []).filter((file) => String(file?.type || "").startsWith("image/"));
   if (!files.length) {
@@ -719,6 +727,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   const [paymentProofError, setPaymentProofError] = useState("");
   const [paymentProofUploading, setPaymentProofUploading] = useState(false);
   const paymentProofDateInputRef = useRef(null);
+  const estimateDateInputRef = useRef(null);
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState("");
   const [editingEstimate, setEditingEstimate] = useState(null);
@@ -1813,6 +1822,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       }
     }
     const useEditFlow = Boolean(editingEstimate && !seedText);
+    const resolvedEstimateDate = useEditFlow
+      ? resolveSubmittedEstimateDate(estimateDateInputRef, editEstimateDate)
+      : "";
     setPrompt("");
     setNotice("");
     const userMessage = { id: `site-admin-user-${Date.now()}`, role: "user", text };
@@ -1825,7 +1837,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       const editPayload = useEditFlow
         ? buildQuickEstimateEditPayload({
           editingEstimate,
-          editEstimateDate,
+          editEstimateDate: resolvedEstimateDate,
           editMobile,
           editClientName,
           editNotes,
@@ -1854,7 +1866,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
           Number(row?.id) === Number(data.quick_estimate_id)
             ? {
               ...row,
-              estimate_date: editEstimateDate,
+              estimate_date: resolvedEstimateDate,
               mobile: editMobile,
               client_name: editClientName,
               created_at: data?.quick_estimate?.created_at || row.created_at,
@@ -2283,10 +2295,12 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                         <strong>Estimate Date</strong>
                       </span>
                       <input
+                        ref={estimateDateInputRef}
                         type="date"
                         className="form-control ba-site-admin-chat__status-date-input"
                         value={editEstimateDate}
                         onChange={(event) => setEditEstimateDate(event.target.value)}
+                        onInput={(event) => setEditEstimateDate(event.target.value)}
                         disabled={sending}
                         aria-label="Estimate date"
                       />

@@ -5188,14 +5188,20 @@ def _upsert_quick_estimate_contact(
 
 
 def _next_quick_estimate_number(org):
-    with transaction.atomic():
-        sequence, _ = QuickEstimateSequence.objects.select_for_update().get_or_create(
-            organization=org,
-            defaults={"next_number": 1},
-        )
-        current_number = max(1, int(sequence.next_number or 1))
-        sequence.next_number = current_number + 1
-        sequence.save(update_fields=["next_number", "updated_at"])
+    sequence, _ = QuickEstimateSequence.objects.select_for_update().get_or_create(
+        organization=org,
+        defaults={"next_number": 1},
+    )
+    highest_existing = (
+        QuickEstimate.objects
+        .filter(organization=org)
+        .aggregate(max_sequence=Max("estimate_sequence"))
+        .get("max_sequence")
+        or 0
+    )
+    current_number = max(1, int(sequence.next_number or 1), int(highest_existing) + 1)
+    sequence.next_number = current_number + 1
+    sequence.save(update_fields=["next_number", "updated_at"])
     return current_number, f"QE-{current_number:04d}"
 
 
@@ -9683,18 +9689,19 @@ def _site_admin_create_quick_estimate(org, user, collected):
         address=str(collected.get("address") or "").strip(),
         gst_number=str(collected.get("gst_number") or "").strip(),
     )
-    estimate_sequence, estimate_number = _next_quick_estimate_number(org)
     item_entries, parsed_total = _site_admin_parse_item_entries(
         collected.get("item_text"),
         fallback_total=collected.get("amount"),
     )
     amount = (parsed_total or _to_decimal(collected.get("amount"))).quantize(Decimal("0.01"))
     with transaction.atomic():
+        estimate_sequence, estimate_number = _next_quick_estimate_number(org)
         estimate = QuickEstimate.objects.create(
             organization=org,
             customer_id=str(customer_row.get("id") or "").strip(),
             estimate_sequence=estimate_sequence,
             estimate_number=estimate_number,
+            estimate_date=timezone.localdate(),
             mobile=mobile,
             client_name=str(client_name or customer_name or mobile).strip()[:180],
             notes="",
@@ -9759,12 +9766,13 @@ def _normalize_quick_estimate_progress_status(value: str) -> str:
 def _normalize_quick_estimate_edit_date(value, current_value=None):
     parsed = parse_date(str(value or "").strip() or "")
     if not parsed:
+        if isinstance(current_value, datetime):
+            current_dt = current_value
+            if timezone.is_naive(current_dt):
+                current_dt = timezone.make_aware(current_dt, timezone.get_current_timezone())
+            return timezone.localtime(current_dt).date()
         return current_value
-    current_dt = current_value if isinstance(current_value, datetime) else timezone.now()
-    if timezone.is_naive(current_dt):
-        current_dt = timezone.make_aware(current_dt, timezone.get_current_timezone())
-    merged = datetime.combine(parsed, current_dt.timetz().replace(tzinfo=None))
-    return timezone.make_aware(merged, timezone.get_current_timezone()) if timezone.is_naive(merged) else merged
+    return parsed
 
 
 def _site_admin_update_quick_estimate_items(
@@ -9797,10 +9805,19 @@ def _site_admin_update_quick_estimate_items(
         payment_proof_entries if payment_proof_entries is not None else payment_proof_images if payment_proof_images is not None else payment_proof_image or getattr(estimate, "payment_proof_image", "")
     )
     next_payment_proof_images = [entry.get("image") for entry in next_payment_proof_entries if str(entry.get("image") or "").strip()]
-    next_estimate_datetime = _normalize_quick_estimate_edit_date(estimate_date, estimate.created_at)
+    next_estimate_date = _normalize_quick_estimate_edit_date(
+        estimate_date,
+        getattr(estimate, "estimate_date", None) or estimate.created_at,
+    )
     changed_fields = []
-    previous_estimate_date = timezone.localtime(estimate.created_at).date().isoformat() if getattr(estimate, "created_at", None) else ""
-    next_estimate_date_label = timezone.localtime(next_estimate_datetime).date().isoformat() if next_estimate_datetime else previous_estimate_date
+    previous_estimate_value = getattr(estimate, "estimate_date", None)
+    if previous_estimate_value:
+        previous_estimate_date = previous_estimate_value.isoformat()
+    elif getattr(estimate, "created_at", None):
+        previous_estimate_date = timezone.localtime(estimate.created_at).date().isoformat()
+    else:
+        previous_estimate_date = ""
+    next_estimate_date_label = next_estimate_date.isoformat() if next_estimate_date else previous_estimate_date
     if next_estimate_date_label != previous_estimate_date:
         changed_fields.append("date")
     if next_mobile != estimate.mobile:
@@ -9812,7 +9829,7 @@ def _site_admin_update_quick_estimate_items(
     if item_text.strip():
         changed_fields.append("items")
     previous_snapshot = {
-        "estimate_date": timezone.localtime(estimate.created_at).date().isoformat() if getattr(estimate, "created_at", None) else "",
+        "estimate_date": previous_estimate_date,
         "mobile": estimate.mobile,
         "client_name": estimate.client_name,
         "notes": str(getattr(estimate, "notes", "") or ""),
@@ -9850,7 +9867,7 @@ def _site_admin_update_quick_estimate_items(
         else:
             customer_id = str(estimate.customer_id or "").strip()
         estimate.customer_id = customer_id
-        estimate.created_at = next_estimate_datetime
+        estimate.estimate_date = next_estimate_date
         estimate.mobile = next_mobile
         estimate.client_name = next_client_name or estimate.client_name
         estimate.notes = str(notes or getattr(estimate, "notes", "") or "").strip()[:120]
@@ -9884,7 +9901,7 @@ def _site_admin_update_quick_estimate_items(
             estimate.delivery_verified_by = None
         estimate.save(update_fields=[
             "customer_id",
-            "created_at",
+            "estimate_date",
             "mobile",
             "client_name",
             "notes",
@@ -9922,7 +9939,7 @@ def _site_admin_update_quick_estimate_items(
             snapshot={
                 "before": previous_snapshot,
                 "after": {
-                    "estimate_date": timezone.localtime(estimate.created_at).date().isoformat() if getattr(estimate, "created_at", None) else "",
+                    "estimate_date": estimate.estimate_date.isoformat() if getattr(estimate, "estimate_date", None) else "",
                     "mobile": estimate.mobile,
                     "client_name": estimate.client_name,
                     "notes": estimate.notes,
@@ -10283,7 +10300,7 @@ def quick_estimates(request, estimate_id: int = None):
             "delivery_verified_by",
         )
         .prefetch_related("items")
-        .order_by("-created_at", "-id")
+        .order_by("-estimate_sequence", "-id")
     )
     if resolved_method == "GET" and estimate_id is None:
         return JsonResponse({"quick_estimates": [_serialize_quick_estimate(row, actor=request.user) for row in qs[:100]]})

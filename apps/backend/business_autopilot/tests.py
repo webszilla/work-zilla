@@ -2584,6 +2584,63 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         self.assertEqual(QuickEstimate.objects.filter(organization=self.org, estimate_number="QE-0001").count(), 1)
         self.assertEqual(QuickEstimate.objects.filter(organization=other_org, estimate_number="QE-0001").count(), 1)
 
+    def test_quick_estimate_number_uses_next_continuous_sequence_after_sequence_drift(self):
+        QuickEstimateSequence.objects.create(organization=self.org, next_number=2)
+        QuickEstimate.objects.create(
+            organization=self.org,
+            estimate_sequence=5,
+            estimate_number="QE-0005",
+            estimate_date=date(2026, 6, 21),
+            mobile="9092833701",
+            client_name="Guru",
+            subtotal=Decimal("100.00"),
+            tax_amount=Decimal("0.00"),
+            total_amount=Decimal("100.00"),
+            status=QuickEstimate.STATUS_CREATED,
+        )
+
+        created = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={"message": "9092833701\nGuru\nBusiness Card Rs.1050"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(created.json()["estimate_number"], "QE-0006")
+
+    def test_quick_estimate_list_returns_latest_estimate_number_first(self):
+        QuickEstimate.objects.create(
+            organization=self.org,
+            estimate_sequence=1,
+            estimate_number="QE-0001",
+            estimate_date=date(2026, 6, 21),
+            mobile="9000000001",
+            client_name="Old",
+            subtotal=Decimal("100.00"),
+            tax_amount=Decimal("0.00"),
+            total_amount=Decimal("100.00"),
+            status=QuickEstimate.STATUS_CREATED,
+        )
+        QuickEstimate.objects.create(
+            organization=self.org,
+            estimate_sequence=2,
+            estimate_number="QE-0002",
+            estimate_date=date(2026, 6, 22),
+            mobile="9000000002",
+            client_name="New",
+            subtotal=Decimal("200.00"),
+            tax_amount=Decimal("0.00"),
+            total_amount=Decimal("200.00"),
+            status=QuickEstimate.STATUS_CREATED,
+        )
+
+        response = self.client.get("/api/business-autopilot/quick-estimates/")
+
+        self.assertEqual(response.status_code, 200)
+        rows = response.json()["quick_estimates"]
+        self.assertEqual(rows[0]["estimate_number"], "QE-0002")
+        self.assertEqual(rows[1]["estimate_number"], "QE-0001")
+
     def test_quick_estimate_detail_patch_updates_item_list(self):
         created = self.client.post(
             "/api/business-autopilot/site-admin/chat",
@@ -2674,7 +2731,7 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         )
         estimate_id = created.json()["quick_estimate_id"]
         estimate = QuickEstimate.objects.get(organization=self.org, id=estimate_id)
-        original_date = timezone.localtime(estimate.created_at).date().isoformat()
+        original_date = (estimate.estimate_date or timezone.localtime(estimate.created_at).date()).isoformat()
 
         response = self.client.patch(
             f"/api/business-autopilot/quick-estimates/{estimate_id}/",
@@ -2689,8 +2746,8 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         estimate.refresh_from_db()
-        self.assertNotEqual(timezone.localtime(estimate.created_at).date().isoformat(), original_date)
-        self.assertEqual(timezone.localtime(estimate.created_at).date().isoformat(), "2026-06-30")
+        self.assertNotEqual((estimate.estimate_date or timezone.localtime(estimate.created_at).date()).isoformat(), original_date)
+        self.assertEqual(estimate.estimate_date.isoformat(), "2026-06-30")
 
         detail = self.client.get(f"/api/business-autopilot/quick-estimates/{estimate_id}/")
         self.assertEqual(detail.status_code, 200)
