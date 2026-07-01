@@ -209,6 +209,17 @@ function filterAssignableOrgUsers(rows) {
     : [];
 }
 
+function isInteractiveField(element) {
+  if (!(element instanceof HTMLElement)) {
+    return false;
+  }
+  const tagName = String(element.tagName || "").toLowerCase();
+  if (["input", "textarea", "select", "button"].includes(tagName)) {
+    return true;
+  }
+  return element.isContentEditable;
+}
+
 function formatEstimateItemsForPrompt(estimate) {
   const items = Array.isArray(estimate?.items) ? estimate.items : [];
   return items
@@ -867,6 +878,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
 
   useEffect(() => {
     if (!composerRef.current) {
+      return;
+    }
+    if (typeof document !== "undefined" && isInteractiveField(document.activeElement)) {
       return;
     }
     composerRef.current.focus();
