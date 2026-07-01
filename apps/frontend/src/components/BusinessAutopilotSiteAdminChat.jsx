@@ -714,6 +714,37 @@ function buildQuickEstimateEditFormData({
   return formData;
 }
 
+function buildQuickEstimateEditPayload({
+  editingEstimate,
+  editEstimateDate,
+  editMobile,
+  editClientName,
+  editNotes,
+  editPaymentCompleted,
+  editPaymentMode,
+  editJobCompleted,
+  editDeliveryCompleted,
+  editPaymentProofEntries,
+  text,
+}) {
+  return {
+    __action: "PATCH",
+    quick_estimate_id: Number(editingEstimate?.id) || null,
+    estimate_date: String(editEstimateDate || ""),
+    mobile: String(editMobile || ""),
+    client_name: String(editClientName || ""),
+    notes: String(editNotes || ""),
+    payment_status: editPaymentCompleted ? "completed" : "non_completed",
+    payment_mode: String(editPaymentMode || ""),
+    job_status: editJobCompleted ? "completed" : "non_completed",
+    delivery_status: editDeliveryCompleted ? "completed" : "non_completed",
+    item_text: String(text || ""),
+    payment_proof_entries: editPaymentMode === "online"
+      ? (Array.isArray(editPaymentProofEntries) ? editPaymentProofEntries : [])
+      : [],
+  };
+}
+
 async function extractImageDataUrls(fileList) {
   const files = Array.from(fileList || []).filter((file) => String(file?.type || "").startsWith("image/"));
   if (!files.length) {
@@ -1229,11 +1260,15 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setNotice("");
   }
 
-  function openStatusPreview(event, images, tooltip) {
+  function openStatusPreview(anchor, images, tooltip) {
     if (typeof window === "undefined") {
       return;
     }
-    const rect = event.currentTarget.getBoundingClientRect();
+    const element = anchor?.currentTarget || anchor?.target || anchor;
+    if (!element || typeof element.getBoundingClientRect !== "function") {
+      return;
+    }
+    const rect = element.getBoundingClientRect();
     const tooltipWidth = Math.min(220, Math.max(120, String(tooltip || "").length * 7 + 20));
     setStatusTooltip({
       text: tooltip || "",
@@ -1253,11 +1288,15 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     });
   }
 
-  function openActionTooltip(event, tooltip) {
+  function openActionTooltip(anchor, tooltip) {
     if (typeof window === "undefined") {
       return;
     }
-    const rect = event.currentTarget.getBoundingClientRect();
+    const element = anchor?.currentTarget || anchor?.target || anchor;
+    if (!element || typeof element.getBoundingClientRect !== "function") {
+      return;
+    }
+    const rect = element.getBoundingClientRect();
     const tooltipWidth = Math.min(220, Math.max(120, String(tooltip || "").length * 7 + 20));
     setStatusTooltip({
       text: tooltip || "",
@@ -1291,8 +1330,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   }
 
   async function handleStatusIconHover(event, row, item) {
+    const anchor = event?.currentTarget || event?.target || null;
     const previewImages = item.key === "payment" ? getEstimatePaymentProofImages(row) : [];
-    openStatusPreview(event, previewImages, item.tooltip);
+    openStatusPreview(anchor, previewImages, item.tooltip);
     if (item.key !== "payment" || previewImages.length || !item.completed) {
       return;
     }
@@ -1300,7 +1340,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     if (!fetchedImages.length) {
       return;
     }
-    openStatusPreview(event, fetchedImages, item.tooltip);
+    openStatusPreview(anchor, fetchedImages, item.tooltip);
   }
 
   async function handleStatusIconClick(row, item) {
@@ -1930,22 +1970,37 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setSending(true);
     try {
       const editEndpoint = QUICK_ESTIMATES_COLLECTION_API;
+      const hasNewPaymentProofFiles = Array.isArray(editPaymentProofFiles) && editPaymentProofFiles.length > 0;
       const editPayload = useEditFlow
         ? (
-          buildQuickEstimateEditFormData({
-            editingEstimate,
-            editEstimateDate: resolvedEstimateDate,
-            editMobile,
-            editClientName,
-            editNotes,
-            editPaymentCompleted,
-            editPaymentMode,
-            editJobCompleted,
-            editDeliveryCompleted,
-            editPaymentProofEntries,
-            editPaymentProofFiles,
-            text,
-          })
+          hasNewPaymentProofFiles
+            ? buildQuickEstimateEditFormData({
+              editingEstimate,
+              editEstimateDate: resolvedEstimateDate,
+              editMobile,
+              editClientName,
+              editNotes,
+              editPaymentCompleted,
+              editPaymentMode,
+              editJobCompleted,
+              editDeliveryCompleted,
+              editPaymentProofEntries,
+              editPaymentProofFiles,
+              text,
+            })
+            : JSON.stringify(buildQuickEstimateEditPayload({
+              editingEstimate,
+              editEstimateDate: resolvedEstimateDate,
+              editMobile,
+              editClientName,
+              editNotes,
+              editPaymentCompleted,
+              editPaymentMode,
+              editJobCompleted,
+              editDeliveryCompleted,
+              editPaymentProofEntries,
+              text,
+            }))
         )
         : null;
       const data = useEditFlow

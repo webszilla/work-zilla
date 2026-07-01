@@ -2362,7 +2362,7 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 
 .ba-site-admin-chat__action-grid {
   display: grid;
-  grid-template-columns: repeat(6, 38px);
+  grid-template-columns: repeat(4, 38px);
   justify-content: end;
   gap: 8px;
   align-content: center;
