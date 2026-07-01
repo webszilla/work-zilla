@@ -408,8 +408,13 @@ function normalizeEstimateLifecycle(row) {
   const paymentStatus = String(row?.payment_status || row?.paymentStatus || "").trim().toLowerCase();
   const jobStatus = String(row?.job_status || row?.jobStatus || "").trim().toLowerCase();
   const deliveryStatus = String(row?.delivery_status || row?.deliveryStatus || "").trim().toLowerCase();
+  const paymentMode = String(row?.payment_mode || row?.paymentMode || "").trim().toLowerCase();
+  const paymentPartialPaid = Boolean(row?.payment_partial_paid || row?.paymentPartialPaid)
+    || (paymentStatus !== "completed" && paymentMode === "online" && normalizePaymentProofEntries(row).length > 0);
   return {
     paymentStatus,
+    paymentMode,
+    paymentPartialPaid,
     jobStatus,
     deliveryStatus,
   };
@@ -449,7 +454,8 @@ function matchEstimateFilter(row, filterKey) {
 }
 
 function buildEstimateStatusNote(row) {
-  const paymentMode = String(row?.payment_mode || row?.paymentMode || "").trim().toLowerCase();
+  const lifecycle = normalizeEstimateLifecycle(row);
+  const paymentMode = lifecycle.paymentMode;
   const paymentTitle = paymentMode === "online"
     ? "Online Payment"
     : paymentMode === "cash"
@@ -457,12 +463,19 @@ function buildEstimateStatusNote(row) {
       : "Payment";
   const statuses = [
     { title: "Job", value: row?.job_status || row?.jobStatus },
-    { title: paymentTitle, value: row?.payment_status || row?.paymentStatus },
+    {
+      title: paymentTitle,
+      value: lifecycle.paymentPartialPaid ? "partial" : row?.payment_status || row?.paymentStatus,
+    },
     { title: "Delivery", value: row?.delivery_status || row?.deliveryStatus },
   ];
   return statuses
-    .filter((item) => String(item.value || "").trim().toLowerCase() === "completed")
-    .map((item) => `${item.title}: Done`)
+    .filter((item) => ["completed", "partial"].includes(String(item.value || "").trim().toLowerCase()))
+    .map((item) => (
+      String(item.value || "").trim().toLowerCase() === "partial"
+        ? `${item.title}: Partial`
+        : `${item.title}: Done`
+    ))
     .join(" • ");
 }
 
@@ -510,13 +523,21 @@ function getStatusProgressMeta(row) {
   const paymentMeta = getStatusUpdateMeta(row, "payment");
   const jobMeta = getStatusUpdateMeta(row, "job");
   const deliveryMeta = getStatusUpdateMeta(row, "delivery");
+  const lifecycle = normalizeEstimateLifecycle(row);
+  const paymentIsPartial = lifecycle.paymentPartialPaid && !paymentMeta.completed;
+  const paymentUpdaterLabel = paymentMeta.shortName || getPaymentVerifierLabel(row) || "-";
   return [
     {
       key: "payment",
       icon: "bi-cash-coin",
       completed: paymentMeta.completed,
-      tooltip: paymentMeta.completed ? `Payment Completed: ${paymentMeta.shortName || "-"}` : "Payment Pending",
-      updaterCount: paymentMeta.count,
+      partial: paymentIsPartial,
+      tooltip: paymentMeta.completed
+        ? `Payment Completed: ${paymentUpdaterLabel}`
+        : paymentIsPartial
+          ? `Partial amount paid: ${paymentUpdaterLabel}`
+          : "Payment Pending",
+      updaterCount: paymentMeta.completed || paymentIsPartial ? paymentMeta.count : 0,
       previewImage: getEstimatePaymentProofImage(row),
     },
     {
@@ -567,6 +588,10 @@ function resolvePreviewImageUrl(value) {
 
 function getPaymentVerifierLabel(row) {
   return String(row?.payment_status_updated_by_name || row?.payment_verified_by_name || "").trim();
+}
+
+function isEstimatePaymentPartial(row) {
+  return normalizeEstimateLifecycle(row).paymentPartialPaid;
 }
 
 function readFileAsDataUrl(file) {
@@ -665,15 +690,16 @@ function buildQuickEstimateEditFormData({
   formData.append("client_name", String(editClientName || ""));
   formData.append("notes", String(editNotes || ""));
   formData.append("payment_status", editPaymentCompleted ? "completed" : "non_completed");
-  formData.append("payment_mode", editPaymentCompleted ? String(editPaymentMode || "") : "");
+  formData.append("payment_mode", String(editPaymentMode || ""));
   formData.append("job_status", editJobCompleted ? "completed" : "non_completed");
   formData.append("delivery_status", editDeliveryCompleted ? "completed" : "non_completed");
   formData.append("item_text", String(text || ""));
   formData.append(
     "payment_proof_entries",
-    JSON.stringify(editPaymentCompleted && editPaymentMode === "online" ? persistedEntries : []),
+    JSON.stringify(editPaymentMode === "online" ? persistedEntries : []),
   );
-  if (!editPaymentCompleted || editPaymentMode !== "online") {
+  if (editPaymentMode !== "online") {
+    formData.set("payment_proof_entries", JSON.stringify([]));
     return formData;
   }
   const uploadPaidDate = String(uploadedEntries[0]?.paid_date || "").trim();
@@ -752,6 +778,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   const [paymentProofActiveIndex, setPaymentProofActiveIndex] = useState(0);
   const [paymentProofEditingIndex, setPaymentProofEditingIndex] = useState(null);
   const [paymentProofPaidDate, setPaymentProofPaidDate] = useState("");
+  const [paymentProofFullPaid, setPaymentProofFullPaid] = useState(false);
   const [paymentProofDraftFiles, setPaymentProofDraftFiles] = useState([]);
   const [paymentProofError, setPaymentProofError] = useState("");
   const [paymentProofUploading, setPaymentProofUploading] = useState(false);
@@ -806,6 +833,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     ...(Array.isArray(paymentProofDraftEntries) ? paymentProofDraftEntries : []),
     ...paymentProofPendingRows,
   ];
+  const hasEditPaymentProof = editPaymentMode === "online" && editPaymentProofEntries.length > 0;
+  const showEditPaymentSummary = editPaymentCompleted || editPaymentMode === "cash" || hasEditPaymentProof;
+  const paymentStatusLabel = editPaymentCompleted ? "Completed" : hasEditPaymentProof ? "Advance Paid" : "Pending";
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -967,6 +997,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setEditNotes("");
     setEditMobileSearchOpen(false);
     setEditPaymentCompleted(false);
+    setEditPaymentMode("");
     setEditJobCompleted(false);
     setEditDeliveryCompleted(false);
     setEditPaymentProofEntries([]);
@@ -978,6 +1009,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setPaymentProofActiveIndex(0);
     setPaymentProofEditingIndex(null);
     setPaymentProofPaidDate("");
+    setPaymentProofFullPaid(false);
     setPaymentProofDraftFiles([]);
     setPaymentProofError("");
     setPaymentProofUploading(false);
@@ -1051,6 +1083,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setPaymentProofDraftFiles([]);
     setPaymentProofError("");
     setPaymentProofPaidDate(String(nextEntries[0]?.paid_date || "").trim());
+    setPaymentProofFullPaid(Boolean(editPaymentCompleted));
     setPaymentProofModalOpen(true);
   }
 
@@ -1075,6 +1108,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setPaymentProofDraftFiles([]);
     setPaymentProofError("");
     setPaymentProofPaidDate("");
+    setPaymentProofFullPaid(true);
     setNotice("");
     setPaymentModeModalOpen(false);
     setPaymentProofModalOpen(false);
@@ -1097,6 +1131,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setPaymentProofDraftFiles([]);
     setPaymentProofError("");
     setPaymentProofPaidDate(String(nextEntries[0]?.paid_date || "").trim());
+    setPaymentProofFullPaid(Boolean(editPaymentCompleted));
   }
 
   function savePaymentProofModal() {
@@ -1123,11 +1158,12 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setEditPaymentProofEntries(normalizedEntries);
     setEditPaymentProofFiles(paymentProofDraftFiles);
     setEditPaymentMode("online");
-    setEditPaymentCompleted(true);
+    setEditPaymentCompleted(Boolean(paymentProofFullPaid));
     setPaymentProofModalOpen(false);
     setPaymentProofPendingImages([]);
     setPaymentProofEditingIndex(null);
     setPaymentProofPaidDate("");
+    setPaymentProofFullPaid(false);
     setPaymentProofError("");
     setNotice("");
   }
@@ -1189,6 +1225,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setPaymentProofModalOpen(false);
     setPaymentProofError("");
     setPaymentProofPaidDate(String(editPaymentProofEntries?.[0]?.paid_date || "").trim());
+    setPaymentProofFullPaid(false);
     setNotice("");
   }
 
@@ -1752,6 +1789,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       setPaymentProofDraftEntries(normalizePaymentProofEntries(estimate));
       setPaymentProofDraftFiles([]);
       setPaymentProofPaidDate("");
+      setPaymentProofFullPaid(String(estimate.payment_status || "").toLowerCase() === "completed");
       appendAssistantMessage(
         {
           reply: `Quick Estimate ${estimate.estimate_number} loaded for editing. You can update mobile number, client name, and full item list now.`,
@@ -1891,9 +1929,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setMessages((prev) => [...prev, userMessage]);
     setSending(true);
     try {
-      const editEndpoint = useEditFlow && editingEstimate?.id
-        ? `/api/business-autopilot/quick-estimates/${editingEstimate.id}/`
-        : QUICK_ESTIMATES_COLLECTION_API;
+      const editEndpoint = QUICK_ESTIMATES_COLLECTION_API;
       const editPayload = useEditFlow
         ? (
           buildQuickEstimateEditFormData({
@@ -1935,12 +1971,13 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
               created_at: data?.quick_estimate?.created_at || row.created_at,
               notes: editNotes,
               payment_status: editPaymentCompleted ? "completed" : "non_completed",
-              payment_mode: editPaymentCompleted ? editPaymentMode : "",
+              payment_mode: editPaymentMode,
+              payment_partial_paid: !editPaymentCompleted && editPaymentMode === "online" && editPaymentProofEntries.length > 0,
               job_status: editJobCompleted ? "completed" : "non_completed",
               delivery_status: editDeliveryCompleted ? "completed" : "non_completed",
-              payment_proof_image: editPaymentCompleted ? (data?.quick_estimate?.payment_proof_image || editPaymentProofEntries?.[0]?.image || "") : "",
-              payment_proof_images: editPaymentCompleted ? normalizePaymentProofEntries(data?.quick_estimate || { payment_proof_entries: editPaymentProofEntries }).map((item) => item.image) : [],
-              payment_proof_entries: editPaymentCompleted ? normalizePaymentProofEntries(data?.quick_estimate || { payment_proof_entries: editPaymentProofEntries }) : [],
+              payment_proof_image: editPaymentMode === "online" ? (data?.quick_estimate?.payment_proof_image || editPaymentProofEntries?.[0]?.image || "") : "",
+              payment_proof_images: editPaymentMode === "online" ? normalizePaymentProofEntries(data?.quick_estimate || { payment_proof_entries: editPaymentProofEntries }).map((item) => item.image) : [],
+              payment_proof_entries: editPaymentMode === "online" ? normalizePaymentProofEntries(data?.quick_estimate || { payment_proof_entries: editPaymentProofEntries }) : [],
             }
             : row
         )));
@@ -2324,7 +2361,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                       />
                       <span className="ba-site-admin-chat__status-switch-copy">
                         <strong>Payment</strong>
-                        <small>{editPaymentCompleted ? "Completed" : "Pending"}</small>
+                        <small>{paymentStatusLabel}</small>
                       </span>
                     </label>
                     <label className="form-check form-switch ba-site-admin-chat__status-switch">
@@ -2369,7 +2406,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                       />
                     </div>
                   </div>
-                  {editPaymentCompleted ? (
+                  {showEditPaymentSummary ? (
                     <div className="ba-site-admin-chat__proof-summary">
                       <button
                         type="button"
@@ -2389,7 +2426,13 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                           >
                             {editPaymentProofEntries.length ? "Change Payment Proof" : "Upload Payment Proof"}
                           </button>
-                          {editPaymentProofEntries.length ? <small>{`${editPaymentProofEntries.length} payment proof image${editPaymentProofEntries.length === 1 ? "" : "s"} attached.`}</small> : <small>Payment proof required.</small>}
+                          {editPaymentProofEntries.length ? (
+                            <small>
+                              {editPaymentCompleted
+                                ? `${editPaymentProofEntries.length} payment proof image${editPaymentProofEntries.length === 1 ? "" : "s"} attached.`
+                                : `${editPaymentProofEntries.length} payment proof image${editPaymentProofEntries.length === 1 ? "" : "s"} attached. Partial payment pending.`}
+                            </small>
+                          ) : <small>Payment proof required.</small>}
                         </>
                       ) : editPaymentMode === "cash" ? <small>Cash payment selected.</small> : <small>Select payment mode.</small>}
                     </div>
@@ -2587,7 +2630,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                                 {String(row.status || "created").replace(/_/g, " ")}
                               </span>
                               {getPaymentVerifierLabel(row) ? (
-                                <small className="ba-site-admin-chat__status-verified">
+                                <small className={`ba-site-admin-chat__status-verified ${isEstimatePaymentPartial(row) ? "is-partial" : ""}`}>
                                   <i className="bi bi-cash-coin" aria-hidden="true" />
                                   <span>{getPaymentVerifierLabel(row)}</span>
                                 </small>
@@ -2596,7 +2639,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                                 {getStatusProgressMeta(row).map((item) => (
                                   <span
                                     key={item.key}
-                                    className={`ba-site-admin-chat__status-icon ba-site-admin-chat__status-icon--${item.key} ${item.completed ? "is-complete" : "is-pending"}`}
+                                    className={`ba-site-admin-chat__status-icon ba-site-admin-chat__status-icon--${item.key} ${item.completed ? "is-complete" : item.partial ? "is-partial" : "is-pending"}`}
                                     aria-label={item.tooltip}
                                     onMouseEnter={(event) => handleStatusIconHover(event, row, item)}
                                     onMouseLeave={closeStatusPreview}
@@ -2936,6 +2979,16 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
               <div>
                 <div className="ba-site-admin-chat__modal-title">Upload Payment Proof</div>
                 <div className="ba-site-admin-chat__modal-subtitle">Upload, drag-drop, or paste the payment screenshot/image here.</div>
+                <label className="form-check ba-site-admin-chat__proof-check">
+                  <input
+                    type="checkbox"
+                    className="form-check-input"
+                    checked={paymentProofFullPaid}
+                    onChange={(event) => setPaymentProofFullPaid(event.target.checked)}
+                    disabled={paymentProofUploading}
+                  />
+                  <span className="form-check-label">Full amount paid</span>
+                </label>
               </div>
               <button
                 type="button"

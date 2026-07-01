@@ -5806,9 +5806,24 @@ def _serialize_quick_estimate_payment_proof_images(value):
     return json.dumps(rows) if rows else ""
 
 
+def _quick_estimate_has_partial_payment(*, payment_status="", payment_mode="", payment_proof_entries=None):
+    normalized_status = str(payment_status or "").strip().lower()
+    normalized_mode = str(payment_mode or "").strip().lower()
+    normalized_entries = _normalize_quick_estimate_payment_proof_entries(payment_proof_entries or [])
+    has_payment_proof = any(str(entry.get("image") or "").strip() for entry in normalized_entries)
+    if normalized_status == QuickEstimate.PROGRESS_COMPLETED:
+        return False
+    return normalized_mode == "online" and has_payment_proof
+
+
 def _build_quick_estimate_status_update_summary(row, status_key, current_actor=None):
     field_name = f"{status_key}_status"
     target_value = str(getattr(row, field_name, "") or "").strip().lower()
+    is_partial_payment = status_key == "payment" and _quick_estimate_has_partial_payment(
+        payment_status=target_value,
+        payment_mode=getattr(row, "payment_mode", ""),
+        payment_proof_entries=getattr(row, "payment_proof_image", ""),
+    )
     names = []
     seen = set()
 
@@ -5834,18 +5849,23 @@ def _build_quick_estimate_status_update_summary(row, status_key, current_actor=N
         after = snapshot.get("after") if isinstance(snapshot.get("after"), dict) else {}
         before_value = str(before.get(field_name) or "").strip().lower()
         after_value = str(after.get(field_name) or "").strip().lower()
-        if before_value == after_value:
+        after_is_partial_payment = status_key == "payment" and _quick_estimate_has_partial_payment(
+            payment_status=after_value,
+            payment_mode=after.get("payment_mode"),
+            payment_proof_entries=after.get("payment_proof_entries") or after.get("payment_proof_image"),
+        )
+        if before_value == after_value and not after_is_partial_payment:
             continue
-        if after_value != QuickEstimate.PROGRESS_COMPLETED:
+        if after_value != QuickEstimate.PROGRESS_COMPLETED and not after_is_partial_payment:
             continue
         add_name(_get_org_user_display_name(getattr(history_row, "actor", None)))
 
     add_name(_get_org_user_display_name(current_actor))
     latest_name = names[-1] if names else ""
     return {
-        "count": len(names) if target_value == QuickEstimate.PROGRESS_COMPLETED else 0,
-        "latest_name": latest_name if target_value == QuickEstimate.PROGRESS_COMPLETED else "",
-        "names": names if target_value == QuickEstimate.PROGRESS_COMPLETED else [],
+        "count": len(names) if target_value == QuickEstimate.PROGRESS_COMPLETED or is_partial_payment else 0,
+        "latest_name": latest_name if target_value == QuickEstimate.PROGRESS_COMPLETED or is_partial_payment else "",
+        "names": names if target_value == QuickEstimate.PROGRESS_COMPLETED or is_partial_payment else [],
     }
 
 
@@ -5873,9 +5893,14 @@ def _serialize_quick_estimate(
         payment_verified_by_name = _get_org_user_display_name(payment_verified_by)
         job_verified_by_name = _get_org_user_display_name(job_verified_by)
         delivery_verified_by_name = _get_org_user_display_name(delivery_verified_by)
+        payment_has_partial = _quick_estimate_has_partial_payment(
+            payment_status=getattr(row, "payment_status", ""),
+            payment_mode=getattr(row, "payment_mode", ""),
+            payment_proof_entries=getattr(row, "payment_proof_image", ""),
+        )
         payment_update_summary = {
-            "count": 1 if str(getattr(row, "payment_status", "") or "").strip().lower() == QuickEstimate.PROGRESS_COMPLETED and payment_verified_by_name else 0,
-            "latest_name": payment_verified_by_name,
+            "count": 1 if (str(getattr(row, "payment_status", "") or "").strip().lower() == QuickEstimate.PROGRESS_COMPLETED or payment_has_partial) and payment_verified_by_name else 0,
+            "latest_name": payment_verified_by_name if payment_verified_by_name else "",
             "names": [payment_verified_by_name] if payment_verified_by_name else [],
         }
         job_update_summary = {
@@ -5890,6 +5915,13 @@ def _serialize_quick_estimate(
         }
     payment_proof_entries = _normalize_quick_estimate_payment_proof_entries(getattr(row, "payment_proof_image", ""))
     payment_proof_images = [entry.get("image") for entry in payment_proof_entries if str(entry.get("image") or "").strip()]
+    payment_status_value = str(getattr(row, "payment_status", "") or "")
+    payment_mode_value = str(getattr(row, "payment_mode", "") or "")
+    payment_partial_paid = _quick_estimate_has_partial_payment(
+        payment_status=payment_status_value,
+        payment_mode=payment_mode_value,
+        payment_proof_entries=payment_proof_entries,
+    )
     if not include_payment_proofs:
         payment_proof_entries = [
             {
@@ -5912,8 +5944,9 @@ def _serialize_quick_estimate(
         "tax_amount": _decimal_to_string(row.tax_amount),
         "total_amount": _decimal_to_string(row.total_amount),
         "status": row.status,
-        "payment_status": str(getattr(row, "payment_status", "") or ""),
-        "payment_mode": str(getattr(row, "payment_mode", "") or ""),
+        "payment_status": payment_status_value,
+        "payment_mode": payment_mode_value,
+        "payment_partial_paid": payment_partial_paid,
         "job_status": str(getattr(row, "job_status", "") or ""),
         "delivery_status": str(getattr(row, "delivery_status", "") or ""),
         "payment_proof_image": payment_proof_images[0] if payment_proof_images else "",
@@ -9835,6 +9868,13 @@ def _site_admin_update_quick_estimate_items(
         payment_proof_entries if payment_proof_entries is not None else payment_proof_images if payment_proof_images is not None else payment_proof_image or getattr(estimate, "payment_proof_image", "")
     )
     next_payment_proof_images = [entry.get("image") for entry in next_payment_proof_entries if str(entry.get("image") or "").strip()]
+    next_payment_status = _normalize_quick_estimate_progress_status(payment_status or getattr(estimate, "payment_status", ""))
+    next_payment_mode = str(payment_mode or getattr(estimate, "payment_mode", "") or "").strip().lower()[:20]
+    next_payment_partial_paid = _quick_estimate_has_partial_payment(
+        payment_status=next_payment_status,
+        payment_mode=next_payment_mode,
+        payment_proof_entries=next_payment_proof_entries,
+    )
     next_estimate_date = _normalize_quick_estimate_edit_date(
         estimate_date,
         getattr(estimate, "estimate_date", None) or estimate.created_at,
@@ -9905,11 +9945,15 @@ def _site_admin_update_quick_estimate_items(
         estimate.tax_amount = Decimal("0.00")
         estimate.total_amount = amount
         estimate.status = QuickEstimate.STATUS_CREATED
-        estimate.payment_status = _normalize_quick_estimate_progress_status(payment_status or getattr(estimate, "payment_status", ""))
-        estimate.payment_mode = str(payment_mode or getattr(estimate, "payment_mode", "") or "").strip().lower()[:20]
+        estimate.payment_status = next_payment_status
+        estimate.payment_mode = next_payment_mode
         estimate.job_status = _normalize_quick_estimate_progress_status(job_status or getattr(estimate, "job_status", ""))
         estimate.delivery_status = _normalize_quick_estimate_progress_status(delivery_status or getattr(estimate, "delivery_status", ""))
         if estimate.payment_status == QuickEstimate.PROGRESS_COMPLETED and estimate.payment_mode == "online":
+            estimate.payment_proof_image = _serialize_quick_estimate_payment_proof_entries(next_payment_proof_entries)
+            if user is not None:
+                estimate.payment_verified_by = user
+        elif next_payment_partial_paid:
             estimate.payment_proof_image = _serialize_quick_estimate_payment_proof_entries(next_payment_proof_entries)
             if user is not None:
                 estimate.payment_verified_by = user
@@ -9975,6 +10019,7 @@ def _site_admin_update_quick_estimate_items(
                     "notes": estimate.notes,
                     "payment_status": estimate.payment_status,
                     "payment_mode": estimate.payment_mode,
+                    "payment_partial_paid": next_payment_partial_paid,
                     "job_status": estimate.job_status,
                     "delivery_status": estimate.delivery_status,
                     "payment_proof_image": estimate.payment_proof_image,
@@ -10618,7 +10663,11 @@ def quick_estimates(request, estimate_id: int = None):
             or getattr(row, "payment_proof_image", "")
         )
         next_payment_proof_images = [entry.get("image") for entry in next_payment_proof_entries if str(entry.get("image") or "").strip()]
-        next_payment_proof_image = next_payment_proof_images[0] if next_payment_proof_images else ""
+        next_payment_partial_paid = _quick_estimate_has_partial_payment(
+            payment_status=next_payment_status,
+            payment_mode=next_payment_mode,
+            payment_proof_entries=next_payment_proof_entries,
+        )
         if next_payment_status == QuickEstimate.PROGRESS_COMPLETED and next_payment_mode == "online" and not next_payment_proof_images:
             return JsonResponse({"detail": "payment_proof_required", "message": "Please upload the payment proof image."}, status=400)
 
@@ -10630,15 +10679,18 @@ def quick_estimates(request, estimate_id: int = None):
             "payment_proof_entries": _normalize_quick_estimate_payment_proof_entries(getattr(row, "payment_proof_image", "")),
         }
         row.payment_status = next_payment_status
-        row.payment_mode = next_payment_mode if next_payment_status == QuickEstimate.PROGRESS_COMPLETED else ""
+        row.payment_mode = next_payment_mode if next_payment_status == QuickEstimate.PROGRESS_COMPLETED or next_payment_partial_paid else ""
         if row.payment_status == QuickEstimate.PROGRESS_COMPLETED and row.payment_mode == "online":
+            row.payment_proof_image = _serialize_quick_estimate_payment_proof_entries(next_payment_proof_entries)
+            row.payment_verified_by = request.user
+        elif next_payment_partial_paid:
             row.payment_proof_image = _serialize_quick_estimate_payment_proof_entries(next_payment_proof_entries)
             row.payment_verified_by = request.user
         elif row.payment_status == QuickEstimate.PROGRESS_COMPLETED and row.payment_mode == "cash":
             row.payment_proof_image = ""
             row.payment_verified_by = request.user
         else:
-            row.payment_proof_image = previous_snapshot["payment_proof_image"]
+            row.payment_proof_image = ""
             row.payment_verified_by = None
         row.save(update_fields=["payment_status", "payment_mode", "payment_proof_image", "payment_verified_by", "updated_at"])
         _record_quick_estimate_history(
@@ -10651,6 +10703,7 @@ def quick_estimates(request, estimate_id: int = None):
                 "after": {
                     "payment_status": row.payment_status,
                     "payment_mode": row.payment_mode,
+                    "payment_partial_paid": next_payment_partial_paid,
                     "payment_proof_image": row.payment_proof_image,
                     "payment_proof_images": next_payment_proof_images,
                     "payment_proof_entries": next_payment_proof_entries,
