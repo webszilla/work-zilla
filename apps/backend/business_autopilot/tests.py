@@ -2664,6 +2664,38 @@ class BusinessAutopilotSiteAdminQuickEstimateTests(TestCase):
         self.assertEqual(len(items), 2)
         self.assertEqual(str(estimate.total_amount), "2000.00")
 
+    def test_quick_estimate_detail_patch_updates_estimate_date(self):
+        created = self.client.post(
+            "/api/business-autopilot/site-admin/chat",
+            data={
+                "message": "9092833701\nGuru\nBusiness Card 500 nos Rs.1050",
+            },
+            content_type="application/json",
+        )
+        estimate_id = created.json()["quick_estimate_id"]
+        estimate = QuickEstimate.objects.get(organization=self.org, id=estimate_id)
+        original_date = timezone.localtime(estimate.created_at).date().isoformat()
+
+        response = self.client.patch(
+            f"/api/business-autopilot/quick-estimates/{estimate_id}/",
+            data=json.dumps({
+                "estimate_date": "2026-06-30",
+                "mobile": "9092833701",
+                "client_name": "Guru",
+                "item_text": "1. Business Card 500 nos Rs.1050",
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        estimate.refresh_from_db()
+        self.assertNotEqual(timezone.localtime(estimate.created_at).date().isoformat(), original_date)
+        self.assertEqual(timezone.localtime(estimate.created_at).date().isoformat(), "2026-06-30")
+
+        detail = self.client.get(f"/api/business-autopilot/quick-estimates/{estimate_id}/")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["quick_estimate"]["estimate_date"], "2026-06-30")
+
     def test_quick_estimate_detail_patch_updates_mobile_and_client_in_same_customer_row(self):
         created = self.client.post(
             "/api/business-autopilot/site-admin/chat",

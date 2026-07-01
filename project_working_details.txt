@@ -189,6 +189,12 @@ ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
   - `/downloads/mac-agent/` -> `404`
 
 LATEST WORK LOG (2026-06-25)
+- Business Autopilot Site Admin quick estimate edit/save fixes completed:
+  - quick estimate detail payload now returns dedicated `estimate_date` so edited dates persist correctly in edit form, table view, and day filters
+  - payment proof modal now waits for both image and paid date before committing proof rows
+  - payment proof modal supports pending preview rows plus edit/delete controls before final save
+  - Safari/local date picker handling strengthened using direct input value fallback during proof commit
+  - quick estimate edit save now uses JSON payload consistently for payment proof updates, avoiding local multipart save failures and 500 errors during edit save
 - Business Autopilot Site Admin quick estimate mobile-only parsing fixed:
   - mobile-only follow-up messages no longer get stored as item description or amount
   - when a fresh mobile is sent mid-flow, stale client/item/amount fields are cleared before continuing

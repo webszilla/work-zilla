@@ -5444,6 +5444,16 @@ def _quick_estimate_display_date(row):
     return ""
 
 
+def _quick_estimate_storage_date(row):
+    estimate_date = getattr(row, "estimate_date", None)
+    if estimate_date:
+        return estimate_date.isoformat()
+    created_at = getattr(row, "created_at", None)
+    if created_at:
+        return timezone.localtime(created_at).date().isoformat()
+    return ""
+
+
 def _wrap_quick_estimate_pdf_lines(text, max_width, font_name, font_size):
     cleaned = re.sub(r"\s+", " ", str(text or "").strip())
     if not cleaned:
@@ -5849,6 +5859,7 @@ def _serialize_quick_estimate(row, include_preview=False, actor=None):
     payload = {
         "id": row.id,
         "estimate_number": row.estimate_number,
+        "estimate_date": _quick_estimate_storage_date(row),
         "mobile": row.mobile,
         "client_name": row.client_name,
         "notes": row.notes or "",
