@@ -619,41 +619,6 @@ function buildQuickEstimateSettingsFormData({
   return formData;
 }
 
-function buildQuickEstimateEditPayload({
-  editingEstimate,
-  editEstimateDate,
-  editMobile,
-  editClientName,
-  editNotes,
-  editPaymentCompleted,
-  editPaymentMode,
-  editJobCompleted,
-  editDeliveryCompleted,
-  editPaymentProofEntries,
-  text,
-}) {
-  const paymentProofEntries = Array.isArray(editPaymentProofEntries) ? editPaymentProofEntries : [];
-  const payload = {
-    __action: "PATCH",
-    quick_estimate_id: editingEstimate.id,
-    estimate_date: editEstimateDate,
-    mobile: editMobile,
-    client_name: editClientName,
-    notes: editNotes,
-    payment_status: editPaymentCompleted ? "completed" : "non_completed",
-    payment_mode: editPaymentCompleted ? editPaymentMode : "",
-    job_status: editJobCompleted ? "completed" : "non_completed",
-    delivery_status: editDeliveryCompleted ? "completed" : "non_completed",
-    item_text: text,
-  };
-  if (!editPaymentCompleted || editPaymentMode !== "online") {
-    payload.payment_proof_image = "";
-    payload.payment_proof_images = [];
-    payload.payment_proof_entries = [];
-  }
-  return payload;
-}
-
 function resolveSubmittedEstimateDate(inputRef, stateValue) {
   const directValue = String(inputRef?.current?.value || "").trim();
   if (directValue) {
@@ -693,12 +658,12 @@ function buildQuickEstimateEditFormData({
   formData.append("job_status", editJobCompleted ? "completed" : "non_completed");
   formData.append("delivery_status", editDeliveryCompleted ? "completed" : "non_completed");
   formData.append("item_text", String(text || ""));
+  formData.append(
+    "payment_proof_entries",
+    JSON.stringify(editPaymentCompleted && editPaymentMode === "online" ? persistedEntries : []),
+  );
   if (!editPaymentCompleted || editPaymentMode !== "online") {
-    formData.append("payment_proof_entries", "[]");
     return formData;
-  }
-  if (persistedEntries.length) {
-    formData.append("payment_proof_entries", JSON.stringify(persistedEntries));
   }
   const uploadPaidDate = String(uploadedEntries[0]?.paid_date || "").trim();
   if (uploadPaidDate) {
@@ -1892,43 +1857,28 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       const editEndpoint = useEditFlow && editingEstimate?.id
         ? `/api/business-autopilot/quick-estimates/${editingEstimate.id}/`
         : QUICK_ESTIMATES_COLLECTION_API;
-      const useMultipartEditFlow = useEditFlow && editPaymentCompleted && editPaymentMode === "online" && editPaymentProofFiles.length > 0;
       const editPayload = useEditFlow
         ? (
-          useMultipartEditFlow
-            ? buildQuickEstimateEditFormData({
-              editingEstimate,
-              editEstimateDate: resolvedEstimateDate,
-              editMobile,
-              editClientName,
-              editNotes,
-              editPaymentCompleted,
-              editPaymentMode,
-              editJobCompleted,
-              editDeliveryCompleted,
-              editPaymentProofEntries,
-              editPaymentProofFiles,
-              text,
-            })
-            : buildQuickEstimateEditPayload({
-              editingEstimate,
-              editEstimateDate: resolvedEstimateDate,
-              editMobile,
-              editClientName,
-              editNotes,
-              editPaymentCompleted,
-              editPaymentMode,
-              editJobCompleted,
-              editDeliveryCompleted,
-              editPaymentProofEntries,
-              text,
-            })
+          buildQuickEstimateEditFormData({
+            editingEstimate,
+            editEstimateDate: resolvedEstimateDate,
+            editMobile,
+            editClientName,
+            editNotes,
+            editPaymentCompleted,
+            editPaymentMode,
+            editJobCompleted,
+            editDeliveryCompleted,
+            editPaymentProofEntries,
+            editPaymentProofFiles,
+            text,
+          })
         )
         : null;
       const data = useEditFlow
         ? await apiFetch(editEndpoint, {
           method: "POST",
-          body: useMultipartEditFlow ? editPayload : JSON.stringify(editPayload),
+          body: editPayload,
         })
         : await apiFetch("/api/business-autopilot/site-admin/chat", {
           method: "POST",
