@@ -633,7 +633,7 @@ function buildQuickEstimateEditPayload({
   text,
 }) {
   const paymentProofEntries = Array.isArray(editPaymentProofEntries) ? editPaymentProofEntries : [];
-  return {
+  const payload = {
     __action: "PATCH",
     quick_estimate_id: editingEstimate.id,
     estimate_date: editEstimateDate,
@@ -644,11 +644,14 @@ function buildQuickEstimateEditPayload({
     payment_mode: editPaymentCompleted ? editPaymentMode : "",
     job_status: editJobCompleted ? "completed" : "non_completed",
     delivery_status: editDeliveryCompleted ? "completed" : "non_completed",
-    payment_proof_image: editPaymentCompleted ? (paymentProofEntries[0]?.image || "") : "",
-    payment_proof_images: editPaymentCompleted ? paymentProofEntries.map((item) => item?.image).filter(Boolean) : [],
-    payment_proof_entries: editPaymentCompleted ? paymentProofEntries : [],
     item_text: text,
   };
+  if (!editPaymentCompleted || editPaymentMode !== "online") {
+    payload.payment_proof_image = "";
+    payload.payment_proof_images = [];
+    payload.payment_proof_entries = [];
+  }
+  return payload;
 }
 
 function resolveSubmittedEstimateDate(inputRef, stateValue) {
@@ -657,6 +660,56 @@ function resolveSubmittedEstimateDate(inputRef, stateValue) {
     return directValue;
   }
   return String(stateValue || "").trim();
+}
+
+function buildQuickEstimateEditFormData({
+  editingEstimate,
+  editEstimateDate,
+  editMobile,
+  editClientName,
+  editNotes,
+  editPaymentCompleted,
+  editPaymentMode,
+  editJobCompleted,
+  editDeliveryCompleted,
+  editPaymentProofEntries,
+  editPaymentProofFiles,
+  text,
+}) {
+  const formData = new FormData();
+  const paymentProofEntries = Array.isArray(editPaymentProofEntries) ? editPaymentProofEntries : [];
+  const paymentProofFiles = Array.isArray(editPaymentProofFiles) ? editPaymentProofFiles : [];
+  const persistedEntryCount = Math.max(0, paymentProofEntries.length - paymentProofFiles.length);
+  const persistedEntries = paymentProofEntries.slice(0, persistedEntryCount);
+  const uploadedEntries = paymentProofEntries.slice(persistedEntryCount);
+  formData.append("__action", "PATCH");
+  formData.append("quick_estimate_id", String(editingEstimate?.id || ""));
+  formData.append("estimate_date", String(editEstimateDate || ""));
+  formData.append("mobile", String(editMobile || ""));
+  formData.append("client_name", String(editClientName || ""));
+  formData.append("notes", String(editNotes || ""));
+  formData.append("payment_status", editPaymentCompleted ? "completed" : "non_completed");
+  formData.append("payment_mode", editPaymentCompleted ? String(editPaymentMode || "") : "");
+  formData.append("job_status", editJobCompleted ? "completed" : "non_completed");
+  formData.append("delivery_status", editDeliveryCompleted ? "completed" : "non_completed");
+  formData.append("item_text", String(text || ""));
+  if (!editPaymentCompleted || editPaymentMode !== "online") {
+    formData.append("payment_proof_entries", "[]");
+    return formData;
+  }
+  if (persistedEntries.length) {
+    formData.append("payment_proof_entries", JSON.stringify(persistedEntries));
+  }
+  const uploadPaidDate = String(uploadedEntries[0]?.paid_date || "").trim();
+  if (uploadPaidDate) {
+    formData.append("payment_paid_date", uploadPaidDate);
+  }
+  paymentProofFiles.forEach((file) => {
+    if (file) {
+      formData.append("payment_proof_files", file);
+    }
+  });
+  return formData;
 }
 
 async function extractImageDataUrls(fileList) {
@@ -715,7 +768,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   const [editDeliveryCompleted, setEditDeliveryCompleted] = useState(false);
   const [editPaymentProofEntries, setEditPaymentProofEntries] = useState([]);
   const [editPaymentStatusUpdaterName, setEditPaymentStatusUpdaterName] = useState("");
-  const [editPaymentProofFile, setEditPaymentProofFile] = useState(null);
+  const [editPaymentProofFiles, setEditPaymentProofFiles] = useState([]);
   const [paymentModeModalOpen, setPaymentModeModalOpen] = useState(false);
   const [paymentProofModalOpen, setPaymentProofModalOpen] = useState(false);
   const [paymentProofDraftEntries, setPaymentProofDraftEntries] = useState([]);
@@ -723,7 +776,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
   const [paymentProofActiveIndex, setPaymentProofActiveIndex] = useState(0);
   const [paymentProofEditingIndex, setPaymentProofEditingIndex] = useState(null);
   const [paymentProofPaidDate, setPaymentProofPaidDate] = useState("");
-  const [paymentProofDraftFile, setPaymentProofDraftFile] = useState(null);
+  const [paymentProofDraftFiles, setPaymentProofDraftFiles] = useState([]);
   const [paymentProofError, setPaymentProofError] = useState("");
   const [paymentProofUploading, setPaymentProofUploading] = useState(false);
   const paymentProofDateInputRef = useRef(null);
@@ -956,7 +1009,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
         setPaymentProofError("Each payment proof image must be 1 MB or smaller.");
         return false;
       }
-      const imageFile = files.find((file) => String(file?.type || "").startsWith("image/")) || null;
+      const imageFiles = files.filter((file) => String(file?.type || "").startsWith("image/"));
       const dataUrls = await extractImageDataUrls(files);
       if (!dataUrls.length) {
         setPaymentProofError("Please upload an image file only.");
@@ -965,7 +1018,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       setPaymentProofPendingImages((prev) => [...prev, ...dataUrls]);
       setPaymentProofActiveIndex(paymentProofDraftEntries.length);
       setPaymentProofEditingIndex(null);
-      setPaymentProofDraftFile(imageFile);
+      setPaymentProofDraftFiles((prev) => [...prev, ...imageFiles]);
       setPaymentProofError("");
       return true;
     } catch (error) {
@@ -1008,7 +1061,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setPaymentProofPendingImages([]);
     setPaymentProofActiveIndex(0);
     setPaymentProofEditingIndex(null);
-    setPaymentProofDraftFile(null);
+    setPaymentProofDraftFiles([]);
     setPaymentProofError("");
     setPaymentProofPaidDate(String(nextEntries[0]?.paid_date || "").trim());
     setPaymentProofModalOpen(true);
@@ -1027,12 +1080,12 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setEditPaymentMode("cash");
     setEditPaymentCompleted(true);
     setEditPaymentProofEntries([]);
-    setEditPaymentProofFile(null);
+    setEditPaymentProofFiles([]);
     setPaymentProofDraftEntries([]);
     setPaymentProofPendingImages([]);
     setPaymentProofActiveIndex(0);
     setPaymentProofEditingIndex(null);
-    setPaymentProofDraftFile(null);
+    setPaymentProofDraftFiles([]);
     setPaymentProofError("");
     setPaymentProofPaidDate("");
     setNotice("");
@@ -1054,7 +1107,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     setPaymentProofPendingImages([]);
     setPaymentProofActiveIndex(0);
     setPaymentProofEditingIndex(null);
-    setPaymentProofDraftFile(null);
+    setPaymentProofDraftFiles([]);
     setPaymentProofError("");
     setPaymentProofPaidDate(String(nextEntries[0]?.paid_date || "").trim());
   }
@@ -1081,7 +1134,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
     }
     setPaymentProofDraftEntries(normalizedEntries);
     setEditPaymentProofEntries(normalizedEntries);
-    setEditPaymentProofFile(paymentProofDraftFile);
+    setEditPaymentProofFiles(paymentProofDraftFiles);
     setEditPaymentMode("online");
     setEditPaymentCompleted(true);
     setPaymentProofModalOpen(false);
@@ -1120,7 +1173,12 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
 
   function handleDeletePaymentProofRow(index) {
     const isEditingCurrentRow = paymentProofEditingIndex === index;
+    const persistedEntryCount = Math.max(0, paymentProofDraftEntries.length - paymentProofDraftFiles.length);
     setPaymentProofDraftEntries((prev) => prev.filter((_, imageIndex) => imageIndex !== index));
+    if (index >= persistedEntryCount) {
+      const pendingFileIndex = index - persistedEntryCount;
+      setPaymentProofDraftFiles((prev) => prev.filter((_, fileIndex) => fileIndex !== pendingFileIndex));
+    }
     setPaymentProofActiveIndex((prev) => (prev > 0 && prev >= index ? prev - 1 : 0));
     setPaymentProofEditingIndex((prev) => (
       prev === null ? null : prev === index ? null : prev > index ? prev - 1 : prev
@@ -1136,10 +1194,10 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       return;
     }
     setEditPaymentCompleted(false);
-    setEditPaymentProofFile(null);
+    setEditPaymentProofFiles([]);
     setEditPaymentMode(String(editPaymentMode || "").trim().toLowerCase() || "online");
     setPaymentProofDraftEntries(Array.isArray(editPaymentProofEntries) ? editPaymentProofEntries : []);
-    setPaymentProofDraftFile(null);
+    setPaymentProofDraftFiles([]);
     setPaymentModeModalOpen(false);
     setPaymentProofModalOpen(false);
     setPaymentProofError("");
@@ -1688,9 +1746,9 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       setEditDeliveryCompleted(String(estimate.delivery_status || "").toLowerCase() === "completed");
       setEditPaymentProofEntries(normalizePaymentProofEntries(estimate));
       setEditPaymentStatusUpdaterName(String(estimate.payment_status_updated_by_name || estimate.payment_verified_by_name || "").trim());
-      setEditPaymentProofFile(null);
+      setEditPaymentProofFiles([]);
       setPaymentProofDraftEntries(normalizePaymentProofEntries(estimate));
-      setPaymentProofDraftFile(null);
+      setPaymentProofDraftFiles([]);
       setPaymentProofPaidDate("");
       appendAssistantMessage(
         {
@@ -1834,25 +1892,43 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
       const editEndpoint = useEditFlow && editingEstimate?.id
         ? `/api/business-autopilot/quick-estimates/${editingEstimate.id}/`
         : QUICK_ESTIMATES_COLLECTION_API;
+      const useMultipartEditFlow = useEditFlow && editPaymentCompleted && editPaymentMode === "online" && editPaymentProofFiles.length > 0;
       const editPayload = useEditFlow
-        ? buildQuickEstimateEditPayload({
-          editingEstimate,
-          editEstimateDate: resolvedEstimateDate,
-          editMobile,
-          editClientName,
-          editNotes,
-          editPaymentCompleted,
-          editPaymentMode,
-          editJobCompleted,
-          editDeliveryCompleted,
-          editPaymentProofEntries,
-          text,
-        })
+        ? (
+          useMultipartEditFlow
+            ? buildQuickEstimateEditFormData({
+              editingEstimate,
+              editEstimateDate: resolvedEstimateDate,
+              editMobile,
+              editClientName,
+              editNotes,
+              editPaymentCompleted,
+              editPaymentMode,
+              editJobCompleted,
+              editDeliveryCompleted,
+              editPaymentProofEntries,
+              editPaymentProofFiles,
+              text,
+            })
+            : buildQuickEstimateEditPayload({
+              editingEstimate,
+              editEstimateDate: resolvedEstimateDate,
+              editMobile,
+              editClientName,
+              editNotes,
+              editPaymentCompleted,
+              editPaymentMode,
+              editJobCompleted,
+              editDeliveryCompleted,
+              editPaymentProofEntries,
+              text,
+            })
+        )
         : null;
       const data = useEditFlow
         ? await apiFetch(editEndpoint, {
           method: "POST",
-          body: JSON.stringify(editPayload),
+          body: useMultipartEditFlow ? editPayload : JSON.stringify(editPayload),
         })
         : await apiFetch("/api/business-autopilot/site-admin/chat", {
           method: "POST",

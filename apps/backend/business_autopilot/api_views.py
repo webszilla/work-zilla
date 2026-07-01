@@ -10329,6 +10329,15 @@ def quick_estimates(request, estimate_id: int = None):
             except json.JSONDecodeError:
                 return JsonResponse({"detail": "invalid_json"}, status=400)
     if request.content_type and request.content_type.startswith("multipart/form-data"):
+        existing_payment_proof_entries = _normalize_quick_estimate_payment_proof_entries(
+            payload.get("payment_proof_entries")
+            or payload.get("paymentProofEntries")
+            or payload.get("payment_proof_images")
+            or payload.get("paymentProofImages")
+            or payload.get("payment_proof_image")
+            or payload.get("paymentProofImage")
+            or ""
+        )
         uploaded_payment_proofs = [
             *request.FILES.getlist("payment_proof_files"),
             *request.FILES.getlist("paymentProofFiles"),
@@ -10354,9 +10363,13 @@ def quick_estimates(request, estimate_id: int = None):
                 "paid_date": paid_date,
             })
         if uploaded_payment_proof_entries:
-            payload["payment_proof_image"] = uploaded_payment_proof_entries[0]["image"]
-            payload["payment_proof_images"] = [entry["image"] for entry in uploaded_payment_proof_entries]
-            payload["payment_proof_entries"] = uploaded_payment_proof_entries
+            merged_payment_proof_entries = [
+                *existing_payment_proof_entries,
+                *uploaded_payment_proof_entries,
+            ]
+            payload["payment_proof_image"] = merged_payment_proof_entries[0]["image"]
+            payload["payment_proof_images"] = [entry["image"] for entry in merged_payment_proof_entries]
+            payload["payment_proof_entries"] = merged_payment_proof_entries
 
     patch_action = str(payload.get("action") or payload.get("__action") or "").strip().lower()
     if resolved_method == "DELETE" and patch_action not in {"delete", "cancel"}:
