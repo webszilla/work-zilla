@@ -5439,6 +5439,12 @@ def _normalize_quick_estimate_item_description(title, description):
     normalized_description = _normalize_quick_estimate_item_text(description_text)
     if title_text and normalized_description.lower() == title_text.lower():
         return ""
+    if title_text:
+        escaped_title = re.escape(title_text)
+        prefix_pattern = re.compile(rf"^{escaped_title}(?:\s*[-:,.]\s*|\s+)?", flags=re.IGNORECASE)
+        trimmed_description = prefix_pattern.sub("", normalized_description, count=1).strip()
+        if trimmed_description:
+            return trimmed_description
     return description_text
 
 

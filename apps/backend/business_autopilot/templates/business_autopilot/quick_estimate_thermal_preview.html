@@ -201,7 +201,7 @@
         {% for item in items %}
           <tr>
             <td>
-              {% if item.service_name %}<div class="item-name">{{ item.service_name }}</div>{% endif %}
+              {% if item.service_name %}<div class="item-name">{{ forloop.counter }}. {{ item.service_name }}</div>{% endif %}
               {% if item.description %}<div class="item-desc">{{ item.description }}</div>{% endif %}
               {% if item.quantity %}<div class="qty">Qty: {{ item.quantity }}{% if item.unit %} {{ item.unit }}{% endif %}</div>{% endif %}
             </td>

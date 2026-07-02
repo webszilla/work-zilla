@@ -175,10 +175,10 @@ VERIFY (AFTER DEPLOY)
 - `pgrep -af "core_platform.wsgi:application"`
 
 ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
-- Published at (UTC): `2026-07-02T13:48:07Z`
-- Local SHA: `ffba7617af8537a8b2c2011693d6ca68af3b811c`
-- GitHub main SHA: `ffba7617af8537a8b2c2011693d6ca68af3b811c`
-- Server SHA: `ffba7617af8537a8b2c2011693d6ca68af3b811c`
+- Published at (UTC): `2026-07-02T14:35:53Z`
+- Local SHA: `c2854d3cf32fc410906480051a8b4779ecc641b7`
+- GitHub main SHA: `c2854d3cf32fc410906480051a8b4779ecc641b7`
+- Server SHA: `c2854d3cf32fc410906480051a8b4779ecc641b7`
 - Deploy method: `git-pull`
 - Gunicorn: listening on `:8000` (`yes`)
 - Verified URLs:
@@ -189,6 +189,9 @@ ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
   - `/downloads/mac-agent/` -> `404`
 
 LATEST WORK LOG (2026-06-25)
+- Business Autopilot Site Admin quick estimate preview/share content cleanup completed:
+  - repeated title prefix is now removed from quick estimate item description lines before thermal preview and WhatsApp share rendering
+  - thermal preview item headings now show serial numbering (`1.`, `2.`, `3.`) in the bill template
 - Business Autopilot Site Admin quick estimate WhatsApp share duplicate text fix completed:
   - quick estimate WhatsApp share builder now removes duplicate description text when item title and description are the same
   - shared estimate item lines now render once per item instead of repeating the same text twice
