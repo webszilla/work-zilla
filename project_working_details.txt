@@ -175,10 +175,10 @@ VERIFY (AFTER DEPLOY)
 - `pgrep -af "core_platform.wsgi:application"`
 
 ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
-- Published at (UTC): `2026-07-02T13:29:24Z`
-- Local SHA: `bbe5e71cc2f1cf6aab75887bee2e9c0ac5e74d6c`
-- GitHub main SHA: `bbe5e71cc2f1cf6aab75887bee2e9c0ac5e74d6c`
-- Server SHA: `bbe5e71cc2f1cf6aab75887bee2e9c0ac5e74d6c`
+- Published at (UTC): `2026-07-02T13:48:07Z`
+- Local SHA: `ffba7617af8537a8b2c2011693d6ca68af3b811c`
+- GitHub main SHA: `ffba7617af8537a8b2c2011693d6ca68af3b811c`
+- Server SHA: `ffba7617af8537a8b2c2011693d6ca68af3b811c`
 - Deploy method: `git-pull`
 - Gunicorn: listening on `:8000` (`yes`)
 - Verified URLs:
@@ -189,6 +189,9 @@ ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
   - `/downloads/mac-agent/` -> `404`
 
 LATEST WORK LOG (2026-06-25)
+- Business Autopilot Site Admin quick estimate WhatsApp share duplicate text fix completed:
+  - quick estimate WhatsApp share builder now removes duplicate description text when item title and description are the same
+  - shared estimate item lines now render once per item instead of repeating the same text twice
 - Business Autopilot Site Admin quick estimate item description limit increased:
   - Site Admin quick estimate composer/item description input limit increased from `280` to `1000` characters
   - frontend production bundle rebuilt and ready for live deploy

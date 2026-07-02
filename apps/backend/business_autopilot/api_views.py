@@ -5243,7 +5243,9 @@ def _build_quick_estimate_whatsapp_url(row):
     items = list(row.items.all().order_by("id"))
     item_lines = []
     for index, item in enumerate(items, start=1):
-        left = " ".join(part for part in [item.service_name, item.description] if str(part or "").strip()).strip()
+        title = str(item.service_name or "").strip()
+        description = _normalize_quick_estimate_item_description(title, item.description)
+        left = " ".join(part for part in [title, description] if str(part or "").strip()).strip()
         qty_text = ""
         if item.quantity is not None:
             qty_value = _decimal_to_string(item.quantity)
