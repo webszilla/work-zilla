@@ -1241,6 +1241,14 @@ html[data-theme="light"] .wz-attendance-alert-text{
   display: none !important;
   content: none !important;
 }
+
+.app-shell :is(button, a, [role="button"]).ba-site-admin-chat__action-btn[aria-label]::before,
+.app-shell :is(button, a, [role="button"]).ba-site-admin-chat__action-btn[aria-label]::after,
+.app-shell :is(button, a, [role="button"]).ba-site-admin-chat__action-btn[title]::before,
+.app-shell :is(button, a, [role="button"]).ba-site-admin-chat__action-btn[title]::after{
+  display: none !important;
+  content: none !important;
+}
 .wz-data-table-wrap{
   border:1px solid rgba(148,163,184,0.18);
   border-radius:12px;
