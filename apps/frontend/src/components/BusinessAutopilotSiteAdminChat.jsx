@@ -663,6 +663,14 @@ function resolveSubmittedEstimateDate(inputRef, stateValue) {
   return String(stateValue || "").trim();
 }
 
+function buildExistingPaymentProofEntryMetadata(entries) {
+  return (Array.isArray(entries) ? entries : [])
+    .map((entry, index) => ({
+      index,
+      paid_date: String(entry?.paid_date || "").trim(),
+    }));
+}
+
 function buildQuickEstimateEditFormData({
   editingEstimate,
   editEstimateDate,
@@ -694,11 +702,12 @@ function buildQuickEstimateEditFormData({
   formData.append("job_status", editJobCompleted ? "completed" : "non_completed");
   formData.append("delivery_status", editDeliveryCompleted ? "completed" : "non_completed");
   formData.append("item_text", String(text || ""));
-  formData.append(
-    "payment_proof_entries",
-    JSON.stringify(editPaymentMode === "online" ? persistedEntries : []),
-  );
+  formData.append("payment_proof_existing_entries", JSON.stringify(
+    editPaymentMode === "online" ? buildExistingPaymentProofEntryMetadata(persistedEntries) : [],
+  ));
+  formData.append("payment_proof_entries", JSON.stringify([]));
   if (editPaymentMode !== "online") {
+    formData.set("payment_proof_existing_entries", JSON.stringify([]));
     formData.set("payment_proof_entries", JSON.stringify([]));
     return formData;
   }
@@ -727,6 +736,7 @@ function buildQuickEstimateEditPayload({
   editPaymentProofEntries,
   text,
 }) {
+  const paymentProofEntries = Array.isArray(editPaymentProofEntries) ? editPaymentProofEntries : [];
   return {
     __action: "PATCH",
     quick_estimate_id: Number(editingEstimate?.id) || null,
@@ -739,8 +749,8 @@ function buildQuickEstimateEditPayload({
     job_status: editJobCompleted ? "completed" : "non_completed",
     delivery_status: editDeliveryCompleted ? "completed" : "non_completed",
     item_text: String(text || ""),
-    payment_proof_entries: editPaymentMode === "online"
-      ? (Array.isArray(editPaymentProofEntries) ? editPaymentProofEntries : [])
+    payment_proof_existing_entries: editPaymentMode === "online"
+      ? buildExistingPaymentProofEntryMetadata(paymentProofEntries)
       : [],
   };
 }

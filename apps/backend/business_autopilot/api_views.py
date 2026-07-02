@@ -6160,6 +6160,69 @@ def _normalize_subscription_alert_days(value):
     return normalized
 
 
+def _normalize_quick_estimate_payment_proof_existing_entries(value):
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(value, list):
+        return []
+    normalized = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        try:
+            index = int(item.get("index"))
+        except (TypeError, ValueError):
+            continue
+        if index < 0:
+            continue
+        normalized.append({
+            "index": index,
+            "paid_date": str(item.get("paid_date") or item.get("paidDate") or "").strip()[:20],
+        })
+    return normalized
+
+
+def _resolve_quick_estimate_payment_proof_entries_from_payload(payload, row=None):
+    payload = payload if isinstance(payload, dict) else {}
+    direct_entries = _normalize_quick_estimate_payment_proof_entries(
+        payload.get("payment_proof_entries")
+        or payload.get("paymentProofEntries")
+        or payload.get("payment_proof_images")
+        or payload.get("paymentProofImages")
+        or payload.get("payment_proof_image")
+        or payload.get("paymentProofImage")
+        or []
+    )
+    existing_entry_updates = _normalize_quick_estimate_payment_proof_existing_entries(
+        payload.get("payment_proof_existing_entries")
+        or payload.get("paymentProofExistingEntries")
+        or []
+    )
+    if not existing_entry_updates:
+        return direct_entries
+    existing_entries = _normalize_quick_estimate_payment_proof_entries(getattr(row, "payment_proof_image", "") if row is not None else "")
+    resolved_existing_entries = []
+    for item in existing_entry_updates:
+        index = item.get("index")
+        if not isinstance(index, int) or index < 0 or index >= len(existing_entries):
+            continue
+        current_entry = dict(existing_entries[index] or {})
+        paid_date = str(item.get("paid_date") or "").strip()
+        if paid_date:
+            current_entry["paid_date"] = paid_date
+        resolved_existing_entries.append(current_entry)
+    return [
+        *resolved_existing_entries,
+        *direct_entries,
+    ]
+
+
 def _is_valid_alert_email(value: str):
     text = str(value or "").strip()
     if not text:
@@ -10428,15 +10491,7 @@ def quick_estimates(request, estimate_id: int = None):
             except json.JSONDecodeError:
                 return JsonResponse({"detail": "invalid_json"}, status=400)
     if request.content_type and request.content_type.startswith("multipart/form-data"):
-        existing_payment_proof_entries = _normalize_quick_estimate_payment_proof_entries(
-            payload.get("payment_proof_entries")
-            or payload.get("paymentProofEntries")
-            or payload.get("payment_proof_images")
-            or payload.get("paymentProofImages")
-            or payload.get("payment_proof_image")
-            or payload.get("paymentProofImage")
-            or ""
-        )
+        existing_payment_proof_entries = _resolve_quick_estimate_payment_proof_entries_from_payload(payload, row=row)
         uploaded_payment_proofs = [
             *request.FILES.getlist("payment_proof_files"),
             *request.FILES.getlist("paymentProofFiles"),
@@ -10653,15 +10708,7 @@ def quick_estimates(request, estimate_id: int = None):
         next_payment_mode = str(payload.get("payment_mode") or payload.get("paymentMode") or row.payment_mode or "").strip().lower()[:20]
         if next_payment_status == QuickEstimate.PROGRESS_COMPLETED and next_payment_mode not in {"cash", "online"}:
             return JsonResponse({"detail": "payment_mode_required", "message": "Please choose cash or online payment mode."}, status=400)
-        next_payment_proof_entries = _normalize_quick_estimate_payment_proof_entries(
-            payload.get("payment_proof_entries")
-            or payload.get("paymentProofEntries")
-            or payload.get("payment_proof_images")
-            or payload.get("paymentProofImages")
-            or payload.get("payment_proof_image")
-            or payload.get("paymentProofImage")
-            or getattr(row, "payment_proof_image", "")
-        )
+        next_payment_proof_entries = _resolve_quick_estimate_payment_proof_entries_from_payload(payload, row=row)
         next_payment_proof_images = [entry.get("image") for entry in next_payment_proof_entries if str(entry.get("image") or "").strip()]
         next_payment_partial_paid = _quick_estimate_has_partial_payment(
             payment_status=next_payment_status,
@@ -10744,15 +10791,7 @@ def quick_estimates(request, estimate_id: int = None):
     next_payment_mode = str(payload.get("payment_mode") or payload.get("paymentMode") or getattr(row, "payment_mode", "") or "").strip().lower()[:20]
     next_job_status = _normalize_quick_estimate_progress_status(payload.get("job_status") or payload.get("jobStatus") or row.job_status)
     next_delivery_status = _normalize_quick_estimate_progress_status(payload.get("delivery_status") or payload.get("deliveryStatus") or row.delivery_status)
-    next_payment_proof_entries = _normalize_quick_estimate_payment_proof_entries(
-        payload.get("payment_proof_entries")
-        or payload.get("paymentProofEntries")
-        or payload.get("payment_proof_images")
-        or payload.get("paymentProofImages")
-        or payload.get("payment_proof_image")
-        or payload.get("paymentProofImage")
-        or getattr(row, "payment_proof_image", "")
-    )
+    next_payment_proof_entries = _resolve_quick_estimate_payment_proof_entries_from_payload(payload, row=row)
     next_payment_proof_images = [entry.get("image") for entry in next_payment_proof_entries if str(entry.get("image") or "").strip()]
     next_payment_proof_image = next_payment_proof_images[0] if next_payment_proof_images else ""
     if not 10 <= len(next_mobile) <= 15:
