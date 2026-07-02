@@ -1522,8 +1522,8 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 
 .ba-site-admin-chat__table-card {
   height: 100%;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 14px;
   min-height: 0;
   padding: 16px;
@@ -1603,17 +1603,20 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 .ba-site-admin-chat__table-wrap {
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 16px;
-  overflow-x: clip !important;
-  overflow-y: auto;
+  overflow-x: auto;
+  overflow-y: scroll;
   background: #fff;
-  max-height: 620px;
+  max-height: none;
+  min-height: 0;
   position: relative;
   isolation: isolate;
   scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 .ba-site-admin-chat__table-wrap::-webkit-scrollbar:horizontal {
-  height: 0 !important;
+  height: 10px;
 }
 
 .ba-site-admin-chat__table-wrap table {
@@ -1833,7 +1836,7 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 }
 
 .ba-site-admin-chat__table-wrap.table-responsive {
-  overflow-x: clip !important;
+  overflow-x: auto !important;
 }
 
 .ba-site-admin-chat__table-wrap table > thead,
@@ -2016,7 +2019,14 @@ html[data-theme="light"] .wz-profile-workspace .btn-outline-danger:hover {
 }
 
 .ba-site-admin-chat__table-pagination {
-  margin-top: auto;
+  margin-top: 0;
+  padding-top: 2px;
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 
 .ba-site-admin-chat__sno-col {
@@ -2993,11 +3003,19 @@ html[data-theme="dark"] .ba-site-admin-chat__action-btn--history {
 .ba-site-admin-chat__table-wrap {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: scroll;
 }
 
 .ba-site-admin-chat__table-pagination {
   flex-shrink: 0;
+}
+
+.ba-site-admin-chat__table-pagination .table-pagination {
+  margin-top: 0;
+  min-width: max-content;
+  padding-bottom: 2px;
 }
 
 .ba-assistant__message {

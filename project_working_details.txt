@@ -175,10 +175,10 @@ VERIFY (AFTER DEPLOY)
 - `pgrep -af "core_platform.wsgi:application"`
 
 ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
-- Published at (UTC): `2026-07-02T04:19:02Z`
-- Local SHA: `877478c1747caf7ed3ad15e88a30d0695388b7dd`
-- GitHub main SHA: `877478c1747caf7ed3ad15e88a30d0695388b7dd`
-- Server SHA: `877478c1747caf7ed3ad15e88a30d0695388b7dd`
+- Published at (UTC): `2026-07-02T13:05:44Z`
+- Local SHA: `08ca9a9e70de1ffac028edca992dd566968b9f9c`
+- GitHub main SHA: `08ca9a9e70de1ffac028edca992dd566968b9f9c`
+- Server SHA: `08ca9a9e70de1ffac028edca992dd566968b9f9c`
 - Deploy method: `git-pull`
 - Gunicorn: listening on `:8000` (`yes`)
 - Verified URLs:
@@ -189,6 +189,10 @@ ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
   - `/downloads/mac-agent/` -> `404`
 
 LATEST WORK LOG (2026-06-25)
+- Business Autopilot Site Admin quick estimate Windows scroll/pagination layout fix completed:
+  - quick estimate list table card now uses a fixed grid layout so the table scroll area and pagination footer do not overlap on Windows browsers
+  - quick estimate table now keeps a dedicated vertical scrollbar instead of relying on overlay scrollbar behavior that only looked correct on macOS
+  - quick estimate pagination footer now has its own horizontal-safe area so page controls remain visible in Windows when classic scrollbars consume layout space
 - Business Autopilot Site Admin quick estimate tooltip duplication fix deployed:
   - action icons now suppress the global CSS pseudo-tooltip for Quick Estimate action buttons
   - only the custom top tooltip remains visible in Site Admin quick estimate table
