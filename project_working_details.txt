@@ -175,11 +175,10 @@ VERIFY (AFTER DEPLOY)
 - `pgrep -af "core_platform.wsgi:application"`
 
 ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
-- Published at (UTC): `2026-07-01T04:40:10Z`
-- Published at (UTC): `2026-07-01T15:36:46Z`
-- Local SHA: `c4812a74bab813bf42b646151157b1907fc3ff84`
-- GitHub main SHA: `c4812a74bab813bf42b646151157b1907fc3ff84`
-- Server SHA: `c4812a74bab813bf42b646151157b1907fc3ff84`
+- Published at (UTC): `2026-07-02T04:19:02Z`
+- Local SHA: `877478c1747caf7ed3ad15e88a30d0695388b7dd`
+- GitHub main SHA: `877478c1747caf7ed3ad15e88a30d0695388b7dd`
+- Server SHA: `877478c1747caf7ed3ad15e88a30d0695388b7dd`
 - Deploy method: `git-pull`
 - Gunicorn: listening on `:8000` (`yes`)
 - Verified URLs:
@@ -190,6 +189,9 @@ ONLINE PUBLISH RECORD (UPDATE EACH DEPLOY)
   - `/downloads/mac-agent/` -> `404`
 
 LATEST WORK LOG (2026-06-25)
+- Business Autopilot Site Admin quick estimate tooltip duplication fix deployed:
+  - action icons now suppress the global CSS pseudo-tooltip for Quick Estimate action buttons
+  - only the custom top tooltip remains visible in Site Admin quick estimate table
 - Business Autopilot Site Admin quick estimate live save/action layout fixes deployed:
   - action icon grid changed back to `4` columns in Site Admin quick estimate table
   - quick estimate edit save now uses JSON payload for normal date/status/item edits and reserves multipart upload only for new payment proof files
