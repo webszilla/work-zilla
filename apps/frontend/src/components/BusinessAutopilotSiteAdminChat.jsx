@@ -2510,7 +2510,7 @@ export default function BusinessAutopilotSiteAdminChat({ headerTabs = null }) {
                     ref={composerRef}
                     className="form-control ba-assistant__textarea"
                     rows={4}
-                    maxLength={280}
+                    maxLength={1000}
                     value={prompt}
                       onChange={(event) => setPrompt(event.target.value)}
                       placeholder={
